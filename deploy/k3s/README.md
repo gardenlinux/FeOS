@@ -98,8 +98,8 @@ The secret key seals environments' secrets and addons' credentials at
 rest (ADR 0018); without it ferund refuses both. Losing it loses every
 sealed value, so keep a copy beside the CA's root.
 
-The bootstrap token becomes a token of the tenant `operator` while there is
-no tenant: FeChat's `FERUN_TOKEN`. The admin users are a fallback: people
+The bootstrap token becomes a token of the project `operator` while there is
+no project: FeChat's `FERUN_TOKEN`. The admin users are a fallback: people
 sign in to ferund's UI and admin API at the OpenID Connect provider, and
 its group `admins` (the `groups` claim) gets the admin surface.
 `oidc-client-ferun` is ferund's client there, with the redirect URI

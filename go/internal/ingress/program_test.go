@@ -313,7 +313,7 @@ func newProgHarness(t *testing.T) *progHarness {
 	}}})
 	fake.SetAdmittedVersion(progName, 3)
 	fake.PutEnv(wire.Env{
-		ID: progEnv, Tenant: "acme", Name: "app", Hosts: []string{progHost}, Deployment: 1, Hash: "h1",
+		ID: progEnv, Project: "acme", Name: "app", Hosts: []string{progHost}, Deployment: 1, Hash: "h1",
 		Routes: []wire.Route{{Name: "root", Path: "/", Service: "web", Port: "http"}},
 		Services: []wire.Service{{Name: "web", Endpoints: []wire.Endpoint{{
 			Instance: "inst-1", Address: progPod, Node: progNode, Ports: map[string]int{"http": 8080}, GroupVersion: 3,
@@ -672,9 +672,9 @@ func TestNewAndClose(t *testing.T) {
 		t.Fatalf("New without the key: %v", err)
 	}
 	bad = h.cfg
-	bad.TenantZoneTLSCert, bad.TenantZoneTLSKey = h.cfg.TLSCert, filepath.Join(t.TempDir(), "missing.key")
-	if _, err := New(bad, Deps{Mesh: &fakeMesh{}}); err == nil || !strings.Contains(err.Error(), "tenant zone") {
-		t.Fatalf("New without the tenant zone's key: %v", err)
+	bad.ProjectZoneTLSCert, bad.ProjectZoneTLSKey = h.cfg.TLSCert, filepath.Join(t.TempDir(), "missing.key")
+	if _, err := New(bad, Deps{Mesh: &fakeMesh{}}); err == nil || !strings.Contains(err.Error(), "project zone") {
+		t.Fatalf("New without the project zone's key: %v", err)
 	}
 	if _, err := New(h.cfg, Deps{}); err == nil || !strings.Contains(err.Error(), "mesh") {
 		t.Fatalf("New without a mesh: %v", err)
@@ -789,7 +789,7 @@ func visitProg(t *testing.T) (*progHarness, *visit.Keys) {
 	h.fake.SetVisits(k)
 	h.fake.SetVisitor("u-1", "a@example.com")
 	h.fake.PutEnv(wire.Env{
-		ID: progEnv, Tenant: "acme", Name: "app", Hosts: []string{progHost}, Deployment: 1, Hash: "h2",
+		ID: progEnv, Project: "acme", Name: "app", Hosts: []string{progHost}, Deployment: 1, Hash: "h2",
 		Access: wire.AccessVisitors, Provider: "fecode", SignIn: progSignIn,
 		Routes: []wire.Route{{Name: "root", Path: "/", Service: "web", Port: "http"}},
 		Services: []wire.Service{{Name: "web", Endpoints: []wire.Endpoint{{

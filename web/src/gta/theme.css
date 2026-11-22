@@ -118,7 +118,7 @@
 [data-theme="gta"] :is(
   .palette, .login-card, .switch-menu, .user-menu,
   .card, .ocard, .statecard, .statcard, .pane, .envobj, .rollout, .jobwhy,
-  .envcard, .tenantrow, .sidebar .objitem.on, .sidebar .snav-item.on,
+  .envcard, .projectrow, .sidebar .objitem.on, .sidebar .snav-item.on,
   .tbl, .evtable, .tl, .tl-tip, .lg-view, .lg-raw, .logpre, .specpre, .schemapre, .snippet pre, .evdetail-body pre,
   .b-nav, .b-sect, .b-first, .b-pop, .diff-entry
 ) {
@@ -185,9 +185,9 @@
   border: 2px solid transparent;
   background: linear-gradient(var(--panel), var(--panel)) padding-box, var(--line) border-box;
 }
-[data-theme="gta"] .envcard, [data-theme="gta"] .tenantrow { box-shadow: 0 6px 16px rgb(32 0 47 / .25); }
-[data-theme="gta"] .tenantrow { background: var(--panel); border-color: transparent; }
-[data-theme="gta"] .tenantrow:hover { background: var(--panel2); }
+[data-theme="gta"] .envcard, [data-theme="gta"] .projectrow { box-shadow: 0 6px 16px rgb(32 0 47 / .25); }
+[data-theme="gta"] .projectrow { background: var(--panel); border-color: transparent; }
+[data-theme="gta"] .projectrow:hover { background: var(--panel2); }
 [data-theme="gta"] .sidebar .objitem.on,
 [data-theme="gta"] .sidebar .snav-item.on { background: var(--panel); box-shadow: none; }
 [data-theme="gta"] .sidebar .snav-label { font-weight: 700; }

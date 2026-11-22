@@ -21,7 +21,7 @@ const lockWait = 300 * time.Millisecond
 // no_credential, not a name of nothing.
 func TestSandboxCredentialsWaitForTheCredentialsLock(t *testing.T) {
 	r := newRig(t)
-	if code, raw := r.tenantCall("PUT", credPath("box", "erp"), credentialBody("Bearer box-token", 0)); code != http.StatusCreated {
+	if code, raw := r.projectCall("PUT", credPath("box", "erp"), credentialBody("Bearer box-token", 0)); code != http.StatusCreated {
 		t.Fatalf("create: %d %s", code, raw)
 	}
 	done := make(chan error, 1)
@@ -53,7 +53,7 @@ func TestSandboxCredentialsWaitForTheCredentialsLock(t *testing.T) {
 // a sandbox that came to name it meanwhile makes it 409.
 func TestDeleteCredentialWaitsForTheCredentialsLock(t *testing.T) {
 	r := newRig(t)
-	if code, raw := r.tenantCall("PUT", credPath("box", "erp"), credentialBody("Bearer box-token", 0)); code != http.StatusCreated {
+	if code, raw := r.projectCall("PUT", credPath("box", "erp"), credentialBody("Bearer box-token", 0)); code != http.StatusCreated {
 		t.Fatalf("create: %d %s", code, raw)
 	}
 	type answer struct {
@@ -66,7 +66,7 @@ func TestDeleteCredentialWaitsForTheCredentialsLock(t *testing.T) {
 			return err
 		}
 		go func() {
-			code, raw := r.tenantCall("DELETE", credPath("box", "erp"), "")
+			code, raw := r.projectCall("DELETE", credPath("box", "erp"), "")
 			done <- answer{code, raw}
 		}()
 		select {

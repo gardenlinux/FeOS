@@ -45,11 +45,11 @@ func withVisits(k *visit.Keys) func(b *table.Builder) {
 	}
 }
 
-// guard makes env admit the visitors of the tenant's provider fecode
-// (kind tenant), made when missing, and tells the table.
+// guard makes env admit the visitors of the project's provider fecode
+// (kind project), made when missing, and tells the table.
 func (h *harness) guard(env uuid.UUID) {
 	h.t.Helper()
-	h.exec(`INSERT INTO access_providers (tenant, name, kind, url) VALUES ('acme', 'fecode', 'tenant', 'https://fecode.example/api/v1/visit')
+	h.exec(`INSERT INTO access_providers (project, name, kind, url) VALUES ('acme', 'fecode', 'project', 'https://fecode.example/api/v1/visit')
 		ON CONFLICT DO NOTHING`)
 	h.exec("UPDATE environments SET access = 'visitors', access_provider = 'fecode' WHERE id = $1", env)
 	h.exec("SELECT pg_notify($1, $2)", db.ChanIngress, "env:"+env.String())

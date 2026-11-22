@@ -424,7 +424,7 @@ func (s *Service) settle(ctx context.Context, tx *store.Store, before, after sto
 		return store.Domain{}, err
 	}
 	if before.State != out.State || before.EnvID != out.EnvID || before.Verification != out.Verification {
-		s.log.Info("domain changed", "tenant", out.Owner, "domain", out.Name, "id", out.ID,
+		s.log.Info("domain changed", "project", out.Owner, "domain", out.Name, "id", out.ID,
 			"verification", out.Verification, "state", out.State, "environment", out.EnvID, "reason", out.Reason)
 	}
 	return out, nil

@@ -4,24 +4,25 @@
 // The UI's routes. ferund answers every path that is not a file of the
 // build with index.html, so deep links work.
 //
-//   /, /tenants                         the tenants
-//   /tenants/:t                         a tenant's overview
-//   /tenants/:t/tools                   the tools of its sandboxes
-//   /tenants/:t/sandboxes[/:id[/:tab]], /tenants/:t/jobs[/:id]
+//   /, /projects                         the projects
+//   /projects/:t                         a project's overview
+//   /projects/:t/tools                   the tools of its sandboxes
+//   /projects/:t/sandboxes[/:id[/:tab]], /projects/:t/jobs[/:id]
 //                                       where a sandbox and a job were
 //                                       before they moved into their
 //                                       environment (ADR 0035): they lead
 //                                       there (view moved)
-//   /tenants/:t/domains[/:id]           its domains
-//   /tenants/:t/providers[/:name[/edit]]
+//   /projects/:t/domains[/:id]           its domains
+//   /projects/:t/providers[/:name[/edit]]
 //                                       its access providers (ADR 0054)
-//   /tenants/:t/new-provider            the form of a new access provider
-//   /tenants/:t/members                 its people: members and invitations
-//   /tenants/:t/tokens                  its tokens
-//   /tenants/:t/usage                   its use against its limits
-//   /tenants/:t/settings                the tenant itself
-//   /tenants/:t/new-environment         the builder of a new environment
-//   /tenants/:t/environments[/:env[/:tab[/:item]]]
+//   /projects/:t/new-provider            the form of a new access provider
+//   /projects/:t/members[?integration=<name>]
+//                                       its people: members, integrations, invitations
+//   /projects/:t/tokens                  its tokens
+//   /projects/:t/usage                   its use against its limits
+//   /projects/:t/settings                the project itself
+//   /projects/:t/new-environment         the builder of a new environment
+//   /projects/:t/environments[/:env[/:tab[/:item]]]
 //                                       its environments; tab:
 //                                       overview, builder[/:kind/:name]
 //                                       (New deployment, an object's form),
@@ -53,7 +54,13 @@
 //   /instances                          the control plane's instances
 //   /ingresses                          the ingresses
 //   /people                             every person (operators)
-//   /invite/:token                      an invitation, to accept
+//   /integrations                       the registered integrations (operators, ADR 0056)
+//   /accounts                           the accounts: a person's, or every one (operators, ADR 0059)
+//   /accounts/:a                        an account's page: its projects, moves, people, invitations
+//   /invite/:token                      an invitation, to accept (a project's or an account's)
+//
+// FeCode links here: /projects?new (make a project) and
+// /projects/:t/members?integration=<name> (grant that integration).
 
 function decode(s) {
   try {
@@ -157,7 +164,7 @@ const SEARCH_TABS = new Set(['logs']);
 // (secrets/http/:name).
 const INVENTORY_KINDS = ['secret', 'binding', 'addon'];
 
-// envRoute reads the segments after /tenants/:t/environments: the
+// envRoute reads the segments after /projects/:t/environments: the
 // environment, its tab (an unknown one is the overview), and the tab's
 // item: a deployment's number, an incident's ID, a job's ID, a trace's
 // ID, a sandbox's ID ("new": the create form, with otab its page's
@@ -169,7 +176,7 @@ const INVENTORY_KINDS = ['secret', 'binding', 'addon'];
 // query (logs.js); on the objects tab the
 // "<kind>/<name>" of the object whose page it is, on the builder's the
 // object whose form is open.
-function envRoute(tenant, seg, search) {
+function envRoute(project, seg, search) {
   const env = seg[0] || '';
   const tab = env && ENV_TABS.includes(seg[1]) ? seg[1] : 'overview';
   let item = '';
@@ -178,11 +185,11 @@ function envRoute(tenant, seg, search) {
   if (tab === 'sandboxes') {
     item = seg[2] || '';
     const otab = item && item !== 'new' ? seg[3] || 'overview' : 'overview';
-    return { view: 'environments', tenant, env, tab, item, otab, replica: null, search: '' };
+    return { view: 'environments', project, env, tab, item, otab, replica: null, search: '' };
   }
   if (tab === 'secrets' && seg[2] === 'http' && seg[3]) {
     const otab = seg[3] !== 'new' && seg[4] === 'edit' ? 'edit' : '';
-    return { view: 'environments', tenant, env, tab, item: `http/${seg[3]}`, otab, replica: null, search: '' };
+    return { view: 'environments', project, env, tab, item: `http/${seg[3]}`, otab, replica: null, search: '' };
   }
   if (tab === 'builder' && seg[2] && seg[3]) item = `${seg[2]}/${seg[3]}`;
   if (tab === 'secrets' && INVENTORY_KINDS.includes(seg[2]) && seg[3]) item = `${seg[2]}/${seg[3]}`;
@@ -190,19 +197,19 @@ function envRoute(tenant, seg, search) {
     item = `${seg[2]}/${seg[3]}`;
     const otab = OBJECT_TABS.includes(seg[4]) ? seg[4] : 'overview';
     if (otab === 'logs' && /^\d+$/.test(seg[5] || '')) replica = Number(seg[5]);
-    return { view: 'environments', tenant, env, tab, item, otab, replica, search: SEARCH_TABS.has(otab) ? search : '' };
+    return { view: 'environments', project, env, tab, item, otab, replica, search: SEARCH_TABS.has(otab) ? search : '' };
   }
-  return { view: 'environments', tenant, env, tab, item, replica, search: SEARCH_TABS.has(tab) ? search : '' };
+  return { view: 'environments', project, env, tab, item, replica, search: SEARCH_TABS.has(tab) ? search : '' };
 }
 
 // envPath is the path of an environment's page: the list without env,
 // the tab's list without item; the search ("?…") only on a logs path. The logs of an object (item "<kind>/<name>") are its
 // page's Logs, with the replica when it is given.
-export function envPath(tenant, env = '', tab = 'overview', item = '', replica = null, search = '') {
+export function envPath(project, env = '', tab = 'overview', item = '', replica = null, search = '') {
   const enc = encodeURIComponent;
-  let p = `/tenants/${enc(tenant)}/environments`;
+  let p = `/projects/${enc(project)}/environments`;
   if (!env) return p;
-  if (tab === 'logs' && item) return objectPath(tenant, env, item, 'logs', replica, search);
+  if (tab === 'logs' && item) return objectPath(project, env, item, 'logs', replica, search);
   p += `/${enc(env)}`;
   if (!tab || tab === 'overview' || !ENV_TABS.includes(tab)) return p;
   p += `/${tab}`;
@@ -213,8 +220,8 @@ export function envPath(tenant, env = '', tab = 'overview', item = '', replica =
 
 // objectPath is the path of an object's page (item "<kind>/<name>") in
 // view otab: the replica and the search only on its logs.
-export function objectPath(tenant, env, item, otab = 'overview', replica = null, search = '') {
-  let p = envPath(tenant, env, 'objects', item);
+export function objectPath(project, env, item, otab = 'overview', replica = null, search = '') {
+  let p = envPath(project, env, 'objects', item);
   if (!otab || otab === 'overview' || !OBJECT_TABS.includes(otab)) return p;
   p += `/${otab}`;
   if (otab === 'logs' && replica != null && replica !== '') p += `/${Number(replica)}`;
@@ -225,62 +232,62 @@ export function objectPath(tenant, env, item, otab = 'overview', replica = null,
 // pickObjectPath is where picking object o (kind, name) in the sidebar
 // leads: its page in the view open now, where it has that view, else its
 // overview.
-export function pickObjectPath(route, tenant, env, o) {
+export function pickObjectPath(route, project, env, o) {
   const now = route.view === 'environments' && route.env
     ? (route.tab === 'objects' ? route.otab : TO_OBJECT[lensOf(route.tab)])
     : '';
   const otab = now && objectTabs(o.kind).includes(now) ? now : 'overview';
-  return objectPath(tenant, env, `${o.kind}/${o.name}`, otab);
+  return objectPath(project, env, `${o.kind}/${o.name}`, otab);
 }
 
 // pickEnvPath is where picking environment env in the sidebar leads:
 // from one of its objects' pages the environment in the same view, else
 // its overview.
-export function pickEnvPath(route, tenant, env) {
-  const inEnv = route.view === 'environments' && route.env && route.tenant === tenant;
+export function pickEnvPath(route, project, env) {
+  const inEnv = route.view === 'environments' && route.env && route.project === project;
   const tab = inEnv && route.tab === 'objects' ? TO_ENV[route.otab] || 'overview' : 'overview';
-  return envPath(tenant, env, tab);
+  return envPath(project, env, tab);
 }
 
 // sandboxPath is an environment's sandboxes, or one of them (id; "new"
 // is the create form) in its page's view tab; jobPath its jobs made by a
 // call, in Activity, or one of them. A sandbox and a job are of one
 // environment (ADR 0035), whose name env is.
-export function sandboxPath(tenant, env, id = '', tab = '') {
-  const p = envPath(tenant, env, 'sandboxes', id);
+export function sandboxPath(project, env, id = '', tab = '') {
+  const p = envPath(project, env, 'sandboxes', id);
   return id && id !== 'new' && tab && tab !== 'overview' ? `${p}/${encodeURIComponent(tab)}` : p;
 }
 
-export function jobPath(tenant, env, id = '') {
-  return envPath(tenant, env, 'jobs', id);
+export function jobPath(project, env, id = '') {
+  return envPath(project, env, 'jobs', id);
 }
 
 // httpSecretPath is an HTTP secret's page (ADR 0055) in its
 // environment's Secrets view (name; "new" is the form of a new one), the
 // form of its new version (edit), or without a name the Secrets view. An
 // HTTP secret is of one environment, whose name env is.
-export function httpSecretPath(tenant, env, name = '', edit = false) {
-  if (!name) return secretsPath(tenant, env);
-  const p = envPath(tenant, env, 'secrets', `http/${name}`);
+export function httpSecretPath(project, env, name = '', edit = false) {
+  if (!name) return secretsPath(project, env);
+  const p = envPath(project, env, 'secrets', `http/${name}`);
   return name !== 'new' && edit ? `${p}/edit` : p;
 }
 
 // secretsPath is an environment's Secrets view, where each key lives,
 // pointing at the row of kind (secret, binding, addon) and name when both
 // are given; an HTTP secret's (kind http) is its page.
-export function secretsPath(tenant, env, kind = '', name = '') {
-  if (kind === 'http' && name) return httpSecretPath(tenant, env, name);
-  return envPath(tenant, env, 'secrets', kind && name ? `${kind}/${name}` : '');
+export function secretsPath(project, env, kind = '', name = '') {
+  if (kind === 'http' && name) return httpSecretPath(project, env, name);
+  return envPath(project, env, 'secrets', kind && name ? `${kind}/${name}` : '');
 }
 
 // newHttpSecretPath is the form of a new HTTP secret in env.
-export function newHttpSecretPath(tenant, env) {
-  return httpSecretPath(tenant, env, 'new');
+export function newHttpSecretPath(project, env) {
+  return httpSecretPath(project, env, 'new');
 }
 
 // newSandboxPath is the create form of a sandbox in env.
-export function newSandboxPath(tenant, env) {
-  return sandboxPath(tenant, env, 'new');
+export function newSandboxPath(project, env) {
+  return sandboxPath(project, env, 'new');
 }
 
 // EARLIER_TABS maps an environment tab's earlier or other name to its
@@ -289,7 +296,8 @@ export function newSandboxPath(tenant, env) {
 // reachability (ADR 0034, revised).
 const EARLIER_TABS = { releases: 'deployments', edit: 'builder', groups: 'reachability' };
 
-// canonicalPath is pathname with an environment tab's earlier name
+// canonicalPath is pathname with the projects' pages under their earlier
+// word (ADR 0061) moved to /projects/..., an environment tab's earlier name
 // replaced by its name, the credentials of old (ADR 0033: their list, a
 // new one's form, one's page and its new version's form, and a
 // credential's row of the Secrets view) by their HTTP secrets' (ADR
@@ -298,28 +306,32 @@ const EARLIER_TABS = { releases: 'deployments', edit: 'builder', groups: 'reacha
 // redirects; else pathname.
 export function canonicalPath(pathname) {
   const seg = String(pathname || '/').split('/');
-  if (seg[1] === 'tenants' && seg[3] === 'environments' && seg[4] && EARLIER_TABS[seg[5]]) {
+  if (seg[1] === 'tenants') { // KEEP-TENANT: the console's paths before ADR 0061
+    seg[1] = 'projects';
+    pathname = seg.join('/');
+  }
+  if (seg[1] === 'projects' && seg[3] === 'environments' && seg[4] && EARLIER_TABS[seg[5]]) {
     seg[5] = EARLIER_TABS[seg[5]];
     return seg.join('/');
   }
-  if (seg[1] === 'tenants' && seg[3] === 'environments' && seg[4] && seg[5] === 'credentials') {
+  if (seg[1] === 'projects' && seg[3] === 'environments' && seg[4] && seg[5] === 'credentials') {
     if (!seg[6]) return [...seg.slice(0, 5), 'secrets'].join('/');
     return [...seg.slice(0, 5), 'secrets', 'http', seg[6], ...(seg[6] !== 'new' && seg[7] === 'edit' ? ['edit'] : [])].join('/');
   }
-  if (seg[1] === 'tenants' && seg[3] === 'environments' && seg[4] && seg[5] === 'secrets' && seg[6] === 'credential' && seg[7]) {
+  if (seg[1] === 'projects' && seg[3] === 'environments' && seg[4] && seg[5] === 'secrets' && seg[6] === 'credential' && seg[7]) {
     return [...seg.slice(0, 5), 'secrets', 'http', seg[7]].join('/');
   }
-  if (seg[1] === 'tenants' && seg[3] === 'environments' && seg[4] && seg[5] === 'logs' && seg[6] && seg[7]) {
+  if (seg[1] === 'projects' && seg[3] === 'environments' && seg[4] && seg[5] === 'logs' && seg[6] && seg[7]) {
     const rest = /^\d+$/.test(seg[8] || '') ? `/${seg[8]}` : '';
     return [...seg.slice(0, 5), 'objects', seg[6], seg[7], 'logs'].join('/') + rest;
   }
   return pathname;
 }
 
-// parsePath maps a path to {view, tenant?, sel?, tab?, node?}, and for
-// the environments to {view, tenant, env, tab, item, replica}. A path
+// parsePath maps a path to {view, project?, sel?, tab?, node?}, and for
+// the environments to {view, project, env, tab, item, replica}. A path
 // of a sandbox or a job from before they moved into their environment is
-// {view: 'moved', tenant, what: 'sandbox' | 'job', sel, tab, env} (env:
+// {view: 'moved', project, what: 'sandbox' | 'job', sel, tab, env} (env:
 // the ?environment= of a new sandbox's form), which leads to where it is.
 export function parsePath(pathname) {
   const [path, query] = String(pathname || '/').split('?');
@@ -338,30 +350,34 @@ export function parsePath(pathname) {
       return { view: 'people' };
     case 'invite':
       return { view: 'invite', token: seg[1] || '' };
-    case 'tenants':
+    case 'accounts':
+      return seg[1] ? { view: 'account', account: seg[1] } : { view: 'accounts' };
+    case 'integrations':
+      return { view: 'integrations' };
+    case 'projects':
       break;
     default:
-      return { view: 'tenants' };
+      return { view: 'projects' };
   }
-  if (seg.length === 1) return { view: 'tenants' };
-  const tenant = seg[1];
-  if (seg[2] === 'tools') return { view: 'tools', tenant };
-  if (seg[2] === 'members') return { view: 'members', tenant };
-  if (seg[2] === 'tokens') return { view: 'tokens', tenant };
-  if (seg[2] === 'jobs') return { view: 'moved', tenant, what: 'job', sel: seg[3] || '', tab: '', env: '' };
-  if (seg[2] === 'domains') return { view: 'domains', tenant, sel: seg[3] || '' };
+  if (seg.length === 1) return { view: 'projects' };
+  const project = seg[1];
+  if (seg[2] === 'tools') return { view: 'tools', project };
+  if (seg[2] === 'members') return { view: 'members', project };
+  if (seg[2] === 'tokens') return { view: 'tokens', project };
+  if (seg[2] === 'jobs') return { view: 'moved', project, what: 'job', sel: seg[3] || '', tab: '', env: '' };
+  if (seg[2] === 'domains') return { view: 'domains', project, sel: seg[3] || '' };
   if (seg[2] === 'providers') {
-    return { view: 'providers', tenant, sel: seg[3] || '', tab: seg[3] && seg[4] === 'edit' ? 'edit' : '' };
+    return { view: 'providers', project, sel: seg[3] || '', tab: seg[3] && seg[4] === 'edit' ? 'edit' : '' };
   }
-  if (seg[2] === 'new-provider') return { view: 'newProvider', tenant };
-  if (seg[2] === 'usage') return { view: 'usage', tenant };
-  if (seg[2] === 'settings') return { view: 'settings', tenant };
-  if (seg[2] === 'new-environment') return { view: 'newEnvironment', tenant };
-  if (seg[2] === 'environments') return envRoute(tenant, seg.slice(3), search);
+  if (seg[2] === 'new-provider') return { view: 'newProvider', project };
+  if (seg[2] === 'usage') return { view: 'usage', project };
+  if (seg[2] === 'settings') return { view: 'settings', project };
+  if (seg[2] === 'new-environment') return { view: 'newEnvironment', project };
+  if (seg[2] === 'environments') return envRoute(project, seg.slice(3), search);
   if (seg[2] === 'sandboxes') {
-    return { view: 'moved', tenant, what: 'sandbox', sel: seg[3] || '', tab: seg[4] || '', env: queryParam(search, 'environment') };
+    return { view: 'moved', project, what: 'sandbox', sel: seg[3] || '', tab: seg[4] || '', env: queryParam(search, 'environment') };
   }
-  return { view: 'overview', tenant };
+  return { view: 'overview', project };
 }
 
 // queryParam is the value of name in search ("?…"), '' without one.
@@ -373,8 +389,8 @@ function queryParam(search, name) {
   }
 }
 
-// TENANT_VIEWS are the views that act in a tenant, with the session.
-export const TENANT_VIEWS = new Set([
+// PROJECT_VIEWS are the views that act in a project, with the session.
+export const PROJECT_VIEWS = new Set([
   'overview',
   'moved',
   'tools',
@@ -385,13 +401,13 @@ export const TENANT_VIEWS = new Set([
 ]);
 
 // newEnvPath is the builder of a new environment.
-export function newEnvPath(tenant) {
-  return `/tenants/${encodeURIComponent(tenant)}/new-environment`;
+export function newEnvPath(project) {
+  return `/projects/${encodeURIComponent(project)}/new-environment`;
 }
 
 // chosenEnv is the environment the sidebar's pages are of: the route's,
-// else the one last open in this tenant (last), else the tenant's first;
-// null when the tenant has none.
+// else the one last open in this project (last), else the project's first;
+// null when the project has none.
 export function chosenEnv(route, envs, last = '') {
   const list = envs || [];
   const by = (n) => (n ? list.find((e) => e.name === n || e.id === n) : undefined);
@@ -399,16 +415,16 @@ export function chosenEnv(route, envs, last = '') {
   return by(last) || list[0] || null;
 }
 
-// switchEnvPath is where choosing env of tenant leads: the same page of
+// switchEnvPath is where choosing env of project leads: the same page of
 // the other environment while one is open (a deployment of one is not in
 // the other, so its list), from an object's page the environment in the
 // same view (another environment may not have the object), else its
 // overview.
-export function switchEnvPath(route, tenant, env) {
-  const inEnv = route.view === 'environments' && route.env && route.tenant === tenant;
-  if (inEnv && route.tab === 'objects') return pickEnvPath(route, tenant, env);
+export function switchEnvPath(route, project, env) {
+  const inEnv = route.view === 'environments' && route.env && route.project === project;
+  if (inEnv && route.tab === 'objects') return pickEnvPath(route, project, env);
   // A trace and an HTTP secret are of one environment only: the other
   // one's logs, its secrets (envPath drops the item).
   const tab = !inEnv ? 'overview' : SUB_PAGES[route.tab] || route.tab;
-  return envPath(tenant, env, tab);
+  return envPath(project, env, tab);
 }

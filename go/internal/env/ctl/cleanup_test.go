@@ -108,12 +108,12 @@ func TestAttachedNewIncarnation(t *testing.T) {
 	b, _ := h.st.GetAttached(bg, env.ID, "web")
 
 	// The sandbox is lost and replaced under the same ID, by the same
-	// tenant.
-	if _, _, err := h.eng.Delete(bg, testTenant, sb.ID); err != nil {
+	// project.
+	if _, _, err := h.eng.Delete(bg, testProject, sb.ID); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, 30*time.Second, "the sandbox's pod gone", func() bool { return h.pod("n1", sb.ID) == nil })
-	again := h.sandboxAs(testTenant, sb.ID)
+	again := h.sandboxAs(testProject, sb.ID)
 	if again.Incarnation == sb.Incarnation {
 		t.Fatal("the same incarnation")
 	}
@@ -190,7 +190,7 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 		return resolves(n1, sb.ID, "web") && api
 	})
 
-	// Its environment deleted (as a tenant's deletion does; the API
+	// Its environment deleted (as a project's deletion does; the API
 	// refuses it while the environment has sandboxes, ADR 0035).
 	stage := h.newEnv("stage")
 	sb = h.sandboxIn(stage, podid.Mint())
@@ -223,7 +223,7 @@ func TestAttachedStopFailureKeepsRow(t *testing.T) {
 		t.Fatalf("the deleted environment's process runs on: %v", got)
 	}
 	// The environment goes once its sandbox has.
-	if _, _, err := h.eng.Delete(bg, testTenant, sb.ID); err != nil {
+	if _, _, err := h.eng.Delete(bg, testProject, sb.ID); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, 60*time.Second, "the environment deleted", func() bool {

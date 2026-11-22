@@ -237,7 +237,7 @@ func (in *ingestion) row(ev *fleetv1.Event, source, kind, category, name string,
 func (r *attribution) apply(row *store.ActivityRow, podID podid.ID) {
 	row.PodID = podID
 	if r.ok {
-		row.SandboxID, row.TenantID = r.SandboxID, activity.Clean(r.TenantID)
+		row.SandboxID, row.ProjectID = r.SandboxID, activity.Clean(r.ProjectID)
 	} else {
 		row.ForeignPod = true
 	}
@@ -312,7 +312,7 @@ func (in *ingestion) add(ctx context.Context, ev *fleetv1.Event) error {
 			Kind: kind, Missed: clampInt64(rec.GetMissed()), Detail: trafficDetail(rec),
 		}
 		if a.ok {
-			row.SandboxID, row.TenantID = a.SandboxID, activity.Clean(a.TenantID)
+			row.SandboxID, row.ProjectID = a.SandboxID, activity.Clean(a.ProjectID)
 		} else {
 			row.ForeignPod = true
 		}

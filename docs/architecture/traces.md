@@ -3,7 +3,7 @@
 `ferun-sink` keeps the spans of the pods FeRun makes and of the requests
 `ferun-ingress` answers (ADR 0026 §10, step 10), appended to a Kafka
 topic and indexed from there by Quickwit's trace index (§11), and
-answers them to a tenant in the shape of Jaeger's query API, and the
+answers them to a project in the shape of Jaeger's query API, and the
 ingress's spans also as its traffic per service. This page is
 the contract between the parts; the ADR says why. Logs are
 docs/architecture/sink.md; what that page says of identities, the topics
@@ -14,7 +14,7 @@ pod (OTel SDK) ──OTLP/gRPC :4317, OTLP/HTTP protobuf :4318──▶ feosd at
                                    │ the pod by its source address, its ferun.* labels stamped
 feosd (node) ──OTLP TraceService/Export (mTLS, node cert)──▶ ferun-sink ──▶ PostgreSQL `trace_usage` (quota)
 ferun-ingress ──TraceService/Export (mTLS, ingress cert)──▶     │   └──▶ Kafka ferun-traces-v4-<days>d ──Kafka source──▶ Quickwit index of that name
-tenants (FeCode) ── GET /api/v1/jaeger/api/… (Bearer) ──────────┤
+projects (FeCode) ── GET /api/v1/jaeger/api/… (Bearer) ─────────┤
 ferund ── GET /api/v1/traffic (the caller's Bearer) ────────────┘
 ```
 
@@ -69,7 +69,7 @@ refused. An address of no pod with labels answers 403
 attribute whose key starts with `ferun.`, then adds the pod's labels, the
 same as its log streams carry (sink.md, The OTLP shape) without
 `ferun.container`, `ferun.log_id` and `ferun.retention_days`:
-`ferun.pod`, `ferun.node`, `ferun.tenant`, `ferun.instance`, and those of
+`ferun.pod`, `ferun.node`, `ferun.project`, `ferun.instance`, and those of
 `ferun.environment`, `ferun.kind`, `ferun.object`, `ferun.replica`,
 `ferun.deployment` (else its earlier word `ferun.release`), `ferun.job`,
 `ferun.attempt` the pod has. A resource
@@ -157,7 +157,7 @@ from the same buffer, in batches of its own, to the sink's
 | `service.name` | `ferun-ingress` |
 | `ferun.pod` | `ingress/<instance's name>` |
 | `ferun.source` | `ingress` |
-| `ferun.tenant`, `ferun.environment` | the request's |
+| `ferun.project`, `ferun.environment` | the request's |
 | `ferun.kind`, `ferun.object` | `service`, the service's name |
 
 The span is the request's record (proxy/trace.go): `trace_id`, `span_id`
@@ -187,7 +187,7 @@ written as before.
 ### Ingest
 
 `TraceService/Export` on the ingest's gRPC server, behind the same
-`authorize`. Each `ResourceSpans` must have `ferun.tenant` and
+`authorize`. Each `ResourceSpans` must have `ferun.project` and
 `ferun.pod`. From a node, `ferun.source` must not be `ingress` and
 `ferun.pod` must not start `ingress/`; from an ingress, `ferun.source`
 must be `ingress` and `ferun.pod` `ingress/<its name>`. Else the request
@@ -198,17 +198,17 @@ A span without a valid `trace_id` (16 bytes, not all zero) or `span_id`
 (8 bytes, not all zero) is dropped and counted in the answer's
 `partial_success.rejected_spans`, with an `error_message`. The others
 become documents (below) and are produced to the trace topic in one
-transaction with the tenant's usage, each keyed by its trace ID (a
+transaction with the project's usage, each keyed by its trace ID (a
 trace's spans in one partition); the answer comes after Kafka has
 them on two of its three replicas and the commit, well within the 8 s the
 node gives a pod's export.
 A span without a start gets the time it came as its `ts`; a resource
 without `service.name` the service `unknown_service`.
 
-**Quota.** Bytes of documents per tenant per day, `--trace-quota`
-(default 1 GiB), counted in `trace_usage` (tenant, day) at ingest.
+**Quota.** Bytes of documents per project per day, `--trace-quota`
+(default 1 GiB), counted in `trace_usage` (project, day) at ingest.
 Beyond it the request answers `RESOURCE_EXHAUSTED` (the request that
-crosses it is stored; of a request of several tenants, the others'
+crosses it is stored; of a request of several projects, the others'
 spans are stored). A loop of the sink deletes the usage of the days
 before yesterday.
 
@@ -229,15 +229,15 @@ indexes are, with a commit interval of 5 s. `N` is the
 mapping's version (`quickwit.TraceMappingVersion`): a changed mapping is
 a new index, and reads search `<prefix>-*`, every version, until the old
 one ages out. Spans are partitioned as the log indexes' lines are, by
-`hash_mod((tenant, environment, job), --index-partitions)` (16), and
-`tenant`, `environment` and `job` are tag fields, so a read of one
+`hash_mod((tenant, environment, job), --index-partitions)` (16), and <!-- KEEP-TENANT: Quickwit's stored name -->
+`tenant`, `environment` and `job` are tag fields, <!-- KEEP-TENANT: Quickwit's stored name --> so a read of one
 environment's spans opens only its partition's splits. A document is a
 span:
 
 | field | type | from |
 |---|---|---|
 | `ts` | datetime (ns), the timestamp field, fast | `start_time_unix_nano` |
-| `tenant` | raw text, the tag field | `ferun.tenant` |
+| `tenant` | raw text, the tag field: the project, under the earlier word of ADR 0061, as `release` | `ferun.project` (`ferun.tenant` from a pod placed before) | <!-- KEEP-TENANT: Quickwit's stored name -->
 | `environment`, `kind`, `object`, `instance`, `job`, `source`, `pod`, `node` | raw text | the `ferun.*` attributes; `source` `ingress` or `egress` as `ferun.source` says, else `container` |
 | `replica`, `release`, `attempt` | u64 | the `ferun.*` attributes; `release` is the deployment, under the label's earlier word, as the log index has it (sink.md) |
 | `trace_id`, `span_id`, `parent_span_id` | raw text, lower-case hex, `trace_id` fast | the span |
@@ -261,7 +261,7 @@ object, bytes as base64 text.
 ### Reading: Jaeger's query API
 
 Under `/api/v1/jaeger`, with a reader as `GET /api/v1/logs` takes it
-(sink.md, Readers); every query is the tenant's own, whatever it asks,
+(sink.md, Readers); every query is the project's own, whatever it asks,
 and a reader of environments only (ADR 0031) reads the spans of those:
 a trace's other spans are left out. The paths and answers are those of Jaeger's HTTP query API
 (`jaeger-query`'s `/api/…`), so a client of that API, Grafana's Jaeger
@@ -269,11 +269,11 @@ data source among them, reads them with the base URL
 `<sink>/api/v1/jaeger` and the token as a header.
 
 - `GET /api/v1/jaeger/api/services` → `{"data": [names], "total": n}`,
-  the `service_name`s of the tenant's spans of the last 7 days.
+  the `service_name`s of the project's spans of the last 7 days.
 - `GET /api/v1/jaeger/api/services/{service}/operations` → `{"data":
   [names], "total": n}`, its `span_name`s of the last 7 days.
 - `GET /api/v1/jaeger/api/traces/{traceID}` → `{"data": [trace]}`; none
-  of the tenant's spans: 404 `{"data": null, "errors": [{"code": 404,
+  of the project's spans: 404 `{"data": null, "errors": [{"code": 404,
   "msg": "trace not found"}]}`. The spans come from the index and from
   the topic's tail: the trace's partition from the source's checkpoint
   to its end, the spans not yet published, so a fresh request's trace is
@@ -314,7 +314,7 @@ among them). A span is `{"traceID", "spanID", "operationName",
 
 `GET /api/v1/traffic?environment=<ID>&service=<name>[&service=…]&since=&until=&step=[&source=ingress|app][&skip=<service>:<path>…]`,
 with a reader as above (404 "no such environment" for an environment
-it may not read): the requests of each service of the tenant's
+it may not read): the requests of each service of the project's
 environment, counted from server spans. `source` `ingress` (the default)
 counts the ingress's (source `ingress`, the service as `object`): what
 it answered at the public hosts. `source` `app` counts the services' own
@@ -429,10 +429,11 @@ counted twice.
 
 ## FeCode
 
-FeCode reads with its tenant token (tenant `fecode`) and lets only a
-project's members read its environments' traces (as its logs, FeCode
-ADR 0009 §12): its backend passes a member's request on to the sink with
-the environment's FeRun ID as `environment` set by FeCode, never the
-caller's. A trace ID in the Logs tab (a request's, a line's) opens the
+FeCode reads as an integration (FeOS ADR 0056): its access token, the
+project in `FeRun-Project` and the person it reads for in
+`FeRun-Person`, so that the sink answers what both may read of the
+project, by ferund's roles ([sink.md](sink.md), Readers); its backend
+passes a member's request on with the environment's FeRun ID as
+`environment` (as its logs, FeCode ADR 0009 §12). A trace ID in the Logs tab (a request's, a line's) opens the
 trace: its spans as a waterfall, top to bottom, each with its service,
 name, duration and attributes, and a link to the lines of the trace.

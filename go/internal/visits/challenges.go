@@ -59,8 +59,8 @@ func (s *Service) opened(ctx context.Context, sealed string) (visit.Challenge, e
 // admit reads on q, with lock, the environment ch names and checks that
 // the caller may answer it: the environment is there, public, not being
 // deleted, guarded (visitors) by a provider of a kind this installation
-// serves, which the caller answers for (a tenant principal: of kind
-// tenant, its own tenant's, and admin on the environment; ferun-auth: of
+// serves, which the caller answers for (a project principal: of kind
+// project, its own project's, and admin on the environment; ferun-auth: of
 // kinds ferun and oidc), and ch's host is one of its hosts or a name one
 // of its wildcard domains covers (ADR 0045). Anything else
 // is notFound, never a 403.
@@ -105,13 +105,13 @@ func (s *Service) admit(ctx context.Context, q *store.Store, c Caller, envID, ho
 }
 
 // answers reports whether c may answer for environment e's provider of
-// kind: ferun-auth for the kinds ferun and oidc, a tenant principal for
-// its tenant's environments of kind tenant on which it is admin.
+// kind: ferun-auth for the kinds ferun and oidc, a project principal for
+// its project's environments of kind project on which it is admin.
 func (c Caller) answers(e store.Environment, kind string) bool {
 	if c.Auth {
 		return kind == model.ProviderKindFerun || kind == model.ProviderKindOIDC
 	}
-	return c.Tenant != "" && c.Tenant == e.Owner && kind == model.ProviderKindTenant && c.Admin != nil && c.Admin(e.ID)
+	return c.Project != "" && c.Project == e.Owner && kind == model.ProviderKindProject && c.Admin != nil && c.Admin(e.ID)
 }
 
 // envView is an environment as a provider sees it.
@@ -120,7 +120,7 @@ func envView(e store.Environment) EnvView {
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	return EnvView{ID: e.ID.String(), Name: e.Name, Tenant: e.Owner, Labels: labels}
+	return EnvView{ID: e.ID.String(), Name: e.Name, Project: e.Owner, Labels: labels}
 }
 
 // restart is where the browser of a challenge begins again: its host and
@@ -174,11 +174,11 @@ func (s *Service) OpenChallenge(ctx context.Context, c Caller, sealed string) (C
 
 // oidcOf is an oidc provider with its secret opened.
 func (s *Service) oidcOf(p store.AccessProvider) (OIDCProvider, error) {
-	secret, err := s.d.Sealer.Open(p.ClientSecretSealed, store.AccessProviderAAD(p.Tenant, p.Name))
+	secret, err := s.d.Sealer.Open(p.ClientSecretSealed, store.AccessProviderAAD(p.Project, p.Name))
 	if err != nil {
-		return OIDCProvider{}, s.failed("open a client secret", fmt.Errorf("provider %s of %s: %w", p.Name, p.Tenant, err))
+		return OIDCProvider{}, s.failed("open a client secret", fmt.Errorf("provider %s of %s: %w", p.Name, p.Project, err))
 	}
-	return OIDCProvider{Tenant: p.Tenant, Name: p.Name, Issuer: p.Issuer, ClientID: p.ClientID,
+	return OIDCProvider{Project: p.Project, Name: p.Name, Issuer: p.Issuer, ClientID: p.ClientID,
 		ClientSecret: string(secret), Rule: ruleOf(p.Rule)}, nil
 }
 
@@ -207,7 +207,7 @@ func checkAccept(in Accept) (time.Time, error) {
 // AcceptChallenge records a provider's yes and makes the visit, which
 // ends at the provider's end, at most visit.MaxVisit after now. For a
 // provider of kind ferun ferund decides: the subject is a person of the
-// installation's issuer with a grant on the environment or its tenant,
+// installation's issuer with a grant on the environment or its project,
 // else the challenge is recorded rejected and the answer is not
 // admitted. The answer sends the browser to the challenge's host with
 // the code. 404 as OpenChallenge, 409 challenge_expired and
@@ -259,7 +259,7 @@ func (s *Service) answer(ctx context.Context, c Caller, sealed string, in *Accep
 			if !endsAt.IsZero() && !endsAt.After(now) {
 				return invalidAccept("endsAt: a time after now")
 			}
-			nv := store.NewVisit{ID: visitID, EnvID: g.env.ID, Tenant: g.env.Owner, Provider: g.provider,
+			nv := store.NewVisit{ID: visitID, EnvID: g.env.ID, Project: g.env.Owner, Provider: g.provider,
 				ProviderKind: g.kind, Host: ch.Host, Subject: in.Subject, Email: in.Email, Name: in.Name,
 				Session: in.Session, EndsAt: endsAt, MaxVisit: visit.MaxVisit}
 			admitted := true
@@ -306,7 +306,7 @@ func (s *Service) answer(ctx context.Context, c Caller, sealed string, in *Accep
 
 // GetVisit answers a visit to its provider, ended or not, until it is
 // swept: 404 no such visit unless the caller may answer for the visit's
-// provider (a tenant principal: of kind tenant, its own tenant's, admin on
+// provider (a project principal: of kind project, its own project's, admin on
 // the environment; ferun-auth: kinds ferun and oidc). Its binding is
 // never answered.
 func (s *Service) GetVisit(ctx context.Context, c Caller, id string) (Visit, error) {
@@ -328,7 +328,7 @@ func (s *Service) GetVisit(ctx context.Context, c Caller, id string) (Visit, err
 	if err != nil {
 		return Visit{}, s.failed("read an environment", err)
 	}
-	if e.Owner != v.Tenant || !c.answers(e, v.ProviderKind) {
+	if e.Owner != v.Project || !c.answers(e, v.ProviderKind) {
 		return Visit{}, errNoVisit()
 	}
 	return Visit{ID: v.ID.String(), Environment: envView(e), Host: v.Host,
@@ -339,8 +339,8 @@ func (s *Service) GetVisit(ctx context.Context, c Caller, id string) (Visit, err
 
 // EndBySession ends with backchannel_logout the open visits of an
 // issuer's session (ferun-auth's back-channel logout): of the provider
-// ferun, every tenant's ({"provider": "ferun", "session"}), or of a
-// tenant's oidc provider ({"tenant", "provider", "session"}). 400
+// ferun, every project's ({"provider": "ferun", "session"}), or of a
+// project's oidc provider ({"project", "provider", "session"}). 400
 // invalid_request without a session or with another shape; 404 no such
 // provider for one that does not exist or is not of kind oidc.
 func (s *Service) EndBySession(ctx context.Context, in EndSession) (int, error) {
@@ -350,14 +350,14 @@ func (s *Service) EndBySession(ctx context.Context, in EndSession) (int, error) 
 		return 0, bad("a session of 1 to 255 bytes is required")
 	case in.Provider == "":
 		return 0, bad("a provider is required")
-	case in.Provider == model.ProviderFerun && in.Tenant != "":
-		return 0, bad("the provider ferun is every tenant's: no tenant goes with it")
-	case in.Provider != model.ProviderFerun && in.Tenant == "":
-		return 0, bad("a tenant goes with a provider of kind oidc")
+	case in.Provider == model.ProviderFerun && in.Project != "":
+		return 0, bad("the provider ferun is every project's: no project goes with it")
+	case in.Provider != model.ProviderFerun && in.Project == "":
+		return 0, bad("a project goes with a provider of kind oidc")
 	}
 	kind := model.ProviderKindFerun
 	if in.Provider != model.ProviderFerun {
-		p, err := s.st.GetAccessProvider(ctx, in.Tenant, in.Provider)
+		p, err := s.st.GetAccessProvider(ctx, in.Project, in.Provider)
 		if errors.Is(err, store.ErrNoRow) || (err == nil && p.Kind != model.ProviderKindOIDC) {
 			return 0, errNoProvider()
 		}
@@ -366,24 +366,24 @@ func (s *Service) EndBySession(ctx context.Context, in EndSession) (int, error) 
 		}
 		kind = model.ProviderKindOIDC
 	}
-	n, err := s.st.EndSessionVisits(ctx, kind, in.Tenant, in.Provider, in.Session, model.VisitBackchannelLogout)
+	n, err := s.st.EndSessionVisits(ctx, kind, in.Project, in.Provider, in.Session, model.VisitBackchannelLogout)
 	if err != nil {
 		return 0, s.failed("end the visits of a session", err)
 	}
 	if n > 0 {
-		s.log.Info("visits ended by a back-channel logout", "tenant", in.Tenant, "provider", in.Provider, "visits", n)
+		s.log.Info("visits ended by a back-channel logout", "project", in.Project, "provider", in.Provider, "visits", n)
 	}
 	return n, nil
 }
 
-// OIDCProvider answers a tenant's oidc provider, with its secret, to
+// OIDCProvider answers a project's oidc provider, with its secret, to
 // ferun-auth (for an issuer's back-channel logout): 404 no such provider
 // unless it exists and is of kind oidc.
-func (s *Service) OIDCProvider(ctx context.Context, tenant, name string) (OIDCProvider, error) {
+func (s *Service) OIDCProvider(ctx context.Context, project, name string) (OIDCProvider, error) {
 	if !providerName.MatchString(name) {
 		return OIDCProvider{}, errNoProvider()
 	}
-	p, err := s.st.GetAccessProvider(ctx, tenant, name)
+	p, err := s.st.GetAccessProvider(ctx, project, name)
 	if errors.Is(err, store.ErrNoRow) || (err == nil && p.Kind != model.ProviderKindOIDC) {
 		return OIDCProvider{}, errNoProvider()
 	}

@@ -965,7 +965,7 @@ func TestIssuePod(t *testing.T) {
 	iss, _ := newCA(t)
 	envID := uuid.MustParse("3f2c0000-0000-4000-8000-000000000001")
 	id := WorkloadID(testTD, "acme", envID, "service", "api")
-	if id != "spiffe://"+testTD+"/tenant/acme/env/3f2c0000-0000-4000-8000-000000000001/service/api" {
+	if id != "spiffe://"+testTD+"/project/acme/env/3f2c0000-0000-4000-8000-000000000001/service/api" {
 		t.Errorf("WorkloadID = %s", id)
 	}
 	pod := podid.ID("xmxfgckmkt6")
@@ -1029,7 +1029,7 @@ func TestIssuePod(t *testing.T) {
 		{"ingress namespace", "spiffe://" + testTD + "/ingress", subject, nil},
 		{"sink ID", SinkID(testTD, "x"), subject, nil},
 		{"sink namespace", "spiffe://" + testTD + "/sink", subject, nil},
-		{"other trust domain", "spiffe://other.test/tenant/a/sandbox/b", subject, nil},
+		{"other trust domain", "spiffe://other.test/project/a/sandbox/b", subject, nil},
 		{"no path", "spiffe://" + testTD, subject, nil},
 		{"dot segment", "spiffe://" + testTD + "/a/../ferun", subject, nil},
 		{"query", "spiffe://" + testTD + "/a?b", subject, nil},

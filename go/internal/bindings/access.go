@@ -16,11 +16,11 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// The access route, GET /api/v1/sandboxes/{id}/access (tenant): the
+// The access route, GET /api/v1/sandboxes/{id}/access (project): the
 // sandbox's two binding sets as their own GETs render them, each binding
 // with what the audit log says it was used for, and the newest refusals.
-// A tenant route, unlike the sets' own: the owner can mint a sandbox token
-// at will, so reading the sets here shows nothing the tenant could not
+// A project route, unlike the sets' own: the owner can mint a sandbox token
+// at will, so reading the sets here shows nothing the project could not
 // read already. Changing them stays the sandbox token's.
 
 // accessDenyLimit is how many refusals the route answers, newest first.
@@ -76,9 +76,9 @@ func isoNS(ns int64) string { return time.Unix(0, ns).UTC().Format(time.RFC3339N
 // Access answers the sandbox's access for its owner; off, the empty
 // object {"kube":null,"ssh":null,"denies":[]}.
 func (s *Service) Access(w http.ResponseWriter, r *http.Request) {
-	tenant, ok := auth.TenantFrom(r.Context())
+	project, ok := auth.ProjectFrom(r.Context())
 	if !ok {
-		apierr.Write(w, apierr.New(http.StatusUnauthorized, "tenant bearer required"))
+		apierr.Write(w, apierr.New(http.StatusUnauthorized, "project bearer required"))
 		return
 	}
 	raw := r.PathValue("id")
@@ -88,8 +88,8 @@ func (s *Service) Access(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sb, err := s.st.GetSandbox(r.Context(), id)
-	if errors.Is(err, model.ErrNotFound) || err == nil && sb.Owner != tenant.Name {
-		// A row of another tenant is indistinguishable from an absent one.
+	if errors.Is(err, model.ErrNotFound) || err == nil && sb.Owner != project.Name {
+		// A row of another project is indistinguishable from an absent one.
 		apierr.Write(w, apierr.New(http.StatusNotFound, "unknown sandbox %s", raw))
 		return
 	}

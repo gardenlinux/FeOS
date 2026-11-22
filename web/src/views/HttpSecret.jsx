@@ -8,6 +8,7 @@ import { Ago, ArmButton, CopyBtn, ErrBox, PageHead, StateDot, useArm, usePoll } 
 import { fmtDateTime, shortId } from '../format.js';
 import { useEnvStatus } from '../envstatus.jsx';
 import { envPath, httpSecretPath, newHttpSecretPath, objectPath, sandboxPath, secretsPath } from '../routes.js';
+import { offeredSecret } from './pins.js';
 import {
   KINDS, REDACTED, curlOf, definitionOf, emptyForm, formOf, hostOf, isName, keptOf, kindLabel, modeWords,
   needsDeployment, pinState, pinWords, pinnedSpec, preflightRows, prefixesOf, refValue, specSnippet, usedWords,
@@ -39,10 +40,10 @@ let saved = null;
 // name or ID, as the route has it): sel is its name, "new" the form of a
 // new one; edit the form of a new version. Without sel, nothing: the
 // list is the Secrets view's.
-export function HttpSecrets({ tenant, env, sel, edit, ec, navigate }) {
-  if (sel === 'new') return <HttpSecretEditor tenant={tenant} env={env} name="" ec={ec} navigate={navigate} />;
-  if (sel && edit) return <HttpSecretEditor key={sel} tenant={tenant} env={env} name={sel} ec={ec} navigate={navigate} />;
-  if (sel) return <HttpSecretPage key={sel} tenant={tenant} env={env} name={sel} ec={ec} navigate={navigate} />;
+export function HttpSecrets({ project, env, sel, edit, ec, navigate }) {
+  if (sel === 'new') return <HttpSecretEditor project={project} env={env} name="" ec={ec} navigate={navigate} />;
+  if (sel && edit) return <HttpSecretEditor key={sel} project={project} env={env} name={sel} ec={ec} navigate={navigate} />;
+  if (sel) return <HttpSecretPage key={sel} project={project} env={env} name={sel} ec={ec} navigate={navigate} />;
   return null;
 }
 
@@ -50,10 +51,10 @@ export function HttpSecrets({ tenant, env, sel, edit, ec, navigate }) {
 const go = (navigate, to) => (e) => { e.preventDefault(); e.stopPropagation(); navigate(to); };
 
 // BackTo is the way back to the environment's Secrets view.
-function BackTo({ tenant, env, navigate, children }) {
+function BackTo({ project, env, navigate, children }) {
   return (
     <div className="subhead envsubhead">
-      <button type="button" className="ghost mini" onClick={() => navigate(secretsPath(tenant, env))}>
+      <button type="button" className="ghost mini" onClick={() => navigate(secretsPath(project, env))}>
         <Icon name="arrowLeft" size={13} /> secrets</button>
       {children}
     </div>
@@ -68,7 +69,7 @@ function refusal(e) {
 
 // ------------------------------------------------------------------ page --
 
-function HttpSecretPage({ tenant, env, name, ec, navigate }) {
+function HttpSecretPage({ project, env, name, ec, navigate }) {
   const [cred, setCred] = useState(null);
   const [err, setErr] = useState('');
   const [missing, setMissing] = useState(false);
@@ -97,17 +98,17 @@ function HttpSecretPage({ tenant, env, name, ec, navigate }) {
   if (missing && !cred) {
     return (
       <div className="creds">
-        <BackTo tenant={tenant} env={env} navigate={navigate} />
+        <BackTo project={project} env={env} navigate={navigate} />
         <p className="empty">No HTTP secret <span className="mono">{name}</span> in this environment.</p>
       </div>
     );
   }
   if (!cred) return err ? <ErrBox error={err} /> : <p className="empty">Loading…</p>;
   if (cred.type !== 'http') {
-    const row = secretsPath(tenant, env, 'secret', name);
+    const row = secretsPath(project, env, 'secret', name);
     return (
       <div className="creds">
-        <BackTo tenant={tenant} env={env} navigate={navigate} />
+        <BackTo project={project} env={env} navigate={navigate} />
         <p className="empty"><span className="mono">{name}</span> is a value secret, not an HTTP secret:{' '}
           <EnvLink to={row} navigate={navigate}>its row in the secrets</EnvLink>.</p>
       </div>
@@ -128,11 +129,11 @@ function HttpSecretPage({ tenant, env, name, ec, navigate }) {
   };
   const cr = cred.credential || {};
   const why = ec.write ? undefined : NEEDS.write;
-  const toEdit = httpSecretPath(tenant, env, name, true);
+  const toEdit = httpSecretPath(project, env, name, true);
 
   return (
     <div className="creds">
-      <BackTo tenant={tenant} env={env} navigate={navigate} />
+      <BackTo project={project} env={env} navigate={navigate} />
       <PageHead kind="HTTP secret" title={name} mono
         state={<span className="badge acc">version {cred.version}</span>}
         actions={(
@@ -186,7 +187,7 @@ function HttpSecretPage({ tenant, env, name, ec, navigate }) {
         </section>
       </div>
 
-      <UsedBy tenant={tenant} env={env} cred={cred} ec={ec} navigate={navigate} onChanged={load} />
+      <UsedBy project={project} env={env} cred={cred} ec={ec} navigate={navigate} onChanged={load} />
 
       <section className="pane cred-danger">
         <div className="pane-toolbar"><h2><Icon name="trash" size={14} /> Delete</h2></div>
@@ -199,7 +200,7 @@ function HttpSecretPage({ tenant, env, name, ec, navigate }) {
             setDelErr('');
             try {
               await api.deleteSecret(env, name);
-              navigate(secretsPath(tenant, env));
+              navigate(secretsPath(project, env));
             } catch (e) {
               setDelErr(e.message);
             }
@@ -295,7 +296,7 @@ const OBJECT_KINDS = new Set(['service', 'job']);
 // the services and jobs of the latest deployment whose variables
 // reference it, with the version the deployments pin and one deployment
 // that moves them to the latest.
-function UsedBy({ tenant, env, cred, ec, navigate, onChanged }) {
+function UsedBy({ project, env, cred, ec, navigate, onChanged }) {
   const { sandboxes, refreshPods } = useEnvStatus();
   const name = cred.name;
   const uses = cred.usedBy || {};
@@ -343,7 +344,7 @@ function UsedBy({ tenant, env, cred, ec, navigate, onChanged }) {
 
   const free = mine.filter((s) => !sbs.includes(s.sandboxId));
   const state = pinState(uses, cred.version);
-  const builder = envPath(tenant, env, 'builder');
+  const builder = envPath(project, env, 'builder');
   const deployed = objects.length > 0 || bindings.length > 0;
 
   return (
@@ -364,7 +365,7 @@ function UsedBy({ tenant, env, cred, ec, navigate, onChanged }) {
                 <span className="inv-uses">
                   {objects.map(([k, n]) => (
                     <span key={`${k}/${n}`} className="inv-obj"><span className="muted">{k}</span>{' '}
-                      <EnvLink to={objectPath(tenant, env, `${k}/${n}`)} navigate={navigate} className="mono">{n}</EnvLink></span>))}
+                      <EnvLink to={objectPath(project, env, `${k}/${n}`)} navigate={navigate} className="mono">{n}</EnvLink></span>))}
                   {bindings.length > 0 && (
                     <span className="muted">binding{bindings.length === 1 ? '' : 's'} <span className="mono">{bindings.join(', ')}</span> in the spec</span>)}
                 </span>
@@ -385,7 +386,7 @@ function UsedBy({ tenant, env, cred, ec, navigate, onChanged }) {
               </td>
             </tr>
             {result && (
-              <tr className="subrow"><td colSpan={3}><DeployResult tenant={tenant} env={env} name={name} res={result} navigate={navigate} /></td></tr>)}
+              <tr className="subrow"><td colSpan={3}><DeployResult project={project} env={env} name={name} res={result} navigate={navigate} /></td></tr>)}
           </tbody>
         </table></div>)}
 
@@ -399,7 +400,7 @@ function UsedBy({ tenant, env, cred, ec, navigate, onChanged }) {
           <tbody>
             {sbs.map((id) => {
               const sb = sbOf(id);
-              const to = sandboxPath(tenant, env, id, 'secrets');
+              const to = sandboxPath(project, env, id, 'secrets');
               return (
                 <tr key={id}>
                   <td><a className="mono" href={to} onClick={go(navigate, to)}>{id}</a></td>
@@ -456,9 +457,9 @@ export async function moveToLatest(env, name, version) {
 
 // DeployResult is what came of moveToLatest: the deployment it made, or
 // why it made none.
-export function DeployResult({ tenant, env, name = '', res, navigate }) {
+export function DeployResult({ project, env, name = '', res, navigate }) {
   if (res.deployment) {
-    const to = envPath(tenant, env, 'deployments', String(res.deployment.number));
+    const to = envPath(project, env, 'deployments', String(res.deployment.number));
     return (
       <span className="ok small">
         <Icon name="check" size={12} /> Deployment <a className="mono" href={to} onClick={go(navigate, to)}>#{res.deployment.number}</a>{' '}
@@ -480,7 +481,7 @@ export function DeployResult({ tenant, env, name = '', res, navigate }) {
 
 // ------------------------------------------------------------------ form --
 
-function HttpSecretEditor({ tenant, env, name, ec, navigate }) {
+function HttpSecretEditor({ project, env, name, ec, navigate }) {
   const [cred, setCred] = useState(null);
   const [err, setErr] = useState('');
   useEffect(() => {
@@ -491,7 +492,7 @@ function HttpSecretEditor({ tenant, env, name, ec, navigate }) {
   }, [env, name]);
   if (name && !cred) return err ? <ErrBox error={err} /> : <p className="empty">Loading…</p>;
   if (cred && cred.type !== 'http') return <ErrBox error={`${name} is a value secret: a secret's kind does not change`} />;
-  return <HttpSecretForm tenant={tenant} env={env} cred={cred} ec={ec} navigate={navigate} />;
+  return <HttpSecretForm project={project} env={env} cred={cred} ec={ec} navigate={navigate} />;
 }
 
 // originOf is an upstream's origin, as the keep rule compares it.
@@ -516,8 +517,11 @@ export function rebinds(f, cred) {
 // origin, CA and token URL stay. Its preflight checks the draft as it
 // stands: a kept field is the latest version's value, which never
 // leaves ferund.
-export function HttpSecretForm({ tenant, env, cred, ec, navigate }) {
-  const [f, setF] = useState(() => (cred ? formOf(cred) : emptyForm()));
+export function HttpSecretForm({ project, env, cred, ec, navigate }) {
+  // A new one takes what a spec's missing secret offers (ADR 0058: its
+  // name, mode and forwarded host, from the builder's link).
+  const [f, setF] = useState(() => (cred ? formOf(cred)
+    : { ...emptyForm(), ...offeredSecret(typeof location !== 'undefined' ? location.search : '') }));
   const [bad, setBad] = useState('');
   const [saving, setSaving] = useState(false);
   const [pre, setPre] = useState(null);
@@ -530,7 +534,7 @@ export function HttpSecretForm({ tenant, env, cred, ec, navigate }) {
   const kept = keptOf(f);
   const rebound = rebinds(f, cred);
   const host = hostOf(f.upstream);
-  const back = editing ? httpSecretPath(tenant, env, cred.name) : secretsPath(tenant, env);
+  const back = editing ? httpSecretPath(project, env, cred.name) : secretsPath(project, env);
   const why = ec.write ? undefined : NEEDS.write;
   const again = rebound && kept.length > 0
     ? `the key goes to another API now: enter ${kept.join(', ')} again` : '';
@@ -581,7 +585,7 @@ export function HttpSecretForm({ tenant, env, cred, ec, navigate }) {
     try {
       const out = await api.putHttpSecret(env, name, body);
       saved = { env, name, version: out.version, created: !editing || out.version !== cred.version };
-      navigate(httpSecretPath(tenant, env, name));
+      navigate(httpSecretPath(project, env, name));
     } catch (e2) {
       setBad(refusal(e2));
     } finally {
@@ -613,7 +617,7 @@ export function HttpSecretForm({ tenant, env, cred, ec, navigate }) {
 
   return (
     <form className="creds" onSubmit={save}>
-      <BackTo tenant={tenant} env={env} navigate={navigate} />
+      <BackTo project={project} env={env} navigate={navigate} />
       <PageHead kind={editing ? 'Edit HTTP secret' : 'New HTTP secret'} title={editing ? cred.name : name || 'New HTTP secret'}
         mono={editing || !!name}
         state={editing ? <span className="badge">version {cred.version} → {cred.version + 1}</span> : null}
@@ -752,7 +756,7 @@ export function HttpSecretForm({ tenant, env, cred, ec, navigate }) {
 // environment env, with their upstream and version, and the way to add
 // and remove one (write on the environment): the whole list is written,
 // and the running pod gets it at once, each at its latest version.
-export function SandboxHttpSecrets({ tenant, env, sandboxId, write, navigate }) {
+export function SandboxHttpSecrets({ project, env, sandboxId, write, navigate }) {
   const [names, setNames] = useState(null);
   const [all, setAll] = useState(null);
   const [err, setErr] = useState('');
@@ -790,7 +794,7 @@ export function SandboxHttpSecrets({ tenant, env, sandboxId, write, navigate }) 
 
   if (!names) return err ? <ErrBox error={err} /> : <p className="empty">Loading…</p>;
   return (
-    <SandboxHttpList tenant={tenant} env={env} names={names} all={all || []} write={write} why={why} err={err} busy={busy}
+    <SandboxHttpList project={project} env={env} names={names} all={all || []} write={write} why={why} err={err} busy={busy}
       pick={pick} setPick={setPick} done={done} navigate={navigate}
       onRemove={(n) => put('rm:' + n, names.filter((x) => x !== n), `${n} taken from the sandbox.`)}
       onAdd={(n) => put('add', [...names, n], `${n} added: the pod reaches it now.`)} />
@@ -798,11 +802,11 @@ export function SandboxHttpSecrets({ tenant, env, sandboxId, write, navigate }) 
 }
 
 // SandboxHttpList is SandboxHttpSecrets' list, its data given.
-export function SandboxHttpList({ tenant, env, names, all, write, why, err = '', busy = '', pick = '', setPick = () => {}, done = '',
+export function SandboxHttpList({ project, env, names, all, write, why, err = '', busy = '', pick = '', setPick = () => {}, done = '',
   navigate, onRemove = () => {}, onAdd = () => {} }) {
   const of = (n) => all.find((c) => c.name === n);
   const free = all.filter((c) => !names.includes(c.name));
-  const list = secretsPath(tenant, env);
+  const list = secretsPath(project, env);
   return (
     <div className="cred-sbx">
       <p className="muted small">The HTTP secrets of its environment this sandbox&apos;s code calls; FeOS adds each key on
@@ -816,7 +820,7 @@ export function SandboxHttpList({ tenant, env, names, all, write, why, err = '',
           <tbody>
             {names.map((n) => {
               const cr = of(n);
-              const to = httpSecretPath(tenant, env, n);
+              const to = httpSecretPath(project, env, n);
               return (
                 <tr key={n}>
                   <td><a className="mono" href={to} onClick={go(navigate, to)}>{n}</a></td>
@@ -845,7 +849,7 @@ export function SandboxHttpList({ tenant, env, names, all, write, why, err = '',
 }
 
 // HttpSecretPicker picks HTTP secrets of env for a new sandbox there.
-export function HttpSecretPicker({ tenant, env, value, onChange, disabled, navigate }) {
+export function HttpSecretPicker({ project, env, value, onChange, disabled, navigate }) {
   const [list, setList] = useState(null);
   useEffect(() => {
     let live = true;
@@ -855,13 +859,13 @@ export function HttpSecretPicker({ tenant, env, value, onChange, disabled, navig
     return () => { live = false; };
   }, [env]);
   if (!env || !list) return null;
-  return <HttpSecretChoice tenant={tenant} env={env} list={list} value={value} onChange={onChange} disabled={disabled} navigate={navigate} />;
+  return <HttpSecretChoice project={project} env={env} list={list} value={value} onChange={onChange} disabled={disabled} navigate={navigate} />;
 }
 
 // HttpSecretChoice is the picker, the environment's HTTP secrets given.
-export function HttpSecretChoice({ tenant, env, list, value, onChange, disabled, navigate }) {
+export function HttpSecretChoice({ project, env, list, value, onChange, disabled, navigate }) {
   const toggle = (n) => onChange(value.includes(n) ? value.filter((x) => x !== n) : [...value, n]);
-  const toNew = newHttpSecretPath(tenant, env);
+  const toNew = newHttpSecretPath(project, env);
   return (
     <fieldset className="sbx-fieldset">
       <legend>HTTP secrets <span className="muted">· optional</span></legend>

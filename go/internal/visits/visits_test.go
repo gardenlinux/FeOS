@@ -35,10 +35,10 @@ func TestNewAndKinds(t *testing.T) {
 		cfg  Config
 		want string
 	}{
-		{Config{}, "tenant"},
-		{Config{Issuer: testIssuer}, "tenant"},
-		{Config{AuthURL: testAuth + "/"}, "tenant,oidc"},
-		{Config{AuthURL: testAuth, Issuer: testIssuer}, "tenant,ferun,oidc"},
+		{Config{}, "project"},
+		{Config{Issuer: testIssuer}, "project"},
+		{Config{AuthURL: testAuth + "/"}, "project,oidc"},
+		{Config{AuthURL: testAuth, Issuer: testIssuer}, "project,ferun,oidc"},
 	} {
 		s, err := New(c.cfg, Deps{Store: st, Sealer: nopSealer{}})
 		if err != nil {
@@ -122,13 +122,13 @@ func TestOpenChallenge(t *testing.T) {
 	f := newFx(t)
 	e, host := f.env("stage", "fecode")
 	sealed, _ := f.challenge(e, host, "/menu?x=1")
-	ch, err := f.s.OpenChallenge(f.ctx, tenantCaller, sealed)
+	ch, err := f.s.OpenChallenge(f.ctx, projectCaller, sealed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ch.Environment.ID != e.ID.String() || ch.Environment.Name != "stage" || ch.Environment.Tenant != testTenant ||
+	if ch.Environment.ID != e.ID.String() || ch.Environment.Name != "stage" || ch.Environment.Project != testProject ||
 		ch.Environment.Labels["fecode.project"] != "p1" || ch.Host != host || ch.Path != "/menu?x=1" || ch.Expired ||
-		ch.Answered || ch.Restart != "https://"+host+"/menu?x=1" || ch.Provider != (ProviderRef{"fecode", "tenant"}) ||
+		ch.Answered || ch.Restart != "https://"+host+"/menu?x=1" || ch.Provider != (ProviderRef{"fecode", "project"}) ||
 		ch.OIDC != nil || ch.ExpiresAt == "" {
 		t.Fatalf("open %+v", ch)
 	}
@@ -143,23 +143,23 @@ func TestOpenChallenge(t *testing.T) {
 		_ = what
 	}
 	// Forged, flipped, oversize, empty.
-	notFound("forged", tenantCaller, "AAAA")
-	notFound("flipped", tenantCaller, sealed[:len(sealed)-2]+"AA")
-	notFound("oversize", tenantCaller, strings.Repeat("A", visit.MaxSealed+1))
-	notFound("empty", tenantCaller, "")
+	notFound("forged", projectCaller, "AAAA")
+	notFound("flipped", projectCaller, sealed[:len(sealed)-2]+"AA")
+	notFound("oversize", projectCaller, strings.Repeat("A", visit.MaxSealed+1))
+	notFound("empty", projectCaller, "")
 	// A host that is not the environment's.
 	other, _ := f.challenge(e, "evil.example", "/")
-	notFound("foreign host", tenantCaller, other)
-	// Callers that may not: not admin, another tenant, ferun-auth for a
-	// tenant provider.
+	notFound("foreign host", projectCaller, other)
+	// Callers that may not: not admin, another project, ferun-auth for a
+	// project provider.
 	notFound("reader", readerCaller, sealed)
-	notFound("foreign tenant", foreignCaller, sealed)
-	notFound("ferun-auth on kind tenant", authCaller, sealed)
-	notFound("no admin func", Caller{Tenant: testTenant}, sealed)
-	// A tenant principal for an environment of kind ferun.
+	notFound("foreign project", foreignCaller, sealed)
+	notFound("ferun-auth on kind project", authCaller, sealed)
+	notFound("no admin func", Caller{Project: testProject}, sealed)
+	// A project principal for an environment of kind ferun.
 	fe, fhost := f.env("ferun-env", "")
 	fs, _ := f.challenge(fe, fhost, "/")
-	notFound("tenant on kind ferun", tenantCaller, fs)
+	notFound("project on kind ferun", projectCaller, fs)
 	if ch, err := f.s.OpenChallenge(f.ctx, authCaller, fs); err != nil || ch.Provider != (ProviderRef{"ferun", "ferun"}) {
 		t.Fatalf("ferun-auth on kind ferun: %+v %v", ch, err)
 	}
@@ -172,9 +172,9 @@ func TestOpenChallenge(t *testing.T) {
 		ch.OIDC.Rule.Domains[0] != "example.com" || ch.Provider.Kind != "oidc" {
 		t.Fatalf("oidc %+v %v", ch, err)
 	}
-	notFound("tenant on kind oidc", tenantCaller, os)
+	notFound("project on kind oidc", projectCaller, os)
 
-	// The environment unpublished, open to anyone, or another tenant's.
+	// The environment unpublished, open to anyone, or another project's.
 	_, err = f.st.SetEnvironmentPublic(f.ctx, oe.ID, false)
 	must(t, err)
 	notFound("unpublished", authCaller, os)
@@ -190,13 +190,13 @@ func TestOpenChallenge(t *testing.T) {
 	late, err := f.keys().SealChallenge(visit.Challenge{ID: id, Env: e.ID.String(), Host: host, Path: "//evil.example/x",
 		Binding: visit.BindingHash(secret), IssuedAt: old, Expires: old + 600})
 	must(t, err)
-	ch, err = f.s.OpenChallenge(f.ctx, tenantCaller, late)
+	ch, err = f.s.OpenChallenge(f.ctx, projectCaller, late)
 	if err != nil || !ch.Expired || ch.Restart != "https://"+host+"/" || ch.Environment.Labels == nil {
 		t.Fatalf("expired %+v %v", ch, err)
 	}
-	_, err = f.s.AcceptChallenge(f.ctx, tenantCaller, Accept{Challenge: late, Subject: "u"})
+	_, err = f.s.AcceptChallenge(f.ctx, projectCaller, Accept{Challenge: late, Subject: "u"})
 	wantAPI(t, err, http.StatusConflict, CodeChallengeExpired, "restart")
-	_, err = f.s.RejectChallenge(f.ctx, tenantCaller, late)
+	_, err = f.s.RejectChallenge(f.ctx, projectCaller, late)
 	wantAPI(t, err, http.StatusConflict, CodeChallengeExpired, "restart")
 }
 
@@ -222,11 +222,11 @@ func TestAcceptChallenge(t *testing.T) {
 		{Challenge: sealed, Subject: "u", EndsAt: "tomorrow"},
 		{Challenge: sealed, Subject: "u", EndsAt: time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)},
 	} {
-		_, err := f.s.AcceptChallenge(f.ctx, tenantCaller, bad)
+		_, err := f.s.AcceptChallenge(f.ctx, projectCaller, bad)
 		wantAPI(t, err, http.StatusBadRequest, CodeInvalidAccept, "")
 	}
 	ends := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
-	a, err := f.s.AcceptChallenge(f.ctx, tenantCaller, Accept{Challenge: sealed, Subject: "u-123",
+	a, err := f.s.AcceptChallenge(f.ctx, projectCaller, Accept{Challenge: sealed, Subject: "u-123",
 		Email: "a@example.com", Name: "Ada", Session: "s-1", EndsAt: ends.Format(time.RFC3339)})
 	if err != nil || !a.Admitted || a.Visit == "" {
 		t.Fatalf("accept %+v %v", a, err)
@@ -239,7 +239,7 @@ func TestAcceptChallenge(t *testing.T) {
 	}
 	v := f.row(uuid.MustParse(a.Visit))
 	if v.Subject != "u-123" || v.Email != "a@example.com" || v.Name != "Ada" || v.Session != "s-1" ||
-		!v.EndsAt.Equal(ends) || v.Provider != "fecode" || v.ProviderKind != "tenant" || v.Host != host ||
+		!v.EndsAt.Equal(ends) || v.Provider != "fecode" || v.ProviderKind != "project" || v.Host != host ||
 		v.Binding != "" || !v.Open() {
 		t.Fatalf("visit %+v", v)
 	}
@@ -250,24 +250,24 @@ func TestAcceptChallenge(t *testing.T) {
 		t.Fatalf("answered by %q", by)
 	}
 	// Once: a second accept or a reject is a 409, and open says answered.
-	_, err = f.s.AcceptChallenge(f.ctx, tenantCaller, Accept{Challenge: sealed, Subject: "u-123"})
+	_, err = f.s.AcceptChallenge(f.ctx, projectCaller, Accept{Challenge: sealed, Subject: "u-123"})
 	wantAPI(t, err, http.StatusConflict, CodeChallengeAnswered, "")
-	_, err = f.s.RejectChallenge(f.ctx, tenantCaller, sealed)
+	_, err = f.s.RejectChallenge(f.ctx, projectCaller, sealed)
 	wantAPI(t, err, http.StatusConflict, CodeChallengeAnswered, "")
-	if ch, err := f.s.OpenChallenge(f.ctx, tenantCaller, sealed); err != nil || !ch.Answered {
+	if ch, err := f.s.OpenChallenge(f.ctx, projectCaller, sealed); err != nil || !ch.Answered {
 		t.Fatalf("answered %+v %v", ch, err)
 	}
 
 	// The end is at most 12 hours away; without one, 12 hours.
 	s2, _ := f.challenge(e, host, "/")
-	a, err = f.s.AcceptChallenge(f.ctx, tenantCaller, Accept{Challenge: s2, Subject: "u",
+	a, err = f.s.AcceptChallenge(f.ctx, projectCaller, Accept{Challenge: s2, Subject: "u",
 		EndsAt: time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339)})
 	must(t, err)
 	if v := f.row(uuid.MustParse(a.Visit)); v.EndsAt.Sub(v.CreatedAt) != visit.MaxVisit {
 		t.Fatalf("capped end %v", v.EndsAt.Sub(v.CreatedAt))
 	}
 	s3, _ := f.challenge(e, host, "/")
-	a, err = f.s.AcceptChallenge(f.ctx, tenantCaller, Accept{Challenge: s3, Subject: "u"})
+	a, err = f.s.AcceptChallenge(f.ctx, projectCaller, Accept{Challenge: s3, Subject: "u"})
 	must(t, err)
 	if v := f.row(uuid.MustParse(a.Visit)); v.EndsAt.Sub(v.CreatedAt) != visit.MaxVisit {
 		t.Fatalf("no end %v", v.EndsAt.Sub(v.CreatedAt))
@@ -275,7 +275,7 @@ func TestAcceptChallenge(t *testing.T) {
 
 	// A reject: a rejected code, no visit.
 	s4, _ := f.challenge(e, host, "/x")
-	a, err = f.s.RejectChallenge(f.ctx, tenantCaller, s4)
+	a, err = f.s.RejectChallenge(f.ctx, projectCaller, s4)
 	if err != nil || a.Admitted || a.Visit != "" {
 		t.Fatalf("reject %+v %v", a, err)
 	}
@@ -303,7 +303,7 @@ func TestAcceptOnce(t *testing.T) {
 		errs := make([]error, 2)
 		for i, f := range []*fx{a, b} {
 			wg.Go(func() {
-				_, errs[i] = f.s.AcceptChallenge(f.ctx, tenantCaller, Accept{Challenge: sealed, Subject: "u"})
+				_, errs[i] = f.s.AcceptChallenge(f.ctx, projectCaller, Accept{Challenge: sealed, Subject: "u"})
 			})
 		}
 		wg.Wait()
@@ -335,7 +335,7 @@ func TestAcceptFerun(t *testing.T) {
 	if code, err := f.keys().VerifyCode(f.codeOf(a, host)); err != nil || code.Outcome != visit.OutcomeRejected {
 		t.Fatalf("no grant's code %+v %v", code, err)
 	}
-	_, err = f.st.PutGrant(f.ctx, store.Grant{TenantID: testTenant, PersonID: p.ID, EnvironmentID: e.ID, Role: "read"})
+	_, err = f.st.PutGrant(f.ctx, store.Grant{ProjectID: testProject, PersonID: p.ID, EnvironmentID: e.ID, Role: "read"})
 	must(t, err)
 	s2, _ := f.challenge(e, host, "/")
 	if a, err := f.s.AcceptChallenge(f.ctx, authCaller, Accept{Challenge: s2, Subject: "nobody"}); err != nil ||
@@ -360,7 +360,7 @@ func TestAcceptFerun(t *testing.T) {
 		t.Fatalf("after the grant went %+v", r)
 	}
 	// A disabled person is refused at the accept.
-	_, err = f.st.PutGrant(f.ctx, store.Grant{TenantID: testTenant, PersonID: p.ID, Role: "admin"})
+	_, err = f.st.PutGrant(f.ctx, store.Grant{ProjectID: testProject, PersonID: p.ID, Role: "admin"})
 	must(t, err)
 	_, err = f.st.SetPersonDisabled(f.ctx, p.ID, true)
 	must(t, err)
@@ -379,7 +379,7 @@ func TestRedeem(t *testing.T) {
 	f := newFx(t)
 	e, host := f.env("stage", "fecode")
 	sealed, chSecret := f.challenge(e, host, "/menu?x=1")
-	a, err := f.s.AcceptChallenge(f.ctx, tenantCaller, Accept{Challenge: sealed, Subject: "u-1", Email: "a@example.com"})
+	a, err := f.s.AcceptChallenge(f.ctx, projectCaller, Accept{Challenge: sealed, Subject: "u-1", Email: "a@example.com"})
 	must(t, err)
 	code := f.codeOf(a, host)
 	vs1, _ := visit.NewBindingSecret()
@@ -448,7 +448,7 @@ func TestRedeem(t *testing.T) {
 
 	// A code past its end: expired.
 	s2, cs2 := f.challenge(e, host, "/")
-	a2, err := f.s.AcceptChallenge(f.ctx, tenantCaller, Accept{Challenge: s2, Subject: "u"})
+	a2, err := f.s.AcceptChallenge(f.ctx, projectCaller, Accept{Challenge: s2, Subject: "u"})
 	must(t, err)
 	f.exec("UPDATE visit_answers SET code_expires_at = now() - interval '1 second' WHERE visit_id = $1", a2.Visit)
 	if r := redeem(f.codeOf(a2, host), cs2, visit.BindingHash(vs1), host); r.Outcome != wire.OutcomeRefused ||
@@ -457,14 +457,14 @@ func TestRedeem(t *testing.T) {
 	}
 	// A rejected code: refused.
 	s3, cs3 := f.challenge(e, host, "/")
-	a3, err := f.s.RejectChallenge(f.ctx, tenantCaller, s3)
+	a3, err := f.s.RejectChallenge(f.ctx, projectCaller, s3)
 	must(t, err)
 	if r := redeem(f.codeOf(a3, host), cs3, visit.BindingHash(vs1), host); r.Outcome != wire.OutcomeRefused {
 		t.Fatalf("rejected code %+v", r)
 	}
 	// The environment unpublished before the redeem: ended.
 	s4, cs4 := f.challenge(e, host, "/")
-	a4, err := f.s.AcceptChallenge(f.ctx, tenantCaller, Accept{Challenge: s4, Subject: "u"})
+	a4, err := f.s.AcceptChallenge(f.ctx, projectCaller, Accept{Challenge: s4, Subject: "u"})
 	must(t, err)
 	_, _, err = f.st.SetEnvironmentAccess(f.ctx, e.ID, model.AccessVisitors, "")
 	must(t, err)
@@ -477,7 +477,7 @@ func TestRedeem(t *testing.T) {
 func TestRenew(t *testing.T) {
 	f := newFx(t)
 	e, host := f.env("stage", "fecode")
-	tok, secret, vid := f.visitIn(e, host, tenantCaller, "u-1")
+	tok, secret, vid := f.visitIn(e, host, projectCaller, "u-1")
 	before := f.row(vid)
 
 	// A wrong or malformed secret: no visit in this cookie, the row as it
@@ -571,7 +571,7 @@ func TestRenew(t *testing.T) {
 func TestRenewNoAnswer(t *testing.T) {
 	f := newFx(t)
 	e, host := f.env("stage", "fecode")
-	tok, secret, vid := f.visitIn(e, host, tenantCaller, "u-1")
+	tok, secret, vid := f.visitIn(e, host, projectCaller, "u-1")
 	answers := map[string]func(w http.ResponseWriter){
 		"500": func(w http.ResponseWriter) { w.WriteHeader(500); _, _ = w.Write([]byte(`{"admitted": false}`)) },
 		"404": func(w http.ResponseWriter) { w.WriteHeader(404); _, _ = w.Write([]byte(`{"admitted": false}`)) },
@@ -614,7 +614,7 @@ func TestRenewNoAnswer(t *testing.T) {
 func TestRenewOneAsk(t *testing.T) {
 	f := newFx(t)
 	e, host := f.env("stage", "fecode")
-	tok, secret, vid := f.visitIn(e, host, tenantCaller, "u-1")
+	tok, secret, vid := f.visitIn(e, host, projectCaller, "u-1")
 	gate := make(chan struct{})
 	f.prov.mu.Lock()
 	f.prov.gate = gate
@@ -658,7 +658,7 @@ func TestRenewOneAsk(t *testing.T) {
 func TestRenewNoAfterIngressGaveUp(t *testing.T) {
 	f := newFx(t)
 	e, host := f.env("stage", "fecode")
-	tok, secret, vid := f.visitIn(e, host, tenantCaller, "u-1")
+	tok, secret, vid := f.visitIn(e, host, projectCaller, "u-1")
 	gate := make(chan struct{})
 	f.prov.mu.Lock()
 	f.prov.gate = gate
@@ -690,7 +690,7 @@ func TestRenewNoAfterIngressGaveUp(t *testing.T) {
 func TestRenewEnds(t *testing.T) {
 	f := newFx(t)
 	e, host := f.env("stage", "fecode")
-	tok, secret, vid := f.visitIn(e, host, tenantCaller, "u-1")
+	tok, secret, vid := f.visitIn(e, host, projectCaller, "u-1")
 	// Unpublished meanwhile (by a release that does not end visits).
 	f.exec("UPDATE environments SET public = false WHERE id = $1", e.ID)
 	if r := f.renew(tok, secret); r.Outcome != wire.OutcomeEnded || r.Reason != model.VisitUnpublished {
@@ -704,13 +704,13 @@ func TestRenewEnds(t *testing.T) {
 		t.Fatalf("an ended visit %+v", r)
 	}
 	// Its time.
-	tok, secret, vid = f.visitIn(e, host, tenantCaller, "u-2")
+	tok, secret, vid = f.visitIn(e, host, projectCaller, "u-2")
 	f.exec("UPDATE visits SET ends_at = now() - interval '1 second' WHERE id = $1", vid)
 	if r := f.renew(tok, secret); r.Outcome != wire.OutcomeEnded || r.Reason != model.VisitExpired {
 		t.Fatalf("expired %+v", r)
 	}
 	// Another provider.
-	tok, secret, _ = f.visitIn(e, host, tenantCaller, "u-3")
+	tok, secret, _ = f.visitIn(e, host, projectCaller, "u-3")
 	f.exec("UPDATE environments SET access_provider = NULL WHERE id = $1", e.ID)
 	if r := f.renew(tok, secret); r.Outcome != wire.OutcomeEnded || r.Reason != model.VisitProviderChanged {
 		t.Fatalf("provider changed %+v", r)
@@ -734,7 +734,7 @@ func TestRenewOIDC(t *testing.T) {
 		t.Fatalf("oidc %+v %v", r, err)
 	}
 	// Its session's back-channel logout ends it.
-	if n, err := f.s.EndBySession(f.ctx, EndSession{Tenant: testTenant, Provider: "sso", Session: "s-1"}); err != nil ||
+	if n, err := f.s.EndBySession(f.ctx, EndSession{Project: testProject, Provider: "sso", Session: "s-1"}); err != nil ||
 		n != 1 {
 		t.Fatalf("end by session %d %v", n, err)
 	}
@@ -746,7 +746,7 @@ func TestRenewOIDC(t *testing.T) {
 func TestEnd(t *testing.T) {
 	f := newFx(t)
 	e, host := f.env("stage", "fecode")
-	tok, secret, vid := f.visitIn(e, host, tenantCaller, "u-1")
+	tok, secret, vid := f.visitIn(e, host, projectCaller, "u-1")
 	other, _ := visit.NewBindingSecret()
 	for _, s := range []string{other, "", "bad"} {
 		if _, err := f.s.End(f.ctx, wire.EndVisitRequest{Token: tok, Secret: s}); err != nil {
@@ -775,10 +775,10 @@ func TestEnd(t *testing.T) {
 func TestGetVisit(t *testing.T) {
 	f := newFx(t)
 	e, host := f.env("stage", "fecode")
-	_, _, vid := f.visitIn(e, host, tenantCaller, "u-1")
-	v, err := f.s.GetVisit(f.ctx, tenantCaller, vid.String())
+	_, _, vid := f.visitIn(e, host, projectCaller, "u-1")
+	v, err := f.s.GetVisit(f.ctx, projectCaller, vid.String())
 	if err != nil || v.ID != vid.String() || v.Environment.Name != "stage" || v.Host != host || v.Subject != "u-1" ||
-		v.Session != "s-1" || v.Provider != (ProviderRef{"fecode", "tenant"}) || v.EndedAt != "" || v.EndReason != "" ||
+		v.Session != "s-1" || v.Provider != (ProviderRef{"fecode", "project"}) || v.EndedAt != "" || v.EndReason != "" ||
 		v.CreatedAt == "" || v.EndsAt == "" {
 		t.Fatalf("visit %+v %v", v, err)
 	}
@@ -787,12 +787,12 @@ func TestGetVisit(t *testing.T) {
 		wantAPI(t, err, http.StatusNotFound, "", "no such visit")
 	}
 	for _, id := range []string{"nope", uuid.NewString()} {
-		_, err := f.s.GetVisit(f.ctx, tenantCaller, id)
+		_, err := f.s.GetVisit(f.ctx, projectCaller, id)
 		wantAPI(t, err, http.StatusNotFound, "", "no such visit")
 	}
 	_, err = f.st.EndVisit(f.ctx, vid, model.VisitSignedOut)
 	must(t, err)
-	if v, err := f.s.GetVisit(f.ctx, tenantCaller, vid.String()); err != nil || v.EndReason != "signed_out" ||
+	if v, err := f.s.GetVisit(f.ctx, projectCaller, vid.String()); err != nil || v.EndReason != "signed_out" ||
 		v.EndedAt == "" {
 		t.Fatalf("ended %+v %v", v, err)
 	}
@@ -805,22 +805,22 @@ func TestEndBySession(t *testing.T) {
 	oe, ohost := f.env("oidc-env", "sso")
 	p, err := f.st.UpsertPerson(f.ctx, testIssuer, "ada", "", "")
 	must(t, err)
-	_, err = f.st.PutGrant(f.ctx, store.Grant{TenantID: testTenant, PersonID: p.ID, Role: "read"})
+	_, err = f.st.PutGrant(f.ctx, store.Grant{ProjectID: testProject, PersonID: p.ID, Role: "read"})
 	must(t, err)
 	_, _, fv := f.visitIn(fe, fhost, authCaller, "ada")
 	_, _, ov := f.visitIn(oe, ohost, authCaller, "u")
 	for _, bad := range []EndSession{
 		{Provider: "ferun"},
 		{Session: "s-1"},
-		{Tenant: testTenant, Provider: "ferun", Session: "s-1"},
+		{Project: testProject, Provider: "ferun", Session: "s-1"},
 		{Provider: "sso", Session: "s-1"},
 	} {
 		_, err := f.s.EndBySession(f.ctx, bad)
 		wantAPI(t, err, http.StatusBadRequest, CodeInvalidRequest, "")
 	}
 	for _, nf := range []EndSession{
-		{Tenant: testTenant, Provider: "fecode", Session: "s-1"},
-		{Tenant: testTenant, Provider: "nope", Session: "s-1"},
+		{Project: testProject, Provider: "fecode", Session: "s-1"},
+		{Project: testProject, Provider: "nope", Session: "s-1"},
 	} {
 		_, err := f.s.EndBySession(f.ctx, nf)
 		wantAPI(t, err, http.StatusNotFound, "", "no such provider")
@@ -831,7 +831,7 @@ func TestEndBySession(t *testing.T) {
 	if f.row(fv).EndReason != model.VisitBackchannelLogout || !f.row(ov).Open() {
 		t.Fatal("the wrong visits ended")
 	}
-	if n, err := f.s.EndBySession(f.ctx, EndSession{Tenant: testTenant, Provider: "sso", Session: "s-1"}); err != nil ||
+	if n, err := f.s.EndBySession(f.ctx, EndSession{Project: testProject, Provider: "sso", Session: "s-1"}); err != nil ||
 		n != 1 || f.row(ov).EndReason != model.VisitBackchannelLogout {
 		t.Fatalf("oidc %d %v", n, err)
 	}
@@ -840,7 +840,7 @@ func TestEndBySession(t *testing.T) {
 func TestSweep(t *testing.T) {
 	f := newFx(t)
 	e, host := f.env("stage", "fecode")
-	_, _, vid := f.visitIn(e, host, tenantCaller, "u-1")
+	_, _, vid := f.visitIn(e, host, projectCaller, "u-1")
 	f.exec("UPDATE visits SET ends_at = now() - interval '1 minute' WHERE id = $1", vid)
 	must(t, f.s.Loops()[0].Run(f.ctx))
 	if v := f.row(vid); v.EndReason != model.VisitExpired {

@@ -52,7 +52,7 @@ func TestPauseResume(t *testing.T) {
 		t.Fatalf("after the pause %+v", row)
 	}
 	podState(t, n1, sb.id, podv1.PodState_POD_STATE_SUSPENDED, 5*time.Second)
-	if r := c.call(b, "POST", sb.path("/resume"), tenantAuth, ""); r.code != 200 || !strings.Contains(r.body, `"clientState":"paused"`) {
+	if r := c.call(b, "POST", sb.path("/resume"), projectAuth, ""); r.code != 200 || !strings.Contains(r.body, `"clientState":"paused"`) {
 		t.Fatalf("resume: %d %s", r.code, r.body)
 	}
 	if row := c.row(sb.id); row.ClientState != model.StateRunning || row.Op != "" {

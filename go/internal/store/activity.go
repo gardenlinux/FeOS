@@ -33,7 +33,7 @@ type ActivityRow struct {
 	SandboxID       podid.ID  // the attributed sandbox; "": none
 	PodID           podid.ID  // node records: the pod the record names, as sent
 	ForeignPod      bool      // a node record about a pod not placed on that node
-	TenantID        string
+	ProjectID       string
 	Node            string
 	StartID         uuid.UUID // node records: the start of feosd
 	Seq             int64     // node events: the sequence number; 0 = none
@@ -54,7 +54,7 @@ type ActivityRow struct {
 	Detail          json.RawMessage // a JSON object; nil stores {}
 }
 
-const activityInsertCols = `ts_ns, sandbox_id, pod_id, foreign_pod, tenant_id, node, start_id, seq, instance_id, source, kind,
+const activityInsertCols = `ts_ns, sandbox_id, pod_id, foreign_pod, project_id, node, start_id, seq, instance_id, source, kind,
 	category, request_id, span_id, parent_span_id, name, tool, params, exit_code, duration_ns, output, output_truncated, detail`
 
 const activityCols = "day, id, " + activityInsertCols
@@ -130,7 +130,7 @@ func (s *Store) InsertActivity(ctx context.Context, rows ...ActivityRow) error {
 			sandboxID, podID          = make([]*string, n), make([]*string, n)
 			startID                   = make([]pgtype.UUID, n)
 			foreignPod, truncated     = make([]bool, n), make([]bool, n)
-			tenantID, node, instance  = make([]string, n), make([]string, n), make([]string, n)
+			projectID, node, instance = make([]string, n), make([]string, n), make([]string, n)
 			source, kind, category    = make([]string, n), make([]string, n), make([]string, n)
 			requestID, spanID, parent = make([]string, n), make([]string, n), make([]string, n)
 			name, tool, output        = make([]string, n), make([]string, n), make([]string, n)
@@ -142,7 +142,7 @@ func (s *Store) InsertActivity(ctx context.Context, rows ...ActivityRow) error {
 			tsNs[i], seq[i] = r.TsNs, seqOrNull(r.Seq)
 			sandboxID[i], podID[i], startID[i] = idOrNull(r.SandboxID), idOrNull(r.PodID), uuidOrNull(r.StartID)
 			foreignPod[i], truncated[i] = r.ForeignPod, r.OutputTruncated
-			tenantID[i], node[i], instance[i] = r.TenantID, r.Node, r.InstanceID
+			projectID[i], node[i], instance[i] = r.ProjectID, r.Node, r.InstanceID
 			source[i], kind[i], category[i] = r.Source, r.Kind, r.Category
 			requestID[i], spanID[i], parent[i] = r.RequestID, r.SpanID, r.ParentSpanID
 			name[i], tool[i], output[i] = r.Name, r.Tool, r.Output
@@ -150,7 +150,7 @@ func (s *Store) InsertActivity(ctx context.Context, rows ...ActivityRow) error {
 			exitCode[i], durationNs[i] = r.ExitCode, r.DurationNs
 			detail[i] = jsonObject(r.Detail)
 		}
-		if _, err := s.q.Exec(ctx, insertActivitySQL, tsNs, sandboxID, podID, foreignPod, tenantID, node, startID,
+		if _, err := s.q.Exec(ctx, insertActivitySQL, tsNs, sandboxID, podID, foreignPod, projectID, node, startID,
 			seq, instance, source, kind, category, requestID, spanID, parent, name, tool, params, exitCode,
 			durationNs, output, truncated, detail); err != nil {
 			return fmt.Errorf("insert activity: %w", err)
@@ -165,7 +165,7 @@ func scanActivity(row pgx.Row) (ActivityRow, error) {
 	var startID *uuid.UUID
 	var seq *int64
 	var params, detail []byte
-	if err := row.Scan(&r.Day, &r.ID, &r.TsNs, &sandboxID, &podID, &r.ForeignPod, &r.TenantID, &r.Node, &startID, &seq,
+	if err := row.Scan(&r.Day, &r.ID, &r.TsNs, &sandboxID, &podID, &r.ForeignPod, &r.ProjectID, &r.Node, &startID, &seq,
 		&r.InstanceID, &r.Source, &r.Kind, &r.Category, &r.RequestID, &r.SpanID, &r.ParentSpanID, &r.Name, &r.Tool,
 		&params, &r.ExitCode, &r.DurationNs, &r.Output, &r.OutputTruncated, &detail); err != nil {
 		return ActivityRow{}, err

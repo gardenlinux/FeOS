@@ -74,7 +74,7 @@ func TestSpanGroups(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := SpanQuery{Tenant: "acme", Environment: "e", Source: "egress", ObjectKind: "service"}
+	q := SpanQuery{Project: "acme", Environment: "e", Source: "egress", ObjectKind: "service"}
 	groups, more, err := c.SpanGroups(context.Background(), "ferun-traces-*", q, []string{"span_name", "service_name"}, 50)
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +83,7 @@ func TestSpanGroups(t *testing.T) {
 		`"terms":{"field":"service_name","size":50}}},"terms":{"field":"span_name","size":50}}}` {
 		t.Errorf("aggs %s", aggs)
 	}
-	if asked["max_hits"] != float64(0) || asked["query"] != `tenant:"acme" AND environment:"e" AND kind:"service" AND source:"egress"` {
+	if asked["max_hits"] != float64(0) || asked["query"] != `tenant:"acme" AND environment:"e" AND kind:"service" AND source:"egress"` { // KEEP-TENANT: Quickwit's stored name
 		t.Errorf("asked %v", asked)
 	}
 	if got := fmt.Sprint(groups); !more || got != "[{[GET erp api] 4 1795086861481846016} {[GET erp sbx1] 1 1795086855000000000} "+

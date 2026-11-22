@@ -1029,7 +1029,7 @@ fn file_offset(regions: &[RegionMapping], addr: u64) -> Option<u64> {
 /// and it was captured at handshake time — possibly minutes and one
 /// destroyed pod ago. A recycled pid would make this signal land on
 /// whatever process now holds the number, which on a hypervisor node is
-/// another tenant's VMM. The pidfd is pinned to the process that opened
+/// another project's VMM. The pidfd is pinned to the process that opened
 /// the socket; if that process is gone the send fails and nothing else
 /// is harmed.
 fn fatal(shared: &Arc<Shared>, why: &str) {

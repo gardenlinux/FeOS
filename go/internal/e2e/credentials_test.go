@@ -62,7 +62,7 @@ func TestCredentials(t *testing.T) {
 	}
 	row := c.row(sb.id)
 	kind, name, set := row.Workload()
-	wantID, wantSubject := pki.PodIdentity(trustDomain, tenant, row.EnvironmentID, sb.id, kind, name, set)
+	wantID, wantSubject := pki.PodIdentity(trustDomain, project, row.EnvironmentID, sb.id, kind, name, set)
 	if uris := creds.Leaf.URIs; len(uris) != 1 || uris[0].String() != wantID || kind != pki.WorkloadSandbox {
 		t.Errorf("the pod's identity %v, want %s (%s)", uris, wantID, kind)
 	}

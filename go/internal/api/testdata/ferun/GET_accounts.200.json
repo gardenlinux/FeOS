@@ -1,0 +1,19 @@
+{
+  "method": "GET",
+  "path": "/api/v1/accounts",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "note": "the accounts the person may put projects on or read; default with explicit false while it is open to everyone (here it is not)",
+  "response": {
+    "accounts": [
+      {
+        "name": "cc-4711",
+        "title": "Team X",
+        "role": "member",
+        "explicit": true,
+        "closed": false
+      }
+    ]
+  }
+}

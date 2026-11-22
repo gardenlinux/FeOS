@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  ENV_LENSES, ENV_TABS, ENV_TAB_LABELS, LENS_PAGES, OBJECT_TABS, OBJECT_TAB_LABELS, PAGE_LABELS, TENANT_VIEWS, canonicalPath,
+  ENV_LENSES, ENV_TABS, ENV_TAB_LABELS, LENS_PAGES, OBJECT_TABS, OBJECT_TAB_LABELS, PAGE_LABELS, PROJECT_VIEWS, canonicalPath,
   chosenEnv, envPath, httpSecretPath, jobPath, lensOf, newHttpSecretPath, newSandboxPath, objectPath, objectTabs, parsePath,
   pickEnvPath, pickObjectPath, sandboxPath, secretsPath, switchEnvPath,
 } from './routes.js';
@@ -12,44 +12,44 @@ import { ADMIN_KEY, readItem, writeItem } from './storage.js';
 
 describe('parsePath', () => {
   it('maps the routes', () => {
-    expect(parsePath('/')).toEqual({ view: 'tenants' });
-    expect(parsePath('/tenants')).toEqual({ view: 'tenants' });
-    expect(parsePath('/tenants/acme')).toEqual({ view: 'overview', tenant: 'acme' });
-    expect(parsePath('/tenants/acme/tools')).toEqual({ view: 'tools', tenant: 'acme' });
+    expect(parsePath('/')).toEqual({ view: 'projects' });
+    expect(parsePath('/projects')).toEqual({ view: 'projects' });
+    expect(parsePath('/projects/acme')).toEqual({ view: 'overview', project: 'acme' });
+    expect(parsePath('/projects/acme/tools')).toEqual({ view: 'tools', project: 'acme' });
     // A sandbox's and a job's old places lead to their environment.
-    expect(parsePath('/tenants/acme/sandboxes')).toEqual({ view: 'moved', tenant: 'acme', what: 'sandbox', sel: '', tab: '', env: '' });
-    expect(parsePath('/tenants/acme/sandboxes/h3k9v2m7qpx/network'))
-      .toEqual({ view: 'moved', tenant: 'acme', what: 'sandbox', sel: 'h3k9v2m7qpx', tab: 'network', env: '' });
-    expect(parsePath('/tenants/acme/sandboxes/new?environment=kino--dev'))
-      .toEqual({ view: 'moved', tenant: 'acme', what: 'sandbox', sel: 'new', tab: '', env: 'kino--dev' });
-    expect(parsePath('/tenants/acme/jobs/a3ze6kkjvfx')).toEqual({ view: 'moved', tenant: 'acme', what: 'job', sel: 'a3ze6kkjvfx', tab: '', env: '' });
+    expect(parsePath('/projects/acme/sandboxes')).toEqual({ view: 'moved', project: 'acme', what: 'sandbox', sel: '', tab: '', env: '' });
+    expect(parsePath('/projects/acme/sandboxes/h3k9v2m7qpx/network'))
+      .toEqual({ view: 'moved', project: 'acme', what: 'sandbox', sel: 'h3k9v2m7qpx', tab: 'network', env: '' });
+    expect(parsePath('/projects/acme/sandboxes/new?environment=kino--dev'))
+      .toEqual({ view: 'moved', project: 'acme', what: 'sandbox', sel: 'new', tab: '', env: 'kino--dev' });
+    expect(parsePath('/projects/acme/jobs/a3ze6kkjvfx')).toEqual({ view: 'moved', project: 'acme', what: 'job', sel: 'a3ze6kkjvfx', tab: '', env: '' });
     expect(parsePath('/nodes')).toEqual({ view: 'nodes' });
     expect(parsePath('/nodes/node-a')).toEqual({ view: 'node', node: 'node-a', tab: 'overview' });
     expect(parsePath('/nodes/node-a/certs')).toEqual({ view: 'node', node: 'node-a', tab: 'certs' });
     expect(parsePath('/join-tokens')).toEqual({ view: 'joinTokens' });
     expect(parsePath('/instances')).toEqual({ view: 'instances' });
     expect(parsePath('/invite/abc_DEF-1')).toEqual({ view: 'invite', token: 'abc_DEF-1' });
-    expect(parsePath('/tenants/acme/members')).toEqual({ view: 'members', tenant: 'acme' });
-    expect(parsePath('/tenants/acme/tokens')).toEqual({ view: 'tokens', tenant: 'acme' });
-    // The HTTP secrets are an environment's (ADR 0055): the tenant has no
+    expect(parsePath('/projects/acme/members')).toEqual({ view: 'members', project: 'acme' });
+    expect(parsePath('/projects/acme/tokens')).toEqual({ view: 'tokens', project: 'acme' });
+    // The HTTP secrets are an environment's (ADR 0055): the project has no
     // page of them, nor of the credentials before.
-    expect(parsePath('/tenants/acme/credentials/github')).toEqual({ view: 'overview', tenant: 'acme' });
+    expect(parsePath('/projects/acme/credentials/github')).toEqual({ view: 'overview', project: 'acme' });
     // The access providers (ADR 0054).
-    expect(parsePath('/tenants/acme/providers')).toEqual({ view: 'providers', tenant: 'acme', sel: '', tab: '' });
-    expect(parsePath('/tenants/acme/providers/fecode')).toEqual({ view: 'providers', tenant: 'acme', sel: 'fecode', tab: '' });
-    expect(parsePath('/tenants/acme/providers/sso/edit')).toEqual({ view: 'providers', tenant: 'acme', sel: 'sso', tab: 'edit' });
-    expect(parsePath('/tenants/acme/providers/sso/other')).toEqual({ view: 'providers', tenant: 'acme', sel: 'sso', tab: '' });
-    expect(parsePath('/tenants/acme/new-provider')).toEqual({ view: 'newProvider', tenant: 'acme' });
-    expect(parsePath('/no/such/page')).toEqual({ view: 'tenants' });
+    expect(parsePath('/projects/acme/providers')).toEqual({ view: 'providers', project: 'acme', sel: '', tab: '' });
+    expect(parsePath('/projects/acme/providers/fecode')).toEqual({ view: 'providers', project: 'acme', sel: 'fecode', tab: '' });
+    expect(parsePath('/projects/acme/providers/sso/edit')).toEqual({ view: 'providers', project: 'acme', sel: 'sso', tab: 'edit' });
+    expect(parsePath('/projects/acme/providers/sso/other')).toEqual({ view: 'providers', project: 'acme', sel: 'sso', tab: '' });
+    expect(parsePath('/projects/acme/new-provider')).toEqual({ view: 'newProvider', project: 'acme' });
+    expect(parsePath('/no/such/page')).toEqual({ view: 'projects' });
   });
 
   it('decodes segments and survives a bad escape', () => {
-    expect(parsePath('/tenants/a%2Eb').tenant).toBe('a.b');
-    expect(parsePath('/tenants/%E0%A4%A').tenant).toBe('%E0%A4%A');
+    expect(parsePath('/projects/a%2Eb').project).toBe('a.b');
+    expect(parsePath('/projects/%E0%A4%A').project).toBe('%E0%A4%A');
   });
 
-  it('the tenant views are those that act in a tenant', () => {
-    expect([...TENANT_VIEWS].sort()).toEqual([
+  it('the project views are those that act in a project', () => {
+    expect([...PROJECT_VIEWS].sort()).toEqual([
       'environments',
       'members',
       'moved',
@@ -62,61 +62,68 @@ describe('parsePath', () => {
 });
 
 describe('the environments routes', () => {
-  const env = (rest) => ({ view: 'environments', tenant: 'fecode', env: '', tab: 'overview', item: '', replica: null, search: '', ...rest });
+  const env = (rest) => ({ view: 'environments', project: 'fecode', env: '', tab: 'overview', item: '', replica: null, search: '', ...rest });
 
   it('maps the list, an environment and its tabs', () => {
-    expect(parsePath('/tenants/fecode/environments')).toEqual(env({}));
-    expect(parsePath('/tenants/fecode/environments/')).toEqual(env({}));
-    expect(parsePath('/tenants/fecode/environments/expensa-stage')).toEqual(env({ env: 'expensa-stage' }));
-    expect(parsePath('/tenants/fecode/environments/expensa-stage/overview')).toEqual(env({ env: 'expensa-stage' }));
-    expect(parsePath('/tenants/fecode/environments/expensa-stage/deployments'))
+    expect(parsePath('/projects/fecode/environments')).toEqual(env({}));
+    expect(parsePath('/projects/fecode/environments/')).toEqual(env({}));
+    expect(parsePath('/projects/fecode/environments/expensa-stage')).toEqual(env({ env: 'expensa-stage' }));
+    expect(parsePath('/projects/fecode/environments/expensa-stage/overview')).toEqual(env({ env: 'expensa-stage' }));
+    expect(parsePath('/projects/fecode/environments/expensa-stage/deployments'))
       .toEqual(env({ env: 'expensa-stage', tab: 'deployments' }));
-    expect(parsePath('/tenants/fecode/environments/expensa-stage/incidents'))
+    expect(parsePath('/projects/fecode/environments/expensa-stage/incidents'))
       .toEqual(env({ env: 'expensa-stage', tab: 'incidents' }));
-    expect(parsePath('/tenants/fecode/environments/expensa-stage/logs'))
+    expect(parsePath('/projects/fecode/environments/expensa-stage/logs'))
       .toEqual(env({ env: 'expensa-stage', tab: 'logs' }));
   });
 
   it("maps a tab's item: a deployment, an incident, an object's logs with its replica", () => {
-    expect(parsePath('/tenants/fecode/environments/expensa-stage/deployments/7'))
+    expect(parsePath('/projects/fecode/environments/expensa-stage/deployments/7'))
       .toEqual(env({ env: 'expensa-stage', tab: 'deployments', item: '7' }));
     // The tab's earlier name (ADR 0018, "The deployments' word") redirects.
-    expect(parsePath('/tenants/fecode/environments/expensa-stage/releases/7'))
+    expect(parsePath('/projects/fecode/environments/expensa-stage/releases/7'))
       .toEqual(env({ env: 'expensa-stage', tab: 'deployments', item: '7' }));
-    expect(canonicalPath('/tenants/fecode/environments/expensa-stage/releases/7'))
-      .toBe('/tenants/fecode/environments/expensa-stage/deployments/7');
-    expect(canonicalPath('/tenants/fecode/environments/expensa-stage/releases'))
-      .toBe('/tenants/fecode/environments/expensa-stage/deployments');
-    expect(canonicalPath('/tenants/releases/environments')).toBe('/tenants/releases/environments');
-    expect(parsePath('/tenants/fecode/environments/expensa-stage/incidents/12'))
+    expect(canonicalPath('/projects/fecode/environments/expensa-stage/releases/7'))
+      .toBe('/projects/fecode/environments/expensa-stage/deployments/7');
+    expect(canonicalPath('/projects/fecode/environments/expensa-stage/releases'))
+      .toBe('/projects/fecode/environments/expensa-stage/deployments');
+    expect(canonicalPath('/projects/releases/environments')).toBe('/projects/releases/environments');
+    // The pages of before ADR 0061, first, then the other rules.
+    expect(canonicalPath('/tenants')).toBe('/projects'); // KEEP-TENANT: the console's paths before ADR 0061
+    expect(canonicalPath('/tenants/fecode/members')).toBe('/projects/fecode/members'); // KEEP-TENANT: the console's paths before ADR 0061
+    expect(canonicalPath('/tenants/fecode/environments/expensa-stage/releases/7')) // KEEP-TENANT: the console's paths before ADR 0061
+      .toBe('/projects/fecode/environments/expensa-stage/deployments/7');
+    expect(parsePath('/tenants/acme/tools')).toEqual({ view: 'tools', project: 'acme' }); // KEEP-TENANT: the console's paths before ADR 0061
+    expect(canonicalPath('/nodes/tenants')).toBe('/nodes/tenants'); // KEEP-TENANT: only the first segment
+    expect(parsePath('/projects/fecode/environments/expensa-stage/incidents/12'))
       .toEqual(env({ env: 'expensa-stage', tab: 'incidents', item: '12' }));
     // An object's logs under the environment's Logs, of old, are its page's.
-    expect(canonicalPath('/tenants/fecode/environments/expensa-stage/logs/service/expense-service'))
-      .toBe('/tenants/fecode/environments/expensa-stage/objects/service/expense-service/logs');
-    expect(parsePath('/tenants/fecode/environments/expensa-stage/logs/service/expense-service'))
+    expect(canonicalPath('/projects/fecode/environments/expensa-stage/logs/service/expense-service'))
+      .toBe('/projects/fecode/environments/expensa-stage/objects/service/expense-service/logs');
+    expect(parsePath('/projects/fecode/environments/expensa-stage/logs/service/expense-service'))
       .toEqual(env({ env: 'expensa-stage', tab: 'objects', item: 'service/expense-service', otab: 'logs' }));
-    expect(parsePath('/tenants/fecode/environments/expensa-stage/logs/service/expense-service/1'))
+    expect(parsePath('/projects/fecode/environments/expensa-stage/logs/service/expense-service/1'))
       .toEqual(env({ env: 'expensa-stage', tab: 'objects', item: 'service/expense-service', otab: 'logs', replica: 1 }));
   });
 
   it("maps an object's page and its views", () => {
     const obj = (rest) => env({ env: 'e', tab: 'objects', item: 'service/api', otab: 'overview', ...rest });
-    expect(parsePath('/tenants/fecode/environments/e/objects/service/api')).toEqual(obj({}));
+    expect(parsePath('/projects/fecode/environments/e/objects/service/api')).toEqual(obj({}));
     for (const otab of ['logs', 'traffic', 'config']) {
-      expect(parsePath(`/tenants/fecode/environments/e/objects/service/api/${otab}`)).toEqual(obj({ otab }));
-      expect(objectPath('fecode', 'e', 'service/api', otab)).toBe(`/tenants/fecode/environments/e/objects/service/api/${otab}`);
+      expect(parsePath(`/projects/fecode/environments/e/objects/service/api/${otab}`)).toEqual(obj({ otab }));
+      expect(objectPath('fecode', 'e', 'service/api', otab)).toBe(`/projects/fecode/environments/e/objects/service/api/${otab}`);
     }
-    expect(parsePath('/tenants/fecode/environments/e/objects/service/api/logs/2?q=x'))
+    expect(parsePath('/projects/fecode/environments/e/objects/service/api/logs/2?q=x'))
       .toEqual(obj({ otab: 'logs', replica: 2, search: '?q=x' }));
     // Traces are no view of an object's page any more: its overview.
-    expect(parsePath('/tenants/fecode/environments/e/objects/service/api/traces?since=1d')).toEqual(obj({}));
+    expect(parsePath('/projects/fecode/environments/e/objects/service/api/traces?since=1d')).toEqual(obj({}));
     // A search on a view without one is dropped, an unknown view is the overview.
-    expect(parsePath('/tenants/fecode/environments/e/objects/service/api/config?q=x')).toEqual(obj({ otab: 'config' }));
-    expect(parsePath('/tenants/fecode/environments/e/objects/service/api/nope')).toEqual(obj({}));
-    expect(objectPath('fecode', 'e', 'service/api')).toBe('/tenants/fecode/environments/e/objects/service/api');
+    expect(parsePath('/projects/fecode/environments/e/objects/service/api/config?q=x')).toEqual(obj({ otab: 'config' }));
+    expect(parsePath('/projects/fecode/environments/e/objects/service/api/nope')).toEqual(obj({}));
+    expect(objectPath('fecode', 'e', 'service/api')).toBe('/projects/fecode/environments/e/objects/service/api');
     expect(objectPath('fecode', 'e', 'service/api', 'logs', 0, '?level=error'))
-      .toBe('/tenants/fecode/environments/e/objects/service/api/logs/0?level=error');
-    expect(objectPath('fecode', 'e', 'service/api', 'config', 3, '?q=x')).toBe('/tenants/fecode/environments/e/objects/service/api/config');
+      .toBe('/projects/fecode/environments/e/objects/service/api/logs/0?level=error');
+    expect(objectPath('fecode', 'e', 'service/api', 'config', 3, '?q=x')).toBe('/projects/fecode/environments/e/objects/service/api/config');
     expect(objectTabs('service')).toEqual(['overview', 'logs', 'traffic', 'config']);
     expect(objectTabs('addon')).toEqual(['overview', 'logs', 'config']);
     expect(objectTabs('job')).toEqual(['overview', 'logs', 'config']);
@@ -139,134 +146,134 @@ describe('the environments routes', () => {
     expect(lensOf('builder')).toBe('');
     expect(lensOf('objects')).toBe('');
     for (const pages of Object.values(LENS_PAGES)) for (const p of pages) expect(PAGE_LABELS[p]).toBeTruthy();
-    expect(parsePath('/tenants/fecode/environments/e/activity')).toEqual(env({ env: 'e', tab: 'activity' }));
+    expect(parsePath('/projects/fecode/environments/e/activity')).toEqual(env({ env: 'e', tab: 'activity' }));
     // The security groups' view became Reachability (ADR 0034, revised); an old link lands there.
-    expect(canonicalPath('/tenants/fecode/environments/e/groups')).toBe('/tenants/fecode/environments/e/reachability');
-    expect(envPath('fecode', 'e', 'reachability')).toBe('/tenants/fecode/environments/e/reachability');
+    expect(canonicalPath('/projects/fecode/environments/e/groups')).toBe('/projects/fecode/environments/e/reachability');
+    expect(envPath('fecode', 'e', 'reachability')).toBe('/projects/fecode/environments/e/reachability');
   });
 
   it('reads an unknown tab as the overview, half an object as none, a bad replica as none', () => {
-    expect(parsePath('/tenants/fecode/environments/expensa-stage/settingz')).toEqual(env({ env: 'expensa-stage' }));
-    expect(parsePath('/tenants/fecode/environments/expensa-stage/logs/service'))
+    expect(parsePath('/projects/fecode/environments/expensa-stage/settingz')).toEqual(env({ env: 'expensa-stage' }));
+    expect(parsePath('/projects/fecode/environments/expensa-stage/logs/service'))
       .toEqual(env({ env: 'expensa-stage', tab: 'logs' }));
-    expect(parsePath('/tenants/fecode/environments/expensa-stage/logs/addon/postgres/x'))
+    expect(parsePath('/projects/fecode/environments/expensa-stage/logs/addon/postgres/x'))
       .toEqual(env({ env: 'expensa-stage', tab: 'objects', item: 'addon/postgres', otab: 'logs' }));
   });
 
   it("a sandbox's and a job's pages are their environment's (ADR 0035)", () => {
-    expect(sandboxPath('fecode', 'kino--tools')).toBe('/tenants/fecode/environments/kino--tools/sandboxes');
-    expect(sandboxPath('fecode', 'kino--tools', 'h3k9v2m7qpx')).toBe('/tenants/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx');
+    expect(sandboxPath('fecode', 'kino--tools')).toBe('/projects/fecode/environments/kino--tools/sandboxes');
+    expect(sandboxPath('fecode', 'kino--tools', 'h3k9v2m7qpx')).toBe('/projects/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx');
     expect(sandboxPath('fecode', 'kino--tools', 'h3k9v2m7qpx', 'connect'))
-      .toBe('/tenants/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx/connect');
+      .toBe('/projects/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx/connect');
     expect(sandboxPath('fecode', 'kino--tools', 'h3k9v2m7qpx', 'overview'))
-      .toBe('/tenants/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx');
-    expect(newSandboxPath('fecode', 'kino--tools')).toBe('/tenants/fecode/environments/kino--tools/sandboxes/new');
-    expect(jobPath('fecode', 'kino--tools')).toBe('/tenants/fecode/environments/kino--tools/jobs');
-    expect(jobPath('fecode', 'kino--tools', 'a3ze6kkjvfx')).toBe('/tenants/fecode/environments/kino--tools/jobs/a3ze6kkjvfx');
-    expect(parsePath('/tenants/fecode/environments/kino--tools/sandboxes'))
+      .toBe('/projects/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx');
+    expect(newSandboxPath('fecode', 'kino--tools')).toBe('/projects/fecode/environments/kino--tools/sandboxes/new');
+    expect(jobPath('fecode', 'kino--tools')).toBe('/projects/fecode/environments/kino--tools/jobs');
+    expect(jobPath('fecode', 'kino--tools', 'a3ze6kkjvfx')).toBe('/projects/fecode/environments/kino--tools/jobs/a3ze6kkjvfx');
+    expect(parsePath('/projects/fecode/environments/kino--tools/sandboxes'))
       .toEqual(env({ env: 'kino--tools', tab: 'sandboxes', otab: 'overview' }));
-    expect(parsePath('/tenants/fecode/environments/kino--tools/sandboxes/new'))
+    expect(parsePath('/projects/fecode/environments/kino--tools/sandboxes/new'))
       .toEqual(env({ env: 'kino--tools', tab: 'sandboxes', item: 'new', otab: 'overview' }));
-    expect(parsePath('/tenants/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx/connect'))
+    expect(parsePath('/projects/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx/connect'))
       .toEqual(env({ env: 'kino--tools', tab: 'sandboxes', item: 'h3k9v2m7qpx', otab: 'connect' }));
-    expect(parsePath('/tenants/fecode/environments/kino--tools/jobs/a3ze6kkjvfx'))
+    expect(parsePath('/projects/fecode/environments/kino--tools/jobs/a3ze6kkjvfx'))
       .toEqual(env({ env: 'kino--tools', tab: 'jobs', item: 'a3ze6kkjvfx' }));
     // The jobs are a page of Activity; a sandbox's page belongs to no view.
     expect(lensOf('jobs')).toBe('activity');
     expect(lensOf('sandboxes')).toBe('');
     // Another environment: its sandboxes' list, its jobs.
-    const sbx = parsePath('/tenants/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx/connect');
-    expect(switchEnvPath(sbx, 'fecode', 'kino--dev')).toBe('/tenants/fecode/environments/kino--dev/sandboxes');
-    const job = parsePath('/tenants/fecode/environments/kino--tools/jobs/a3ze6kkjvfx');
-    expect(switchEnvPath(job, 'fecode', 'kino--dev')).toBe('/tenants/fecode/environments/kino--dev/jobs');
+    const sbx = parsePath('/projects/fecode/environments/kino--tools/sandboxes/h3k9v2m7qpx/connect');
+    expect(switchEnvPath(sbx, 'fecode', 'kino--dev')).toBe('/projects/fecode/environments/kino--dev/sandboxes');
+    const job = parsePath('/projects/fecode/environments/kino--tools/jobs/a3ze6kkjvfx');
+    expect(switchEnvPath(job, 'fecode', 'kino--dev')).toBe('/projects/fecode/environments/kino--dev/jobs');
   });
 
   it('envPath builds what parsePath reads', () => {
-    expect(envPath('fecode')).toBe('/tenants/fecode/environments');
-    expect(envPath('fecode', 'expensa-stage')).toBe('/tenants/fecode/environments/expensa-stage');
-    expect(envPath('fecode', 'expensa-stage', 'overview', 'x')).toBe('/tenants/fecode/environments/expensa-stage');
-    expect(envPath('fecode', 'expensa-stage', 'deployments', 7)).toBe('/tenants/fecode/environments/expensa-stage/deployments/7');
+    expect(envPath('fecode')).toBe('/projects/fecode/environments');
+    expect(envPath('fecode', 'expensa-stage')).toBe('/projects/fecode/environments/expensa-stage');
+    expect(envPath('fecode', 'expensa-stage', 'overview', 'x')).toBe('/projects/fecode/environments/expensa-stage');
+    expect(envPath('fecode', 'expensa-stage', 'deployments', 7)).toBe('/projects/fecode/environments/expensa-stage/deployments/7');
     // An object's logs are its page's Logs.
     expect(envPath('fecode', 'expensa-stage', 'logs', 'service/expense-service'))
-      .toBe('/tenants/fecode/environments/expensa-stage/objects/service/expense-service/logs');
+      .toBe('/projects/fecode/environments/expensa-stage/objects/service/expense-service/logs');
     expect(envPath('fecode', 'expensa-stage', 'logs', 'service/expense-service', 0))
-      .toBe('/tenants/fecode/environments/expensa-stage/objects/service/expense-service/logs/0');
+      .toBe('/projects/fecode/environments/expensa-stage/objects/service/expense-service/logs/0');
     expect(envPath('fecode', 'e', 'logs', '', null, '?q=timeout&level=error'))
-      .toBe('/tenants/fecode/environments/e/logs?q=timeout&level=error');
+      .toBe('/projects/fecode/environments/e/logs?q=timeout&level=error');
     expect(envPath('fecode', 'e', 'logs', 'service/web', 1, '?source=ingress'))
-      .toBe('/tenants/fecode/environments/e/objects/service/web/logs/1?source=ingress');
-    expect(envPath('fecode', 'e', 'overview', '', null, '?q=x')).toBe('/tenants/fecode/environments/e');
-    expect(envPath('a b', 'e', 'logs', 'service/web', 2)).toBe('/tenants/a%20b/environments/e/objects/service/web/logs/2');
-    expect(envPath('fecode', 'e', 'deployments', '', 3)).toBe('/tenants/fecode/environments/e/deployments');
+      .toBe('/projects/fecode/environments/e/objects/service/web/logs/1?source=ingress');
+    expect(envPath('fecode', 'e', 'overview', '', null, '?q=x')).toBe('/projects/fecode/environments/e');
+    expect(envPath('a b', 'e', 'logs', 'service/web', 2)).toBe('/projects/a%20b/environments/e/objects/service/web/logs/2');
+    expect(envPath('fecode', 'e', 'deployments', '', 3)).toBe('/projects/fecode/environments/e/deployments');
     for (const [tab, item, replica, search] of [['overview', '', null, ''], ['deployments', '', null, ''],
       ['deployments', '6', null, ''], ['incidents', '12', null, ''], ['logs', '', null, ''], ['logs', '', null, '?trace=x'],
       ['activity', '', null, '']]) {
       expect(parsePath(envPath('a/b', 'expensa-stage', tab, item, replica, search)))
-        .toEqual({ view: 'environments', tenant: 'a/b', env: 'expensa-stage', tab, item, replica, search });
+        .toEqual({ view: 'environments', project: 'a/b', env: 'expensa-stage', tab, item, replica, search });
     }
     for (const [item, replica, search] of [['job/migrate', null, ''], ['service/web', 0, ''], ['service/web', 3, '?q=a+b']]) {
       expect(parsePath(envPath('a/b', 'expensa-stage', 'logs', item, replica, search)))
-        .toEqual({ view: 'environments', tenant: 'a/b', env: 'expensa-stage', tab: 'objects', item, otab: 'logs', replica, search });
+        .toEqual({ view: 'environments', project: 'a/b', env: 'expensa-stage', tab: 'objects', item, otab: 'logs', replica, search });
     }
     expect(ENV_TABS).toEqual([
       'overview', 'builder', 'activity', 'deployments', 'incidents', 'jobs', 'logs', 'traces', 'traffic', 'reachability', 'settings',
       'secrets', 'access', 'objects', 'sandboxes',
     ]);
     // An object's page: its kind and name, its view.
-    expect(envPath('fecode', 'e', 'objects', 'service/web api')).toBe('/tenants/fecode/environments/e/objects/service/web%20api');
-    expect(parsePath('/tenants/fecode/environments/e/objects/job/migrate/2?q=x'))
+    expect(envPath('fecode', 'e', 'objects', 'service/web api')).toBe('/projects/fecode/environments/e/objects/service/web%20api');
+    expect(parsePath('/projects/fecode/environments/e/objects/job/migrate/2?q=x'))
       .toEqual(env({ env: 'e', tab: 'objects', item: 'job/migrate', otab: 'overview' }));
-    expect(parsePath('/tenants/fecode/environments/e/objects/job')).toEqual(env({ env: 'e', tab: 'objects' }));
+    expect(parsePath('/projects/fecode/environments/e/objects/job')).toEqual(env({ env: 'e', tab: 'objects' }));
     for (const tab of ENV_TABS) expect(ENV_TAB_LABELS[tab]).toBeTruthy();
     expect(ENV_TAB_LABELS.builder).toBe('New deployment');
     for (const tab of ['traffic', 'secrets', 'access', 'settings']) {
-      expect(parsePath(`/tenants/fecode/environments/e/${tab}`)).toEqual(env({ env: 'e', tab }));
-      expect(envPath('fecode', 'e', tab)).toBe(`/tenants/fecode/environments/e/${tab}`);
+      expect(parsePath(`/projects/fecode/environments/e/${tab}`)).toEqual(env({ env: 'e', tab }));
+      expect(envPath('fecode', 'e', tab)).toBe(`/projects/fecode/environments/e/${tab}`);
     }
     // The builder's other name (edit) leads to the builder; an item on a tab without items is dropped.
-    expect(parsePath('/tenants/fecode/environments/e/edit')).toEqual(env({ env: 'e', tab: 'builder' }));
-    expect(parsePath('/tenants/fecode/environments/e/secrets/x')).toEqual(env({ env: 'e', tab: 'secrets' }));
-    expect(parsePath('/tenants/fecode/environments/e/builder')).toEqual(env({ env: 'e', tab: 'builder' }));
-    expect(envPath('fecode', 'e', 'builder')).toBe('/tenants/fecode/environments/e/builder');
+    expect(parsePath('/projects/fecode/environments/e/edit')).toEqual(env({ env: 'e', tab: 'builder' }));
+    expect(parsePath('/projects/fecode/environments/e/secrets/x')).toEqual(env({ env: 'e', tab: 'secrets' }));
+    expect(parsePath('/projects/fecode/environments/e/builder')).toEqual(env({ env: 'e', tab: 'builder' }));
+    expect(envPath('fecode', 'e', 'builder')).toBe('/projects/fecode/environments/e/builder');
     // The builder opens an object's form: …/builder/<kind>/<name>, and the edit link of old.
-    expect(parsePath('/tenants/fecode/environments/e/builder/service/api')).toEqual(env({ env: 'e', tab: 'builder', item: 'service/api' }));
-    expect(parsePath('/tenants/fecode/environments/e/edit/addon/db')).toEqual(env({ env: 'e', tab: 'builder', item: 'addon/db' }));
-    expect(parsePath('/tenants/fecode/environments/e/builder/service')).toEqual(env({ env: 'e', tab: 'builder' }));
-    expect(envPath('fecode', 'e', 'builder', 'secret/registry-ghcr.io')).toBe('/tenants/fecode/environments/e/builder/secret/registry-ghcr.io');
-    expect(envPath('fecode', 'e', 'builder', 'route/a b')).toBe('/tenants/fecode/environments/e/builder/route/a%20b');
-    expect(parsePath('/tenants/fecode/new-environment')).toEqual({ view: 'newEnvironment', tenant: 'fecode' });
-    expect(parsePath('/tenants/fecode/environments/e/traces/4bf92f3577b34da6a3ce929d0e0e4736'))
+    expect(parsePath('/projects/fecode/environments/e/builder/service/api')).toEqual(env({ env: 'e', tab: 'builder', item: 'service/api' }));
+    expect(parsePath('/projects/fecode/environments/e/edit/addon/db')).toEqual(env({ env: 'e', tab: 'builder', item: 'addon/db' }));
+    expect(parsePath('/projects/fecode/environments/e/builder/service')).toEqual(env({ env: 'e', tab: 'builder' }));
+    expect(envPath('fecode', 'e', 'builder', 'secret/registry-ghcr.io')).toBe('/projects/fecode/environments/e/builder/secret/registry-ghcr.io');
+    expect(envPath('fecode', 'e', 'builder', 'route/a b')).toBe('/projects/fecode/environments/e/builder/route/a%20b');
+    expect(parsePath('/projects/fecode/new-environment')).toEqual({ view: 'newEnvironment', project: 'fecode' });
+    expect(parsePath('/projects/fecode/environments/e/traces/4bf92f3577b34da6a3ce929d0e0e4736'))
       .toEqual(env({ env: 'e', tab: 'traces', item: '4bf92f3577b34da6a3ce929d0e0e4736' }));
-    expect(parsePath('/tenants/fecode/environments/e/traces?service=api&since=1d')).toEqual(env({ env: 'e', tab: 'traces' }));
-    expect(envPath('fecode', 'e', 'traces', 'abc')).toBe('/tenants/fecode/environments/e/traces/abc');
+    expect(parsePath('/projects/fecode/environments/e/traces?service=api&since=1d')).toEqual(env({ env: 'e', tab: 'traces' }));
+    expect(envPath('fecode', 'e', 'traces', 'abc')).toBe('/projects/fecode/environments/e/traces/abc');
   });
 
   it("an HTTP secret's pages: a new one's form, one's page, its new version (ADR 0055)", () => {
-    const env = (rest) => ({ view: 'environments', tenant: 'fecode', item: '', replica: null, search: '', ...rest });
-    expect(httpSecretPath('fecode', 'e')).toBe('/tenants/fecode/environments/e/secrets');
-    expect(newHttpSecretPath('fecode', 'e')).toBe('/tenants/fecode/environments/e/secrets/http/new');
-    expect(httpSecretPath('fecode', 'e', 'github')).toBe('/tenants/fecode/environments/e/secrets/http/github');
-    expect(httpSecretPath('fecode', 'e', 'github', true)).toBe('/tenants/fecode/environments/e/secrets/http/github/edit');
-    expect(httpSecretPath('fecode', 'e', 'new', true)).toBe('/tenants/fecode/environments/e/secrets/http/new');
-    expect(secretsPath('fecode', 'e', 'http', 'github')).toBe('/tenants/fecode/environments/e/secrets/http/github');
-    expect(parsePath('/tenants/fecode/environments/e/secrets/http/new'))
+    const env = (rest) => ({ view: 'environments', project: 'fecode', item: '', replica: null, search: '', ...rest });
+    expect(httpSecretPath('fecode', 'e')).toBe('/projects/fecode/environments/e/secrets');
+    expect(newHttpSecretPath('fecode', 'e')).toBe('/projects/fecode/environments/e/secrets/http/new');
+    expect(httpSecretPath('fecode', 'e', 'github')).toBe('/projects/fecode/environments/e/secrets/http/github');
+    expect(httpSecretPath('fecode', 'e', 'github', true)).toBe('/projects/fecode/environments/e/secrets/http/github/edit');
+    expect(httpSecretPath('fecode', 'e', 'new', true)).toBe('/projects/fecode/environments/e/secrets/http/new');
+    expect(secretsPath('fecode', 'e', 'http', 'github')).toBe('/projects/fecode/environments/e/secrets/http/github');
+    expect(parsePath('/projects/fecode/environments/e/secrets/http/new'))
       .toEqual(env({ env: 'e', tab: 'secrets', item: 'http/new', otab: '' }));
-    expect(parsePath('/tenants/fecode/environments/e/secrets/http/github'))
+    expect(parsePath('/projects/fecode/environments/e/secrets/http/github'))
       .toEqual(env({ env: 'e', tab: 'secrets', item: 'http/github', otab: '' }));
-    expect(parsePath('/tenants/fecode/environments/e/secrets/http/github/edit'))
+    expect(parsePath('/projects/fecode/environments/e/secrets/http/github/edit'))
       .toEqual(env({ env: 'e', tab: 'secrets', item: 'http/github', otab: 'edit' }));
-    expect(parsePath('/tenants/fecode/environments/e/secrets/http/github/nope'))
+    expect(parsePath('/projects/fecode/environments/e/secrets/http/github/nope'))
       .toEqual(env({ env: 'e', tab: 'secrets', item: 'http/github', otab: '' }));
-    expect(parsePath('/tenants/fecode/environments/e/secrets/http')).toEqual(env({ env: 'e', tab: 'secrets' }));
+    expect(parsePath('/projects/fecode/environments/e/secrets/http')).toEqual(env({ env: 'e', tab: 'secrets' }));
     // Switching the environment on an HTTP secret's page leads to the
     // other one's secrets: an HTTP secret is of one environment.
-    const route = parsePath('/tenants/fecode/environments/e/secrets/http/github/edit');
-    expect(switchEnvPath(route, 'fecode', 'f')).toBe('/tenants/fecode/environments/f/secrets');
+    const route = parsePath('/projects/fecode/environments/e/secrets/http/github/edit');
+    expect(switchEnvPath(route, 'fecode', 'f')).toBe('/projects/fecode/environments/f/secrets');
   });
 
   it('a credential\'s pages of old (ADR 0033) lead to its HTTP secret\'s', () => {
-    const env = (rest) => ({ view: 'environments', tenant: 'fecode', item: '', replica: null, search: '', ...rest });
-    const at = '/tenants/fecode/environments/e';
+    const env = (rest) => ({ view: 'environments', project: 'fecode', item: '', replica: null, search: '', ...rest });
+    const at = '/projects/fecode/environments/e';
     expect(canonicalPath(`${at}/credentials`)).toBe(`${at}/secrets`);
     expect(canonicalPath(`${at}/credentials/`)).toBe(`${at}/secrets`);
     expect(canonicalPath(`${at}/credentials/github`)).toBe(`${at}/secrets/http/github`);
@@ -279,20 +286,20 @@ describe('the environments routes', () => {
   });
 
   it("the Secrets view, pointing at one of its rows; its old place under Settings is the same path", () => {
-    expect(secretsPath('fecode', 'e')).toBe('/tenants/fecode/environments/e/secrets');
-    expect(secretsPath('fecode', 'e', 'binding', 'erp')).toBe('/tenants/fecode/environments/e/secrets/binding/erp');
-    expect(secretsPath('fecode', 'e', 'secret', 'a b')).toBe('/tenants/fecode/environments/e/secrets/secret/a%20b');
-    expect(secretsPath('fecode', 'e', 'secret')).toBe('/tenants/fecode/environments/e/secrets');
-    expect(parsePath('/tenants/fecode/environments/e/secrets')).toEqual(env({ env: 'e', tab: 'secrets' }));
+    expect(secretsPath('fecode', 'e')).toBe('/projects/fecode/environments/e/secrets');
+    expect(secretsPath('fecode', 'e', 'binding', 'erp')).toBe('/projects/fecode/environments/e/secrets/binding/erp');
+    expect(secretsPath('fecode', 'e', 'secret', 'a b')).toBe('/projects/fecode/environments/e/secrets/secret/a%20b');
+    expect(secretsPath('fecode', 'e', 'secret')).toBe('/projects/fecode/environments/e/secrets');
+    expect(parsePath('/projects/fecode/environments/e/secrets')).toEqual(env({ env: 'e', tab: 'secrets' }));
     for (const kind of ['secret', 'binding', 'addon']) {
-      expect(parsePath(`/tenants/fecode/environments/e/secrets/${kind}/x`)).toEqual(env({ env: 'e', tab: 'secrets', item: `${kind}/x` }));
+      expect(parsePath(`/projects/fecode/environments/e/secrets/${kind}/x`)).toEqual(env({ env: 'e', tab: 'secrets', item: `${kind}/x` }));
     }
     // An unknown kind, or half a row, points at none.
-    expect(parsePath('/tenants/fecode/environments/e/secrets/service/x')).toEqual(env({ env: 'e', tab: 'secrets' }));
-    expect(parsePath('/tenants/fecode/environments/e/secrets/binding')).toEqual(env({ env: 'e', tab: 'secrets' }));
-    const route = parsePath('/tenants/fecode/environments/e/secrets/binding/erp');
-    expect(switchEnvPath(route, 'fecode', 'f')).toBe('/tenants/fecode/environments/f/secrets');
-    expect(envPath('fecode', 'e', 'secrets', 'binding/erp')).toBe('/tenants/fecode/environments/e/secrets/binding/erp');
+    expect(parsePath('/projects/fecode/environments/e/secrets/service/x')).toEqual(env({ env: 'e', tab: 'secrets' }));
+    expect(parsePath('/projects/fecode/environments/e/secrets/binding')).toEqual(env({ env: 'e', tab: 'secrets' }));
+    const route = parsePath('/projects/fecode/environments/e/secrets/binding/erp');
+    expect(switchEnvPath(route, 'fecode', 'f')).toBe('/projects/fecode/environments/f/secrets');
+    expect(envPath('fecode', 'e', 'secrets', 'binding/erp')).toBe('/projects/fecode/environments/e/secrets/binding/erp');
   });
 });
 
@@ -353,47 +360,63 @@ describe('chosenEnv', () => {
 
 describe('switchEnvPath', () => {
   it('keeps the page of the open environment', () => {
-    const r = { view: 'environments', tenant: 'kino', env: 'prod', tab: 'logs', item: 'api' };
-    expect(switchEnvPath(r, 'kino', 'stage')).toBe('/tenants/kino/environments/stage/logs');
-    expect(switchEnvPath({ ...r, tab: 'objects' }, 'kino', 'stage')).toBe('/tenants/kino/environments/stage');
+    const r = { view: 'environments', project: 'kino', env: 'prod', tab: 'logs', item: 'api' };
+    expect(switchEnvPath(r, 'kino', 'stage')).toBe('/projects/kino/environments/stage/logs');
+    expect(switchEnvPath({ ...r, tab: 'objects' }, 'kino', 'stage')).toBe('/projects/kino/environments/stage');
     // From an object's view the other environment's same view.
     expect(switchEnvPath({ ...r, tab: 'objects', item: 'service/api', otab: 'traffic' }, 'kino', 'stage'))
-      .toBe('/tenants/kino/environments/stage/traffic');
-    expect(switchEnvPath({ ...r, tab: 'traces', item: 'abc' }, 'kino', 'stage')).toBe('/tenants/kino/environments/stage/logs');
+      .toBe('/projects/kino/environments/stage/traffic');
+    expect(switchEnvPath({ ...r, tab: 'traces', item: 'abc' }, 'kino', 'stage')).toBe('/projects/kino/environments/stage/logs');
     expect(switchEnvPath({ ...r, tab: 'objects', item: 'service/api', otab: 'config' }, 'kino', 'stage'))
-      .toBe('/tenants/kino/environments/stage/settings');
+      .toBe('/projects/kino/environments/stage/settings');
   });
-  it('opens the overview from elsewhere or in another tenant', () => {
-    expect(switchEnvPath({ view: 'domains', tenant: 'kino' }, 'kino', 'stage')).toBe('/tenants/kino/environments/stage');
-    expect(switchEnvPath({ view: 'environments', tenant: 'kino', env: 'prod', tab: 'logs' }, 'acme', 'web'))
-      .toBe('/tenants/acme/environments/web');
+  it('opens the overview from elsewhere or in another project', () => {
+    expect(switchEnvPath({ view: 'domains', project: 'kino' }, 'kino', 'stage')).toBe('/projects/kino/environments/stage');
+    expect(switchEnvPath({ view: 'environments', project: 'kino', env: 'prod', tab: 'logs' }, 'acme', 'web'))
+      .toBe('/projects/acme/environments/web');
   });
 });
 
 describe('the sidebar keeps the view', () => {
-  const r = (rest) => ({ view: 'environments', tenant: 'kino', env: 'prod', tab: 'overview', item: '', ...rest });
+  const r = (rest) => ({ view: 'environments', project: 'kino', env: 'prod', tab: 'overview', item: '', ...rest });
   const api = { kind: 'service', name: 'api' };
   const db = { kind: 'addon', name: 'db' };
   it("picks an object in the view open now, where it has that view", () => {
-    expect(pickObjectPath(r({ tab: 'logs' }), 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api/logs');
-    expect(pickObjectPath(r({ tab: 'traffic' }), 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api/traffic');
-    expect(pickObjectPath(r({ tab: 'traffic' }), 'kino', 'prod', db)).toBe('/tenants/kino/environments/prod/objects/addon/db');
+    expect(pickObjectPath(r({ tab: 'logs' }), 'kino', 'prod', api)).toBe('/projects/kino/environments/prod/objects/service/api/logs');
+    expect(pickObjectPath(r({ tab: 'traffic' }), 'kino', 'prod', api)).toBe('/projects/kino/environments/prod/objects/service/api/traffic');
+    expect(pickObjectPath(r({ tab: 'traffic' }), 'kino', 'prod', db)).toBe('/projects/kino/environments/prod/objects/addon/db');
     // From the keys of the environment to an object's, on its overview.
-    expect(pickObjectPath(r({ tab: 'secrets' }), 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api');
-    expect(pickObjectPath(r({ tab: 'secrets', item: 'http/github' }), 'kino', 'prod', db)).toBe('/tenants/kino/environments/prod/objects/addon/db');
-    expect(pickObjectPath(r({ tab: 'access' }), 'kino', 'prod', db)).toBe('/tenants/kino/environments/prod/objects/addon/db/config');
-    expect(pickObjectPath(r({ tab: 'deployments' }), 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api');
+    expect(pickObjectPath(r({ tab: 'secrets' }), 'kino', 'prod', api)).toBe('/projects/kino/environments/prod/objects/service/api');
+    expect(pickObjectPath(r({ tab: 'secrets', item: 'http/github' }), 'kino', 'prod', db)).toBe('/projects/kino/environments/prod/objects/addon/db');
+    expect(pickObjectPath(r({ tab: 'access' }), 'kino', 'prod', db)).toBe('/projects/kino/environments/prod/objects/addon/db/config');
+    expect(pickObjectPath(r({ tab: 'deployments' }), 'kino', 'prod', api)).toBe('/projects/kino/environments/prod/objects/service/api');
     expect(pickObjectPath(r({ tab: 'objects', item: 'service/api', otab: 'traffic' }), 'kino', 'prod', db))
-      .toBe('/tenants/kino/environments/prod/objects/addon/db');
+      .toBe('/projects/kino/environments/prod/objects/addon/db');
     expect(pickObjectPath(r({ tab: 'traces', item: 'abc' }), 'kino', 'prod', api))
-      .toBe('/tenants/kino/environments/prod/objects/service/api/logs');
+      .toBe('/projects/kino/environments/prod/objects/service/api/logs');
     expect(pickObjectPath(r({ tab: 'objects', item: 'addon/db', otab: 'logs' }), 'kino', 'prod', api))
-      .toBe('/tenants/kino/environments/prod/objects/service/api/logs');
-    expect(pickObjectPath({ view: 'domains', tenant: 'kino' }, 'kino', 'prod', api)).toBe('/tenants/kino/environments/prod/objects/service/api');
+      .toBe('/projects/kino/environments/prod/objects/service/api/logs');
+    expect(pickObjectPath({ view: 'domains', project: 'kino' }, 'kino', 'prod', api)).toBe('/projects/kino/environments/prod/objects/service/api');
   });
   it('picks the environment in the same view from an object, else its overview', () => {
-    expect(pickEnvPath(r({ tab: 'objects', item: 'service/api', otab: 'logs' }), 'kino', 'prod')).toBe('/tenants/kino/environments/prod/logs');
-    expect(pickEnvPath(r({ tab: 'logs' }), 'kino', 'prod')).toBe('/tenants/kino/environments/prod');
-    expect(pickEnvPath({ view: 'domains', tenant: 'kino' }, 'kino', 'prod')).toBe('/tenants/kino/environments/prod');
+    expect(pickEnvPath(r({ tab: 'objects', item: 'service/api', otab: 'logs' }), 'kino', 'prod')).toBe('/projects/kino/environments/prod/logs');
+    expect(pickEnvPath(r({ tab: 'logs' }), 'kino', 'prod')).toBe('/projects/kino/environments/prod');
+    expect(pickEnvPath({ view: 'domains', project: 'kino' }, 'kino', 'prod')).toBe('/projects/kino/environments/prod');
+  });
+});
+
+describe('the pages of accounts and integrations (FeOS ADRs 0056, 0059)', () => {
+  it('parses the accounts, an account and the integrations', () => {
+    expect(parsePath('/accounts')).toEqual({ view: 'accounts' });
+    expect(parsePath('/accounts/cc-4711')).toEqual({ view: 'account', account: 'cc-4711' });
+    expect(parsePath('/accounts/a%20b')).toEqual({ view: 'account', account: 'a b' });
+    expect(parsePath('/integrations')).toEqual({ view: 'integrations' });
+  });
+
+  it('keeps the two ways FeCode links here', () => {
+    // A person without a project makes one; a project's admin grants FeCode.
+    expect(parsePath('/projects?new')).toEqual({ view: 'projects' });
+    expect(parsePath('/projects/kino/members?integration=fecode')).toEqual({ view: 'members', project: 'kino' });
+    expect(canonicalPath('/projects/kino/members')).toBe('/projects/kino/members');
   });
 });

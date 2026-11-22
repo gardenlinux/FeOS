@@ -31,7 +31,7 @@ func ids(sbs []store.Sandbox) []podid.ID {
 // with an op to the op, and keeps bookings; lost grace then resolves them.
 func TestDownSweepAndLostGrace(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	mkNode(t, s, "n2")
 	mkNode(t, s, "n3")
@@ -183,7 +183,7 @@ func TestDownSweepAndLostGrace(t *testing.T) {
 
 func TestOpsOfInstances(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	must(t, s.UpsertInstance(bg, store.InstanceInfo{ID: "live"}))
 	must(t, s.UpsertInstance(bg, store.InstanceInfo{ID: "stopping"}))
@@ -246,7 +246,7 @@ func TestOpsOfInstances(t *testing.T) {
 
 func TestLoopCandidates(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	mkNode(t, s, "n2")
 	exec(t, s, "UPDATE nodes SET object_store_id = 'store-1' WHERE name = 'n1'")
@@ -366,7 +366,7 @@ func TestLoopCandidates(t *testing.T) {
 
 func TestInTx(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	boom := errors.New("boom")
 	var id podid.ID
 	err := s.InTx(bg, func(tx *store.Store) error {

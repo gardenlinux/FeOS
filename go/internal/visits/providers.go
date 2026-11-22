@@ -74,8 +74,8 @@ func (s *Service) view(p store.AccessProvider, envs []EnvRef) Provider {
 			// Each provider its own redirect URI: ferun-auth finishes a
 			// code only at the one its sign-in began with (no OAuth
 			// mix-up between issuers).
-			v.RedirectURI = s.cfg.AuthURL + "/callback/" + p.Tenant + "/" + p.Name
-			v.BackchannelURI = s.cfg.AuthURL + "/backchannel/" + p.Tenant + "/" + p.Name
+			v.RedirectURI = s.cfg.AuthURL + "/callback/" + p.Project + "/" + p.Name
+			v.BackchannelURI = s.cfg.AuthURL + "/backchannel/" + p.Project + "/" + p.Name
 		}
 	}
 	return v
@@ -88,10 +88,10 @@ func ruleOf(raw json.RawMessage) Rule {
 	return r
 }
 
-// envsByProvider are the environments of tenant whose access is visitors,
+// envsByProvider are the environments of project whose access is visitors,
 // by the provider each names (model.ProviderFerun for the builtin).
-func (s *Service) envsByProvider(ctx context.Context, tenant string) (map[string][]EnvRef, error) {
-	rows, err := s.st.ProviderEnvironments(ctx, tenant)
+func (s *Service) envsByProvider(ctx context.Context, project string) (map[string][]EnvRef, error) {
+	rows, err := s.st.ProviderEnvironments(ctx, project)
 	if err != nil {
 		return nil, err
 	}
@@ -114,15 +114,15 @@ func refs(r []EnvRef) []EnvRef {
 	return r
 }
 
-// ListProviders lists a tenant's providers, ferun first, then by name,
+// ListProviders lists a project's providers, ferun first, then by name,
 // with the kinds this installation serves. A provider of kind oidc names
 // the redirect URI its issuer registers, its own.
-func (s *Service) ListProviders(ctx context.Context, tenant string) (ProviderList, error) {
-	rows, err := s.st.ListAccessProviders(ctx, tenant)
+func (s *Service) ListProviders(ctx context.Context, project string) (ProviderList, error) {
+	rows, err := s.st.ListAccessProviders(ctx, project)
 	if err != nil {
 		return ProviderList{}, s.failed("list providers", err)
 	}
-	envs, err := s.envsByProvider(ctx, tenant)
+	envs, err := s.envsByProvider(ctx, project)
 	if err != nil {
 		return ProviderList{}, s.failed("list providers", err)
 	}
@@ -133,10 +133,10 @@ func (s *Service) ListProviders(ctx context.Context, tenant string) (ProviderLis
 	return out, nil
 }
 
-// GetProvider answers one of a tenant's providers; ferun always exists.
+// GetProvider answers one of a project's providers; ferun always exists.
 // 404 no such provider else.
-func (s *Service) GetProvider(ctx context.Context, tenant, name string) (Provider, error) {
-	envs, err := s.envsByProvider(ctx, tenant)
+func (s *Service) GetProvider(ctx context.Context, project, name string) (Provider, error) {
+	envs, err := s.envsByProvider(ctx, project)
 	if err != nil {
 		return Provider{}, s.failed("read a provider", err)
 	}
@@ -146,7 +146,7 @@ func (s *Service) GetProvider(ctx context.Context, tenant, name string) (Provide
 	if !providerName.MatchString(name) {
 		return Provider{}, errNoProvider()
 	}
-	p, err := s.st.GetAccessProvider(ctx, tenant, name)
+	p, err := s.st.GetAccessProvider(ctx, project, name)
 	if errors.Is(err, store.ErrNoRow) {
 		return Provider{}, errNoProvider()
 	}
@@ -162,20 +162,20 @@ type secretIn struct {
 	keep  bool
 }
 
-// PutProvider makes or changes a tenant's provider (§1.8.2): 201 when it
+// PutProvider makes or changes a project's provider (§1.8.2): 201 when it
 // makes one (created), 200 when it changes one or finds it as asked, which
 // writes nothing. A change of the kind, the issuer, the client or the rule
 // ends the provider's open visits; a change of the url or the secret alone
-// does not. The address of a provider of kind tenant is judged by the
+// does not. The address of a provider of kind project is judged by the
 // control plane's destination rule before anything is written.
-func (s *Service) PutProvider(ctx context.Context, tenant, name string, in ProviderIn, madeBy string) (p Provider, created bool, err error) {
+func (s *Service) PutProvider(ctx context.Context, project, name string, in ProviderIn, madeBy string) (p Provider, created bool, err error) {
 	if name == model.ProviderFerun {
 		return Provider{}, false, apierr.WithCode(http.StatusConflict, CodeReservedName, textReservedName)
 	}
 	if !providerName.MatchString(name) {
 		return Provider{}, false, invalidProvider("provider name %q: a DNS label of at most 63 lowercase letters, digits and hyphens", name)
 	}
-	want, secret, err := s.checkProviderIn(ctx, tenant, name, in)
+	want, secret, err := s.checkProviderIn(ctx, project, name, in)
 	if err != nil {
 		return Provider{}, false, err
 	}
@@ -183,7 +183,7 @@ func (s *Service) PutProvider(ctx context.Context, tenant, name string, in Provi
 	// A new secret is sealed outside the transaction (which may run again).
 	var sealed []byte
 	if want.Kind == model.ProviderKindOIDC && !secret.keep {
-		if sealed, err = s.d.Sealer.Seal([]byte(secret.value), store.AccessProviderAAD(tenant, name)); err != nil {
+		if sealed, err = s.d.Sealer.Seal([]byte(secret.value), store.AccessProviderAAD(project, name)); err != nil {
 			return Provider{}, false, s.failed("seal a client secret", err)
 		}
 	}
@@ -191,19 +191,19 @@ func (s *Service) PutProvider(ctx context.Context, tenant, name string, in Provi
 	ended, wrote := 0, false
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
 		created, ended, wrote = false, 0, false
-		t, err := tx.LockTenant(ctx, tenant, store.ForNoKeyUpdate)
+		t, err := tx.LockProject(ctx, project, store.ForNoKeyUpdate)
 		if errors.Is(err, store.ErrNoRow) {
-			return apierr.New(http.StatusUnauthorized, "unknown tenant token")
+			return apierr.New(http.StatusUnauthorized, "unknown project token")
 		}
 		if err != nil {
 			return err
 		}
 		if t.Deleting() {
-			return apierr.New(http.StatusConflict, "tenant %s is being deleted", tenant)
+			return apierr.New(http.StatusConflict, "project %s is being deleted", project)
 		}
-		old, err := tx.LockAccessProvider(ctx, tenant, name, store.ForUpdate)
+		old, err := tx.LockAccessProvider(ctx, project, name, store.ForUpdate)
 		if errors.Is(err, store.ErrNoRow) {
-			n, err := tx.CountAccessProviders(ctx, tenant)
+			n, err := tx.CountAccessProviders(ctx, project)
 			if err != nil {
 				return err
 			}
@@ -243,7 +243,7 @@ func (s *Service) PutProvider(ctx context.Context, tenant, name string, in Provi
 		}
 		wrote = true
 		if identity {
-			ended, err = tx.EndProviderVisits(ctx, tenant, name, model.VisitProviderChanged)
+			ended, err = tx.EndProviderVisits(ctx, project, name, model.VisitProviderChanged)
 		}
 		return err
 	})
@@ -251,10 +251,10 @@ func (s *Service) PutProvider(ctx context.Context, tenant, name string, in Provi
 		return Provider{}, false, s.pass("put a provider", err)
 	}
 	if wrote {
-		s.log.Info("access provider put", "tenant", tenant, "provider", name, "kind", row.Kind, "created", created,
+		s.log.Info("access provider put", "project", project, "provider", name, "kind", row.Kind, "created", created,
 			"visits_ended", ended)
 	}
-	envs, err := s.envsByProvider(ctx, tenant)
+	envs, err := s.envsByProvider(ctx, project)
 	if err != nil {
 		return Provider{}, false, s.failed("read a provider", err)
 	}
@@ -266,7 +266,7 @@ func (s *Service) sameSecret(old store.AccessProvider, value string) bool {
 	if len(old.ClientSecretSealed) == 0 {
 		return false
 	}
-	plain, err := s.d.Sealer.Open(old.ClientSecretSealed, store.AccessProviderAAD(old.Tenant, old.Name))
+	plain, err := s.d.Sealer.Open(old.ClientSecretSealed, store.AccessProviderAAD(old.Project, old.Name))
 	return err == nil && string(plain) == value
 }
 
@@ -279,13 +279,13 @@ func sameRule(a, b json.RawMessage) bool {
 
 // checkProviderIn checks a PUT's body and returns the row it asks for
 // (without a sealed secret) and its secret.
-func (s *Service) checkProviderIn(ctx context.Context, tenant, name string, in ProviderIn) (store.AccessProvider, secretIn, error) {
-	row := store.AccessProvider{Tenant: tenant, Name: name, Kind: in.Kind}
+func (s *Service) checkProviderIn(ctx context.Context, project, name string, in ProviderIn) (store.AccessProvider, secretIn, error) {
+	row := store.AccessProvider{Project: project, Name: name, Kind: in.Kind}
 	other := func(field string) error {
 		return invalidProvider("%s is not a field of kind %s", field, in.Kind)
 	}
 	switch in.Kind {
-	case model.ProviderKindTenant:
+	case model.ProviderKindProject:
 		switch {
 		case in.Issuer != "":
 			return row, secretIn{}, other("issuer")
@@ -306,7 +306,7 @@ func (s *Service) checkProviderIn(ctx context.Context, tenant, name string, in P
 		// One answer for a refused address and for a name that does not
 		// resolve, so that the check tells nothing of the names inside.
 		if err := checkHost(ctx, s.judge, u.Hostname()); err != nil {
-			s.log.Debug("a provider's address refused", "tenant", tenant, "provider", name, "err", err)
+			s.log.Debug("a provider's address refused", "project", project, "provider", name, "err", err)
 			return row, secretIn{}, apierr.WithCode(http.StatusUnprocessableEntity, CodeDestinationDenied,
 				textDestinationDenied, u.Hostname())
 		}
@@ -337,7 +337,7 @@ func (s *Service) checkProviderIn(ctx context.Context, tenant, name string, in P
 		row.Issuer, row.ClientID, row.Rule = in.Issuer, in.ClientID, raw
 		return row, secret, nil
 	}
-	return row, secretIn{}, invalidProvider("kind %q: a provider is of kind tenant or oidc", in.Kind)
+	return row, secretIn{}, invalidProvider("kind %q: a provider is of kind project or oidc", in.Kind)
 }
 
 // checkHost is egress.CheckHost (tests replace it).
@@ -494,19 +494,19 @@ func isASCII(s string) bool {
 	return true
 }
 
-// DeleteProvider deletes a tenant's provider no environment names: 404 no
+// DeleteProvider deletes a project's provider no environment names: 404 no
 // such provider, 409 reserved_name for ferun, 409 provider_in_use for one
 // an environment names.
-func (s *Service) DeleteProvider(ctx context.Context, tenant, name string) error {
+func (s *Service) DeleteProvider(ctx context.Context, project, name string) error {
 	if name == model.ProviderFerun {
 		return apierr.WithCode(http.StatusConflict, CodeReservedName, textReservedName)
 	}
 	if !providerName.MatchString(name) {
 		return errNoProvider()
 	}
-	ok, err := s.st.DeleteAccessProvider(ctx, tenant, name)
+	ok, err := s.st.DeleteAccessProvider(ctx, project, name)
 	if errors.Is(err, store.ErrInUse) {
-		ids, err := s.st.EnvironmentsNamingProvider(ctx, tenant, name)
+		ids, err := s.st.EnvironmentsNamingProvider(ctx, project, name)
 		if err != nil {
 			return s.failed("delete a provider", err)
 		}
@@ -518,6 +518,6 @@ func (s *Service) DeleteProvider(ctx context.Context, tenant, name string) error
 	if !ok {
 		return errNoProvider()
 	}
-	s.log.Info("access provider deleted", "tenant", tenant, "provider", name)
+	s.log.Info("access provider deleted", "project", project, "provider", name)
 	return nil
 }

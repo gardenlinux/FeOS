@@ -15,10 +15,10 @@ import (
 // The sandbox the Expensa spec's attached service runs in.
 const webSandbox = "0193a000-0000-7000-8000-00000000000a"
 
-// Another attachable sandbox of the tenant.
+// Another attachable sandbox of the project.
 const otherSandbox = "0193a000-0000-7000-8000-00000000000b"
 
-// An attachable sandbox of the tenant with a short ID (ADR 0019); the two
+// An attachable sandbox of the project with a short ID (ADR 0019); the two
 // above have UUIDs, as sandboxes made before do.
 const shortSandbox = "k3x9m2p7q4r"
 
@@ -335,10 +335,11 @@ func TestValidateRules(t *testing.T) {
 			s.Services["web2"] = Service{Runtime: RuntimeAttached, Command: []string{"x"}, Sandbox: webSandbox, Idle: IdleNever}
 			s.Services["web3"] = Service{Runtime: RuntimeAttached, Command: []string{"x"}, Sandbox: webSandbox, Idle: "soon"}
 		}, []expect{e("services.web3.idle", `"soon" is not a duration`)}},
-		{"never is for attached services", ModeSpec, func(s *Spec) {
+		{"never is every runtime's word", ModeSpec, func(s *Spec) {
 			approval(s)
 			svc(s, "expense-service", func(v *Service) { v.Idle = IdleNever })
-		}, []expect{e("services.expense-service.idle", `"never" is not a duration`)}},
+			svc(s, "approval-service", func(v *Service) { v.Idle = IdleNever })
+		}, nil},
 		{"attached sandbox", ModePlan, func(s *Spec) {
 			approval(s)
 			s.Services["web2"] = Service{Runtime: RuntimeAttached, Command: []string{"x"}}

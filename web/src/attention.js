@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// What needs a person in a tenant: Home's first list and the sidebar's
-// counts. Put together in the browser from the lists the tenant's pages
+// What needs a person in a project: Home's first list and the sidebar's
+// counts. Put together in the browser from the lists the project's pages
 // read anyway (summary.jsx): the environments' open incidents, the
 // domains' states and warnings, the sandboxes that failed, the
 // invitations about to expire and the limits nearly reached. Each item
@@ -50,11 +50,11 @@ export function inWords(deltaMs) {
 }
 
 // attention is the list of items, most severe first, then newest first.
-// in: {tenant, environments, incidents: {env name: [open incident]},
+// in: {project, environments, incidents: {env name: [open incident]},
 // sandboxes, domains, invitations, quota}; each may be missing (not
 // read, or not offered to the role).
 export function attention(input, now = Date.now()) {
-  const t = enc(input.tenant || '');
+  const t = enc(input.project || '');
   const items = [];
 
   for (const env of input.environments || []) {
@@ -67,7 +67,7 @@ export function attention(input, now = Date.now()) {
         object: `${env.name}${inc.object ? ' · ' + inc.object : ''}`,
         detail: inc.summary || '',
         since: inc.openedAt || '',
-        to: `/tenants/${t}/environments/${enc(env.name)}/incidents/${enc(inc.id)}`,
+        to: `/projects/${t}/environments/${enc(env.name)}/incidents/${enc(inc.id)}`,
         action: 'Open incident',
       });
     }
@@ -79,7 +79,7 @@ export function attention(input, now = Date.now()) {
         object: env.name,
         detail: '',
         since: '',
-        to: `/tenants/${t}/environments/${enc(env.name)}/incidents`,
+        to: `/projects/${t}/environments/${enc(env.name)}/incidents`,
         action: 'Open incidents',
       });
     }
@@ -91,7 +91,7 @@ export function attention(input, now = Date.now()) {
         object: env.name,
         detail: env.deployed ? `deployment ${env.deployed} keeps serving` : 'nothing serves',
         since: '',
-        to: `/tenants/${t}/environments/${enc(env.name)}/deployments/${enc(env.deployment)}`,
+        to: `/projects/${t}/environments/${enc(env.name)}/deployments/${enc(env.deployment)}`,
         action: 'Open deployment',
       });
     }
@@ -110,8 +110,8 @@ export function attention(input, now = Date.now()) {
       // Its page is its environment's (ADR 0035); one without is found by
       // its ID.
       to: sb.environment && (sb.environment.name || sb.environment.id)
-        ? `/tenants/${t}/environments/${enc(sb.environment.name || sb.environment.id)}/sandboxes/${enc(sb.sandboxId)}`
-        : `/tenants/${t}/sandboxes/${enc(sb.sandboxId)}`,
+        ? `/projects/${t}/environments/${enc(sb.environment.name || sb.environment.id)}/sandboxes/${enc(sb.sandboxId)}`
+        : `/projects/${t}/sandboxes/${enc(sb.sandboxId)}`,
       action: 'Open sandbox',
     });
   }
@@ -131,7 +131,7 @@ export function attention(input, now = Date.now()) {
       object: d.name,
       detail: parts.join(' · '),
       since: w.recordMissingSince || w.dnsMovedSince || '',
-      to: `/tenants/${t}/domains/${enc(d.id || d.name)}`,
+      to: `/projects/${t}/domains/${enc(d.id || d.name)}`,
       action: trouble[1],
     });
   }
@@ -147,7 +147,7 @@ export function attention(input, now = Date.now()) {
       object: `${inv.role}${inv.environmentName || inv.environment ? ' · ' + (inv.environmentName || inv.environment) : ''}`,
       detail: 'not accepted yet',
       since: '',
-      to: `/tenants/${t}/members`,
+      to: `/projects/${t}/members`,
       action: 'Open people',
     });
   }
@@ -162,7 +162,7 @@ export function attention(input, now = Date.now()) {
         object: '',
         detail: r.tone === 'bad' ? 'new ones are refused until some go' : '',
         since: '',
-        to: `/tenants/${t}/usage`,
+        to: `/projects/${t}/usage`,
         action: 'Open usage',
       });
     }

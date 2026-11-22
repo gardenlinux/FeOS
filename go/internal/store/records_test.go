@@ -80,16 +80,16 @@ func i64(n int64) *int64 { return &n }
 
 func TestActivityRows(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	sb := mkSandbox(t, s, "acme")
 	start := uuid.New()
 	var rows []store.ActivityRow
 	for i := range 600 {
-		rows = append(rows, store.ActivityRow{TsNs: int64(1000 + i), SandboxID: sb.ID, TenantID: "acme",
+		rows = append(rows, store.ActivityRow{TsNs: int64(1000 + i), SandboxID: sb.ID, ProjectID: "acme",
 			Source: store.SourceFerund, Kind: "tool_start", Category: "tool", SpanID: "s1", Name: "bash: ls"})
 	}
 	rows = append(rows,
-		store.ActivityRow{TsNs: 5000, SandboxID: sb.ID, TenantID: "acme", Node: "n1", StartID: start, Seq: 1,
+		store.ActivityRow{TsNs: 5000, SandboxID: sb.ID, ProjectID: "acme", Node: "n1", StartID: start, Seq: 1,
 			Source: store.SourceFeosd, Kind: "pod_state", Detail: json.RawMessage(`{"state":"RUNNING"}`)},
 		store.ActivityRow{TsNs: 5001, PodID: podid.Mint(), ForeignPod: true, Node: "n1", StartID: start, Seq: 2,
 			Source: store.SourceFeosd, Kind: "pod_state"},
@@ -147,14 +147,14 @@ func TestTrafficRows(t *testing.T) {
 	sb := legacyID()
 	start := uuid.New()
 	must(t, s.InsertTraffic(bg,
-		store.TrafficRow{TsNs: 2, Node: "n1", StartID: start, Seq: 2, PodID: sb, SandboxID: sb, TenantID: "acme", Kind: "dns",
+		store.TrafficRow{TsNs: 2, Node: "n1", StartID: start, Seq: 2, PodID: sb, SandboxID: sb, ProjectID: "acme", Kind: "dns",
 			Detail: json.RawMessage(`{"dns":{"name":"example.com"}}`)},
 		store.TrafficRow{TsNs: 1, Node: "n1", StartID: start, Seq: 1, PodID: sb, SandboxID: sb, Kind: "flow", Missed: 3},
 		store.TrafficRow{TsNs: 3, Node: "n1", StartID: start, Seq: 3, PodID: podid.Mint(), ForeignPod: true, Kind: "drop"},
 	))
 	must(t, s.InsertTraffic(bg, store.TrafficRow{TsNs: 1, Node: "n1", StartID: start, Seq: 1, Kind: "flow"}))
 	rows, err := s.ListSandboxTraffic(bg, sb, store.ActivityQuery{Limit: 10})
-	if err != nil || len(rows) != 2 || rows[0].Kind != "flow" || rows[0].Missed != 3 || rows[1].TenantID != "acme" ||
+	if err != nil || len(rows) != 2 || rows[0].Kind != "flow" || rows[0].Missed != 3 || rows[1].ProjectID != "acme" ||
 		string(rows[1].Detail) != `{"dns": {"name": "example.com"}}` {
 		t.Fatalf("traffic %+v %v", rows, err)
 	}
@@ -228,7 +228,7 @@ func TestIssuedCerts(t *testing.T) {
 	pod := podid.Mint()
 	for i, serial := range []string{"01", "02", "03"} {
 		c, err := s.InsertIssuedCert(bg, store.IssuedCert{Serial: serial, PodID: pod, Incarnation: uuid.New(), Node: "n1",
-			SPIFFEID: "spiffe://feos.local/tenant/acme/sandbox/" + pod.String(), HPKEPublicKey: []byte{byte(i)},
+			SPIFFEID: "spiffe://feos.local/project/acme/sandbox/" + pod.String(), HPKEPublicKey: []byte{byte(i)},
 			BindingsVersion: "v", NotAfter: time.Now().Add(time.Hour)})
 		if err != nil || c.IssuedAt.IsZero() {
 			t.Fatalf("insert %+v %v", c, err)
@@ -253,7 +253,7 @@ func TestIssuedCerts(t *testing.T) {
 	// The newest of each pod that has one: of the same time, by serial.
 	other, none := podid.Mint(), podid.Mint()
 	if _, err := s.InsertIssuedCert(bg, store.IssuedCert{Serial: "0a", PodID: other, Incarnation: uuid.New(), Node: "n2",
-		SPIFFEID: "spiffe://feos.local/tenant/acme/env/x/service/api", HPKEPublicKey: []byte{9},
+		SPIFFEID: "spiffe://feos.local/project/acme/env/x/service/api", HPKEPublicKey: []byte{9},
 		NotAfter: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestIssuedCerts(t *testing.T) {
 
 func TestWatches(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	sb := mkSandbox(t, s, "acme")
 	ch, unsubscribe := d.Subscribe(db.ChanWatch)
 	defer unsubscribe()
@@ -352,7 +352,7 @@ func TestWatches(t *testing.T) {
 
 func TestBindings(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	sb := mkSandbox(t, s, "acme")
 	v, kube, err := s.KubeBindings(bg, sb.ID)
 	if err != nil || v != "" || kube == nil || len(kube) != 0 {

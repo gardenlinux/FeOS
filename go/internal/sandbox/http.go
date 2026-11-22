@@ -258,7 +258,7 @@ func (e *Engine) markHTTPUnimplemented(node string) {
 
 // recordHTTPPush records a push's outcome in the activity log.
 func (e *Engine) recordHTTPPush(row store.Sandbox, version, result string) {
-	e.record(activity.Event{SandboxID: row.ID, TenantID: row.Owner, Node: row.Node, Kind: activity.KindPodHTTPBindings,
+	e.record(activity.Event{SandboxID: row.ID, ProjectID: row.Owner, Node: row.Node, Kind: activity.KindPodHTTPBindings,
 		Name:   fmt.Sprintf("HTTP bindings %s to node %s", result, row.Node),
 		Detail: map[string]any{"node": row.Node, "version": version, "result": result}})
 }

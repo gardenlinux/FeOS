@@ -202,7 +202,7 @@ type startTimes struct {
 
 // New builds an instance: it loads the front doors' certificate (with
 // --tls-cert) and the issuer, opens and migrates the database (and
-// bootstraps the operator tenant), and binds the front doors' and the
+// bootstraps the operator project), and binds the front doors' and the
 // nodes' listeners. Nothing serves before Run.
 func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance, err error) {
 	if log == nil {
@@ -355,7 +355,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 		ingDeps.Visits = i.Visits
 	}
 	ing = ingresssvc.New(ingresssvc.Config{
-		InstanceID: i.id, TrustDomain: cfg.TrustDomain, AppsZone: cfg.AppsZone, TenantZone: cfg.TenantZone,
+		InstanceID: i.id, TrustDomain: cfg.TrustDomain, AppsZone: cfg.AppsZone, ProjectZone: cfg.ProjectZone,
 		CertTTL: cfg.NodeCertTTL, SupersedeGrace: ingressSupersedeGrace, PodNetwork: i.podNetwork, Log: i.log,
 	}, ingDeps)
 	i.Ingress = ing
@@ -381,7 +381,7 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 	deps := api.Deps{
 		DB: i.DB, Store: i.Store, Engine: i.Engine, Elector: i.Elector, Conns: i.Links, Fleet: fl,
 		Tools: tools.NewREST(i.Runner), Specs: tools.Specs, MCP: i.mcp, Ports: i.streams.Ports,
-		Watches: i.streams.Watches, Bindings: i.Bindings, Environments: i.Env, Ingress: ing, Domains: i.Domains, TenantJobs: i.Env,
+		Watches: i.streams.Watches, Bindings: i.Bindings, Environments: i.Env, Ingress: ing, Domains: i.Domains, ProjectJobs: i.Env,
 		Ready: i.ready, Sealer: sealerOf(sealer), Issuer: i.Issuer,
 	}
 	if i.Visits != nil {
@@ -403,11 +403,11 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 	i.Elector.Register(i.Runner.Loops()...)
 	i.handler = api.New(api.Config{
 		AdminUsers: cfg.AdminUsers, DenyPrefixes: cfg.DenyPrefixes, InstanceID: i.id, PreparationWaitMs: config.PreparationBudget.Milliseconds(),
-		PublicURL: cfg.PublicURL, OIDC: oidc, SessionTTL: cfg.SessionTTL, DefaultImage: cfg.DefaultImage,
+		PublicURL: cfg.PublicURL, OIDC: oidc, APIAudience: cfg.APIAudience, SessionTTL: cfg.SessionTTL, DefaultImage: cfg.DefaultImage,
 		DefaultVCPUs: cfg.DefaultVCPUs, DefaultMemoryMiB: cfg.DefaultMemoryMiB, JoinTokenTTL: config.JoinTokenTTL,
 		TelemetryInterval: config.TelemetryInterval, NodeTTL: cfg.NodeTTL, LostGrace: cfg.LostGrace,
-		DrainTimeout: cfg.DrainTimeout, TenantCreation: cfg.TenantCreation, TenantsPerPerson: cfg.TenantsPerPerson,
-		ReservedTenantNames: reservedTenantNames(cfg), TenantDefaults: tenantDefaults(cfg), Zones: cfg.Zones(),
+		DrainTimeout: cfg.DrainTimeout, ProjectCreation: cfg.ProjectCreation, ProjectsPerPerson: cfg.ProjectsPerPerson,
+		ReservedProjectNames: reservedProjectNames(cfg), ProjectDefaults: projectDefaults(cfg), Zones: cfg.Zones(),
 		DiskBudget: cfg.DiskBudget, Log: i.log,
 	}, deps)
 
@@ -459,7 +459,7 @@ func (i *Instance) newEnvironments(key []byte) (*env.Service, error) {
 	deps := env.Deps{
 		InstanceID: i.id, DB: i.DB, Store: i.Store, Elector: i.Elector, Conns: i.Links, Engine: i.Engine,
 		Runner: runner, Ports: fwd, Sealer: sealer, AppsZone: i.cfg.AppsZone, EnvChanged: i.Domains.EnvChanged,
-		AppsZoneOwners: i.cfg.AppsZoneOwners, TenantZone: i.cfg.TenantZone, SinkURL: i.cfg.SinkURL, Bindings: hb,
+		AppsZoneOwners: i.cfg.AppsZoneOwners, ProjectZone: i.cfg.ProjectZone, SinkURL: i.cfg.SinkURL, Bindings: hb,
 		DenyPrefixes: i.cfg.DenyPrefixes, Issuer: i.Issuer, Log: i.log,
 	}
 	// The kinds of providers a publish may name (ADR 0054); nil without
@@ -484,7 +484,7 @@ func (i *Instance) newEnvironments(key []byte) (*env.Service, error) {
 
 // newDomains builds the domains' core (ADR 0021): its checks ask
 // --dns-resolver, or the system's resolvers without it; the apps zone,
-// the tenant zone (ADR 0031), the edge's name, ferun-auth's host
+// the project zone (ADR 0031), the edge's name, ferun-auth's host
 // (--visitor-auth-url, ADR 0054) and every --domain-reserved zone cannot
 // be claimed.
 func (i *Instance) newDomains() (*domains.Service, error) {
@@ -511,8 +511,8 @@ func (i *Instance) newDomains() (*domains.Service, error) {
 }
 
 // bootstrap is the migration's bootstrap: the cluster's pod network, and
-// with --bootstrap-token the tenant "operator" with that token, while no
-// tenant exists.
+// with --bootstrap-token the project "operator" with that token, while no
+// project exists.
 func (i *Instance) bootstrap(ctx context.Context, tx pgx.Tx) error {
 	if err := i.bootstrapPodNetwork(ctx, store.On(tx)); err != nil {
 		return err
@@ -525,7 +525,7 @@ func (i *Instance) bootstrap(ctx context.Context, tx pgx.Tx) error {
 		return err
 	}
 	if created {
-		i.log.Info("bootstrapped the tenant operator with the bootstrap token")
+		i.log.Info("bootstrapped the project operator with the bootstrap token")
 	}
 	return nil
 }
@@ -973,14 +973,14 @@ func sealerOf(sl *seal.Sealer) api.Sealer {
 	return sl
 }
 
-// reservedTenantNames are the names no tenant a person makes may have
+// reservedProjectNames are the names no project a person makes may have
 // beside the fixed ones (ADR 0031): the apps zone's owners' and the
 // platform's host labels, the first label of the public URL's host, of
-// --edge-name, of --apps-zone, of the tenant zone and of ferun-auth's
+// --edge-name, of --apps-zone, of the project zone and of ferun-auth's
 // host (--visitor-auth-url, ADR 0054).
-func reservedTenantNames(cfg config.Config) []string {
+func reservedProjectNames(cfg config.Config) []string {
 	out := slices.Clone(cfg.AppsZoneOwners)
-	hosts := []string{cfg.EdgeName, cfg.AppsZone, cfg.TenantZone, visitorAuthHost(cfg)}
+	hosts := []string{cfg.EdgeName, cfg.AppsZone, cfg.ProjectZone, visitorAuthHost(cfg)}
 	if u, err := url.Parse(cfg.PublicURL); err == nil {
 		hosts = append(hosts, u.Hostname())
 	}
@@ -1005,19 +1005,19 @@ func visitorAuthHost(cfg config.Config) string {
 	return strings.ToLower(u.Hostname())
 }
 
-// tenantDefaults are the limits of the tenants people make, from
-// --tenant-default-*: a negative flag is no limit.
-func tenantDefaults(cfg config.Config) store.TenantLimits {
+// projectDefaults are the limits of the projects people make, from
+// --project-default-*: a negative flag is no limit.
+func projectDefaults(cfg config.Config) store.ProjectLimits {
 	limit := func(v int) *int {
 		if v < 0 {
 			return nil
 		}
 		return &v
 	}
-	var l store.TenantLimits
-	l.Sandboxes, l.Environments = limit(cfg.TenantDefaultSandboxes), limit(cfg.TenantDefaultEnvironments)
-	l.RunningJobs, l.VCPUs = limit(cfg.TenantDefaultRunningJobs), limit(cfg.TenantDefaultVCPUs)
-	if m := cfg.TenantDefaultMemoryMiB; m >= 0 {
+	var l store.ProjectLimits
+	l.Sandboxes, l.Environments = limit(cfg.ProjectDefaultSandboxes), limit(cfg.ProjectDefaultEnvironments)
+	l.RunningJobs, l.VCPUs = limit(cfg.ProjectDefaultRunningJobs), limit(cfg.ProjectDefaultVCPUs)
+	if m := cfg.ProjectDefaultMemoryMiB; m >= 0 {
 		l.MemoryMiB = &m
 	}
 	return l

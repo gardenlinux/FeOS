@@ -43,7 +43,7 @@ leaves out `i`, `l`, `o` and `u`, which are misread for digits.
 
 - **The control plane mints every pod's ID**, a sandbox's and an
   environment's replica's, from a cryptographic random source. Its
-  sandboxes' IDs are unique over all tenants; a create whose new ID is
+  sandboxes' IDs are unique over all projects; a create whose new ID is
   taken draws another.
 - **A client does not choose one.** A create that names an ID is refused;
   the answer carries the new sandbox's ID, which the client keeps. A

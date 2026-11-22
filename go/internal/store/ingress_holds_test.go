@@ -50,7 +50,7 @@ func admit(t *testing.T, s *store.Store, id podid.ID, ingress string) string {
 
 func TestIngressHolds(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	env := mkEnv(t, s, "acme", "stage")
 	publish(t, s, env.ID, true)
@@ -197,7 +197,7 @@ func TestIngressHolds(t *testing.T) {
 // once the ingress was seen recently, long ago, or left.
 func TestIngressFence(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	public := mkEnv(t, s, "acme", "stage")
 	publish(t, s, public.ID, true)

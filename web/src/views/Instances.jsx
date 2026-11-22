@@ -115,7 +115,7 @@ export function Instances() {
                 {leaderRow && <div><div className="muted small">version</div><div className="mono">{leaderRow.version || '—'}</div></div>}
               </>
               : <span className="warn">No instance holds the leader's lease: the loops that only one may run (node expiry, idle
-                pause, drains, repairs, tenant deletion) wait until one takes it.</span>}
+                pause, drains, repairs, project deletion) wait until one takes it.</span>}
           </div>
         </section>)}
 

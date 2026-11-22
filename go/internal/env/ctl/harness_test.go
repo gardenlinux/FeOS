@@ -44,8 +44,8 @@ import (
 var bg = context.Background()
 
 const (
-	testTD     = "feos.test"
-	testTenant = "t1"
+	testTD      = "feos.test"
+	testProject = "t1"
 	// testImage is pinned: no registry is asked.
 	testImage = "example.test/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 )
@@ -90,7 +90,7 @@ func fakeResolve(image string) string {
 }
 
 // harness is one ferund instance with the controller, on a fresh
-// database with the tenant t1, and its test nodes.
+// database with the project t1, and its test nodes.
 type harness struct {
 	t      *testing.T
 	d      *db.DB
@@ -142,7 +142,7 @@ func newHarness(t *testing.T, o options) *harness {
 		t.Fatal(err)
 	}
 	h := &harness{t: t, d: d, st: store.New(d), iss: iss, objs: testnode.NewObjectStore("ctl"), nodes: map[string]*testnode.Node{}}
-	if _, _, err := h.st.CreateTenant(bg, testTenant); err != nil {
+	if _, _, err := h.st.CreateProject(bg, testProject); err != nil {
 		t.Fatal(err)
 	}
 	const id = "i1"
@@ -356,10 +356,10 @@ func (h *harness) addressOf(id podid.ID) string {
 	return sb.Address
 }
 
-// newEnv makes an environment of the tenant.
+// newEnv makes an environment of the project.
 func (h *harness) newEnv(name string) store.Environment {
 	h.t.Helper()
-	return h.envOf(testTenant, name)
+	return h.envOf(testProject, name)
 }
 
 // envOf is owner's environment name, made when it has none (a sandbox
@@ -415,7 +415,7 @@ func (h *harness) apply(envID uuid.UUID, spec string) int {
 	return n
 }
 
-// putSecret adds a version of a tenant secret and returns its version.
+// putSecret adds a version of a project secret and returns its version.
 func (h *harness) putSecret(envID uuid.UUID, name, value string) int {
 	h.t.Helper()
 	version := 1

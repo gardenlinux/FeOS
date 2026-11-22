@@ -3,7 +3,7 @@
 **Status:** Merged into [ADR 0022](0022-images.md) · **Date:** 2026-10-29
 
 It decided that a create brings its own registry credentials, never the
-tenant's; that `ferund` asks the image's registry with them before every
+project's; that `ferund` asks the image's registry with them before every
 new pod, cached image or not, and remembers nothing but the registry's
 token; and that an image is baked once, in its first pod, keyed by its
 source and used only after the yes. All of it lives in ADR 0022, with

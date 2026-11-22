@@ -12,14 +12,14 @@ the ingress joins), [ADR 0018](../adr/0018-environments-and-deployments.md)
 [deploy/gardener/README.md](../../deploy/gardener/README.md#the-ingress).
 
 `ferun-ingress` serves `https://<label>.<zone>/…`, where the zone is the
-apps zone or the tenant zone of the tenants people make (ADR 0031), and the tenants'
-domains of the environments whose tenant made them public, straight to their image
+apps zone or the project zone of the projects people make (ADR 0031), and the projects'
+domains of the environments whose project made them public, straight to their image
 services' pods over IPv6 on the pods' mesh. It has no REST API, no
-database and no tenant's token: it connects out to `ferund` on the
+database and no project's token: it connects out to `ferund` on the
 nodes' port, as a node does, and serves from the table `ferund` streams
 to it. A rollout or an outage of `ferund` cuts no request.
 
-Not built: `http` traffic records, zones of a tenant's own, certificates over
+Not built: `http` traffic records, zones of a project's own, certificates over
 DNS-01 (a zone's wildcard), L4 routes and h2c upstreams. The domains'
 claims, checks and states are `ferund`'s domains core; their
 certificates are ACME's ([control-plane.md](control-plane.md#certificates-of-domains)).
@@ -31,7 +31,7 @@ certificates are ACME's ([control-plane.md](control-plane.md#certificates-of-dom
                      │   NetworkPolicy: 8080/8443 from anywhere; 9090, udp/51820-51835 from the workers
                      │   egress: DNS, ferund's 7443, udp/51820 to the workers, nothing else
    StatefulSet ferun-ingress-0/1 (root with NET_ADMIN, seccomp RuntimeDefault, a volume each)
-     ├─ proxy:  TLS (SNI: a domain's certificate from the table, else the tenant zone's wildcard where it covers the name, else the apps zone's) → HTTP/1.1 or HTTP/2
+     ├─ proxy:  TLS (SNI: a domain's certificate from the table, else the project zone's wildcard where it covers the name, else the apps zone's) → HTTP/1.1 or HTTP/2
      │          port 80: ACME HTTP-01 answers from the table, else 308 to https
      │          → host → environment → route → service → endpoint
      │          ├─ usable: port admitted ∧ group version ≥ admitted ∧ node's handshake < 180 s
@@ -89,7 +89,7 @@ Go's syntax, byte sizes as integers with an optional `KiB`, `MiB` or
 | `--sink-endpoint` | none | the sink's ingest, `host:port`, where the access log goes ([Access log](#access-log)); a name is resolved by the instance, any of its addresses serves; empty: the access log is not kept, its records counted as dropped (logged once at start) |
 | `--listen-http`, `--listen-https`, `--health-listen` | required | an IP address and a port each: the pod's IP, never a wildcard, which would bind the mesh device's address too |
 | `--tls-cert`, `--tls-key` | required | the apps zone's wildcard certificate and its key, PEM, read again every 30 s |
-| `--tenant-zone-tls-cert`, `--tenant-zone-tls-key` | empty | the tenant zone's wildcard certificate and its key (ADR 0031), PEM, read again every 30 s, served for every name it covers; both or neither ([The tenant zone](#the-tenant-zone)) |
+| `--project-zone-tls-cert`, `--project-zone-tls-key` | empty | the project zone's wildcard certificate and its key (ADR 0031), PEM, read again every 30 s, served for every name it covers; both or neither ([The project zone](#the-project-zone)) |
 | `--mesh-device` | `ferun-mesh` | the WireGuard device |
 | `--mesh-port` | `51820` | its UDP port; a repair moves the device to one of the 15 after it ([Lost paths](#lost-paths)) |
 | `--mesh-endpoint` | required | where the nodes reach the device: `$(POD_IP):51820` |
@@ -97,10 +97,10 @@ Go's syntax, byte sizes as integers with an optional `KiB`, `MiB` or
 | `--wake-hold` | `2m` | how long a request waits while instances of its service are asleep or waking |
 | `--pending-hold` | `10s` | how long a request waits while they are only pending |
 | `--max-held` | `1024` | how many requests may wait at once |
-| `--max-held-per-tenant` | `256` | how many requests of one tenant may wait at once |
+| `--max-held-per-project` | `256` | how many requests of one project may wait at once |
 | `--max-held-per-env` | `128` | how many requests of one environment may wait at once |
 | `--max-inflight` | `2048` | how many requests may be forwarded at once, waiting for a connection or an answer, upgraded ones included ([Limits](#limits)) |
-| `--max-inflight-per-tenant` | `512` | how many requests of one tenant may be forwarded at once |
+| `--max-inflight-per-project` | `512` | how many requests of one project may be forwarded at once |
 | `--max-inflight-per-env` | `256` | how many requests of one environment may be forwarded at once |
 | `--upstream-dial-timeout` | `3s` | the bound of a dial to an instance |
 | `--upstream-idle-timeout` | `4s` | a pooled connection to an instance idle this long is closed |
@@ -132,7 +132,7 @@ of the directory, so that a crash leaves the old content or the new.
 | `removed` | the refusal that said the ingress was removed, until the next join |
 | `wg.key` | the WireGuard private key, 32 raw bytes |
 | `mesh.json` | the place on the mesh: `{podNetwork, prefix, address}` |
-| `table-v3.json` | the table's cache, `{savedAt, state}`, written 1 s after a change and at least once a minute while heartbeats confirm it; it holds the domains' certificates and private keys, the ACME challenges, the visits' keys and the routes' hosts. Without it the agent reads a `table-v2.json` of an older binary once; the first save deletes that and a `table.json` ([Visitors](#the-tables-part), [Routing](#routing)) |
+| `table-v4.json` | the table's cache, `{savedAt, state}`, written 1 s after a change and at least once a minute while heartbeats confirm it; it holds the domains' certificates and private keys, the ACME challenges, the visits' keys, the routes' hosts and each environment's project. Without it the agent reads the `table-v3.json` of the release before ADR 0061 once, with its earlier names; the first save deletes that, a `table-v2.json` and a `table.json` ([Visitors](#the-tables-part), [Routing](#routing)) |
 
 The certificate is renewed for the same key; a new key is made only
 when the identity is declared lost. A new `wg.key` is made after every
@@ -249,7 +249,7 @@ its endpoint, its version and its capabilities (`visits`: it checks
 visits, [Visitors](#the-tables-part); `routeHosts`: it serves a route
 on its host alone, [Routing](#routing)). Hello takes the instance's place on the
 mesh and answers the cluster's ULA, its /96 and address, the apps zone,
-the tenant zone and the answering instance; the agent keeps `mesh.json` and configures
+the project zone and the answering instance; the agent keeps `mesh.json` and configures
 the device ([The mesh](#the-mesh)). `Sync` then streams the table. A
 message out of sequence, or a stream that ends or stays silent for 45 s,
 makes the agent connect again.
@@ -294,16 +294,16 @@ pods' mesh".
 The table is what the ingress routes, one entry per public environment
 (`wire.Env`, [api.md](api.md#the-ingresss-api)):
 
-- its ID, tenant, name and hosts: its served domains, else
-  `<label>.<zone>` in its tenant's zone while the platform serves that
-  zone (the apps zone, or the tenant zone, ADR 0031): an
+- its ID, project, name and hosts: its served domains, else
+  `<label>.<zone>` in its project's zone while the platform serves that
+  zone (the apps zone, or the project zone, ADR 0031): an
   environment on a domain of its own is not served at its default host
   (ADR 0021);
 - its **domains** (`domains`): each served domain's name, its
   certificate's chain (DER, leaf first) and private key (PKCS #8 DER),
   opened by the builder from `domain_certs`. A domain is served when its
   state is `served` or `dns-moved`, it is verified and bound to the
-  environment, which is its tenant's, and its certificate's `not_after`
+  environment, which is its project's, and its certificate's `not_after`
   is ahead; ordered by when they were bound. A domain takes at most
   64 KiB (`table.MaxDomainBytes`, a chain takes a few), and the domains
   that would take the entry past 2 MiB are left out, never the
@@ -335,15 +335,15 @@ The table is what the ingress routes, one entry per public environment
 Beside the environments the table holds the mesh, the nodes with their
 keys, endpoints and /96s at the peers' version, the visits' keys
 (`visitKeys`, [Visitors](#the-tables-part)), `Self`: the
-instance's name, mesh address, the apps zone, the tenant zone and its admitted version
+instance's name, mesh address, the apps zone, the project zone and its admitted version
 ([Admission](#admission)), and the **challenges**: every pending ACME
 HTTP-01 answer (`acme_challenges` whose `expires_at` is ahead, at most
 1024), each its token, host and key authorization, for every instance. An environment that is not public, is being
-deleted, has no label or no deployment, or whose tenant is being deleted
+deleted, has no label or no deployment, or whose project is being deleted
 has no entry; nor has one whose routing deployment's spec does not parse,
 or whose entry would take more than 2 MiB coded (`table.MaxEnvBytes`;
 logged at most once a minute per environment): every instance holds
-every entry, so one tenant's environment must not grow the messages of
+every entry, so one project's environment must not grow the messages of
 all. A valid spec stays far below that size, since a route's path has at
 most 1 KiB ([control-plane.md](control-plane.md#the-deployment-spec)); a
 deployment stored before that limit can exceed it.
@@ -384,7 +384,7 @@ for all), while a stream uses it, and keeps it as an immutable snapshot:
 
 Every writer of what the table shows notifies in its transaction:
 publishing, an environment's deployment, deployed deployment or deletion, a
-tenant's deletion, an instance's insert, delete, phase or deployment, the
+project's deletion, an instance's insert, delete, phase or deployment, the
 admission records, and the ingress and mesh rows
 ([control-plane.md](control-plane.md#the-database)). A replica that
 becomes ready, pauses or stops reaches the ingress about 100 ms after
@@ -441,8 +441,8 @@ nothing expires it.
 
 ### The cache
 
-At its start the agent loads `table-v3.json` (else an older binary's
-`table-v2.json`), `mesh.json` and `wg.key`,
+At its start the agent loads `table-v4.json` (else the release before's
+`table-v3.json`), `mesh.json` and `wg.key`,
 configures the mesh device and hands the cached table to the proxy before
 it contacts `ferund`: an instance that restarts while `ferund` is away
 serves at once what was routable, with the domains' certificates, and
@@ -564,7 +564,7 @@ and nothing reaches through it.
 
 ### Publishing
 
-The ingress serves an environment only once its tenant made it public:
+The ingress serves an environment only once its project made it public:
 
     PUT /api/v1/environments/{env}/public    {"public": true, "access": "visitors", "provider": "ferun"}
 
@@ -591,17 +591,17 @@ without them.
   rolls nothing.
 - Refused with 409: publishing while the platform has no apps zone ("the
   platform serves no apps zone (--apps-zone); an environment cannot be
-  public") or serves not the tenant's zone ("the platform serves no zone
-  old.example.com, tenant acme's; …", a zone left behind by a changed
-  `--tenant-zone`), and either while the environment or its tenant is being
+  public") or serves not the project's zone ("the platform serves no zone
+  old.example.com, project acme's; …", a zone left behind by a changed
+  `--project-zone`), and either while the environment or its project is being
   deleted. A call that changes nothing writes nothing.
 - A change notifies `ferun_ingress env:<id>`, wakes `env-reconcile` and
-  `env-groups`, and is logged with the tenant and the environment.
+  `env-groups`, and is logged with the project and the environment.
 
 `--apps-zone` (`FERUN_APPS_ZONE`) of `ferund` names the zone; empty, the
 default, is the platform's switch: no environment has a host, and none
-can be published. `--tenant-zone` (`FERUN_TENANT_ZONE`) names the
-second zone, the tenant zone ([The tenant zone](#the-tenant-zone)). Deploying the ingress makes no environment public, and
+can be published. `--project-zone` (`FERUN_PROJECT_ZONE`) names the
+second zone, the project zone ([The project zone](#the-project-zone)). Deploying the ingress makes no environment public, and
 a clone never copies `public`.
 
 `GET /api/v1/environments` and `GET …/{env}` show `public` and `hosts`
@@ -622,16 +622,16 @@ at yet says that the ingress serves it once it is.
 
 ### Host labels
 
-An environment's default host is `<label>.<zone>`, in its tenant's zone
-(`tenants.zone`: the apps zone for none, else the tenant zone, ADR 0031).
-The label is a name in that zone, given at its first publish, or chosen by its tenant (below), and changes
-only when its tenant chooses another:
+An environment's default host is `<label>.<zone>`, in its project's zone
+(`projects.zone`: the apps zone for none, else the project zone, ADR 0031).
+The label is a name in that zone, given at its first publish, or chosen by its project (below), and changes
+only when its project chooses another:
 
-- **natural**: `<environment>-<tenant>`, when it names that pair alone
+- **natural**: `<environment>-<project>`, when it names that pair alone
   and is a valid label:
   - the environment's name has no hyphen, so the label splits at its
     first hyphen;
-  - the tenant has no dot, so the label holds the tenant as it is, and
+  - the project has no dot, so the label holds the project as it is, and
     no `--`, so the label has none;
   - it does not end in a hyphen and 16 hex characters, the fallback's
     form;
@@ -640,44 +640,45 @@ only when its tenant chooses another:
 - **fallback**: at most 46 characters of the name (prefixed `e-` when the
   name has that reserved form, trailing hyphens trimmed), a hyphen, and
   the first 16 hex characters of the SHA-256 of the environment's UUID;
-- **chosen**: a label the tenant names with `PUT …/public {"public":
+- **chosen**: a label the project names with `PUT …/public {"public":
   true, "hostLabel": "stage--kino"}`: a DNS label of at most 63
   characters with `--` in it, not as its third and fourth characters,
   and not ending in a hyphen and 16 hex characters. It replaces the
-  label the environment had or would get; that one stays the tenant's;
-- **plain**: a chosen label without `--`, which only a tenant that owns
+  label the environment had or would get; that one stays the project's;
+- **plain**: a chosen label without `--`, which only a project that owns
   the apps zone may choose (`--apps-zone-owners`, FeCode's installation
-  `fecode`, for a project's production at `<project>.<apps zone>`), and
-  only while its hosts are in the apps zone: the tenant zone has no
+  `fecode`, for one of its projects' production at `<FeCode
+  project>.<apps zone>`), and
+  only while its hosts are in the apps zone: the project zone has no
   owners, and a plain label there is a 400. A plain label is a
   DNS label of at most 63 characters, not ending in a hyphen and 16 hex
   characters. One whose part after its first hyphen names an existing
-  tenant is refused (409 `host_label_taken`), since it is the natural
-  label of that tenant's environment, unless the owner holds it already.
+  project is refused (409 `host_label_taken`), since it is the natural
+  label of that project's environment, unless the owner holds it already.
 
-So no two pairs of environment name and tenant have the same natural
+So no two pairs of environment name and project have the same natural
 label, and no natural label is another environment's fallback: a host
-that reads as `<environment>-<tenant>` belongs to that tenant. `web` of
+that reads as `<environment>-<project>` belongs to that project. `web` of
 `acme-io` is `web-acme-io`; `web` of `acme.io` and `web-acme` of `io`,
 which would read the same, get the fallback. A chosen label is neither
 form: no natural label has `--`, and every fallback ends in its hash.
 A plain label is never a fallback, but one with a hyphen reads as a
 natural label: `ironcore-dashboard` as `ironcore` of `dashboard`. That
-is the zone's owner's trade, bounded so: an existing tenant's natural
-label is refused, and a tenant made later whose natural label the owner
-holds gets its fallback, as for a label another tenant holds. A host
-that reads as `<environment>-<tenant>` is that tenant's or the zone's
+is the zone's owner's trade, bounded so: an existing project's natural
+label is refused, and a project made later whose natural label the owner
+holds gets its fallback, as for a label another project holds. A host
+that reads as `<environment>-<project>` is that project's or the zone's
 owner's.
 
 `host_labels` registers every label ever given, per zone (`zone`: `''`
 for the apps zone, else the zone's name, migration `0029`), with the
-tenant that first claimed it there: a label taken in the tenant zone is
-not taken in the apps zone, so whoever makes a tenant cannot reach the
+project that first claimed it there: a label taken in the project zone is
+not taken in the apps zone, so whoever makes a project cannot reach the
 labels of the platform's products. A claim is one atomic upsert, the chosen label, or the
 natural label first, then the fallback: a label is free only for its owner, and only once its
 environment is gone (the foreign key sets it free on delete). So a host,
-its cookies, service workers and HSTS never pass to another tenant; a
-tenant created again under the same name inherits its labels.
+its cookies, service workers and HSTS never pass to another project; a
+project created again under the same name inherits its labels.
 `environments.host_label` mirrors the claim; `host_labels` (its key
 `(zone, label)` and its unique `env_id`) keeps one host per environment
 and one environment per host, so the label alone is no longer unique
@@ -699,7 +700,7 @@ whoever its hosts admit.
 
 [ADR 0054](../adr/0054-visitors-of-an-environment.md): a public
 environment admits `anyone`, as before, or `visitors` of one of its
-tenant's providers ([control-plane.md](control-plane.md#visitors)). The
+project's providers ([control-plane.md](control-plane.md#visitors)). The
 ingress checks a visit by itself, with keys from its table, and asks
 `ferund` only to redeem a code, renew a token and end a visit, over its
 connection; it holds no list and no rule.
@@ -708,7 +709,7 @@ connection; it holds no list and no rule.
 
 - An environment's entry carries `access` (`""` anyone; `visitors`),
   `provider` (the name a token's `prv` must equal) and `signIn`, where a
-  navigation without a visit is sent: the tenant's service, or
+  navigation without a visit is sent: the project's service, or
   `ferun-auth`'s `/visit`. Beside the environments the table carries
   `visitKeys`: the token key's public half and the challenge key, each
   with its ID (16 characters of base64url of a SHA-256), the same for
@@ -724,8 +725,9 @@ connection; it holds no list and no rule.
   (reason `visit-unavailable`), anything else 401. A guarded environment
   never loses its `access` on an error path of the builder; a provider
   without a row gives `signIn` "".
-- The cache is `table-v3.json` (`table-v2.json` until routes had hosts),
-  and the agent's first save deletes `table.json`: an older binary started
+- The cache is `table-v4.json` (`table-v3.json` until ADR 0061,
+  `table-v2.json` until routes had hosts), and the agent's first save
+  deletes the older ones and `table.json`: an older binary started
   on the same volume finds no cache and serves nothing until `ferund`
   gives it a table without the guarded environments, instead of serving
   them open from a new cache. The new binary does not read `table.json`.
@@ -798,12 +800,12 @@ answer, 503 "Signing in is not available right now." with `Retry-After:
   instance did not see end.
 - **Same-site requests.** A request that is no navigation and whose
   `Sec-Fetch-Site` is `same-site` or `cross-site` has no visit, whatever
-  its cookie: tenant hosts under one zone are one site to the browser
+  its cookie: project hosts under one zone are one site to the browser
   (the zones have no Public Suffix List entry), so `SameSite=Lax` sends
-  the cookie with another tenant's `fetch`. `same-origin`, `none` and no
+  the cookie with another project's `fetch`. `same-origin`, `none` and no
   header pass. A navigation of a frame (`Sec-Fetch-Dest` present and not
   `document`: an iframe, an embed) from such a site is no navigation
-  here: 401 and no visit, so that another tenant's page cannot frame the
+  here: 401 and no visit, so that another project's page cannot frame the
   app with its visitor's identity.
 - **Renewal.** A token with less than 5 minutes left is renewed in line,
   on the request that finds it (one renewal per visit at a time on an
@@ -1027,7 +1029,7 @@ host 404 "no such host".
   body received before the request reads it ([Limits](#limits)); no
   write timeout and no timeout for an upstream's response headers, so
   that streams and long polls live.
-- On a host under the apps zone or the tenant zone, every cookie of a
+- On a host under the apps zone or the project zone, every cookie of a
   response is made host-only ([Cookies](#cookies)).
 
 ### Trace context
@@ -1054,7 +1056,7 @@ tracing SDK:
 ### Access log
 
 - After its response, each request routed to an environment becomes a
-  record: its start and duration, the environment and its tenant, the service, the
+  record: its start and duration, the environment and its project, the service, the
   instance of the last attempt, host, method, the escaped path without
   the query, protocol, status (101 for an upgrade, 0 when none was
   written), outcome (the status class, `upgraded`, `aborted`), reason
@@ -1075,7 +1077,7 @@ tracing SDK:
   dialled again after a lost connection. Each (environment, service)
   is a stream of the run, keyed `ingress/<name>`, `<env>/<service>`, the
   run's ID (drawn when the instance starts), each record a JSON line of
-  it numbered from 0, with the environment's tenant as the proxy routed
+  it numbered from 0, with the environment's project as the proxy routed
   it. The agent keeps up to 10,000 records unsent (at most about 15 MiB,
   the batch on its way included) and sends every second, or as soon as
   1,000 wait. A batch holds at most 1,000 records or 1 MiB of lines and
@@ -1083,7 +1085,7 @@ tracing SDK:
   after a backoff (1 s, doubling to 30 s), while new records wait in the
   buffer; one it refuses (`INVALID_ARGUMENT`, `RESOURCE_EXHAUSTED`) is
   dropped and counted. A full buffer drops the new record, and a record
-  without a tenant is dropped; both are counted
+  without a project is dropped; both are counted
   (`ferun_ingress_access_log_dropped_total`). The agent sends while it
   holds a certificate, with or without its connection to `ferund`, and
   the shutdown sends the rest the same way.
@@ -1142,7 +1144,7 @@ asleep the proxy asks the agent to wake the service; the agent sends
 `Wake(env, service)`, one call per service at a time and at most every 5
 s, and drops it while it is not connected; a held request looks again at
 least every 5 s, and so asks again. More than `--max-held-per-env` held
-requests of one environment, or `--max-held-per-tenant` of one tenant:
+requests of one environment, or `--max-held-per-project` of one project:
 503 "too many requests waiting for this host"; more than `--max-held`
 in all: 503 "too many requests waiting";
 both with `Retry-After: 1` ([Limits](#limits)). Draining ends every held
@@ -1161,30 +1163,30 @@ hibernating.
 
 ### Limits
 
-One tenant must not take an instance from the others, nor one
-environment its tenant's other environments. Without bounds, an app that
+One project must not take an instance from the others, nor one
+environment its project's other environments. Without bounds, an app that
 accepts connections and never answers, reached by clients that open many
 HTTP/2 streams, pins requests, goroutines and memory until the instance
 is killed for its memory, and every public app goes down with it; an
 environment whose service stays pending would fill the held requests,
 and every other environment's cold start would get 503.
 
-The shares nest: a tenant's environments together have the tenant's
+The shares nest: a project's environments together have the project's
 share, a quarter of the instance's cap by default, so that it takes four
-tenants to fill the cap however many environments each makes public;
+projects to fill the cap however many environments each makes public;
 within it each environment has its own, an eighth of the cap. A share
 larger than the one it sits in has no effect.
 
 - **Forwarded requests.** A request counts from its first pick of an
   endpoint to its end: the idle hold, the wait for a connection and the
   answer, an upgraded connection for its whole life. One environment may
-  have `--max-inflight-per-env` (256) at once, one tenant
-  `--max-inflight-per-tenant` (512): beyond, 503 "too many requests to
+  have `--max-inflight-per-env` (256) at once, one project
+  `--max-inflight-per-project` (512): beyond, 503 "too many requests to
   this host, try again", `Retry-After: 5`. The instance may have
   `--max-inflight` (2048): beyond, 503 "the ingress is busy, try again",
   `Retry-After: 1`.
 - **Held requests.** One environment may have `--max-held-per-env` (128)
-  held at once, one tenant `--max-held-per-tenant` (256), the instance
+  held at once, one project `--max-held-per-project` (256), the instance
   `--max-held` (1024) ([above](#held-requests-and-wake)).
 - **What a request keeps.** A held or forwarded request keeps its
   headers and the part of its body that came but was not read: a held
@@ -1195,7 +1197,7 @@ larger than the one it sits in has no effect.
   - an HTTP/2 client may send 64 KiB of a body before the request reads
     it. That is HTTP/2's own initial window and the least that works,
     since a client may send that much before it has the server's
-    settings; Go's default of 1 MiB let one tenant's held requests pin
+    settings; Go's default of 1 MiB let one project's held requests pin
     280 MiB. The smaller window slows HTTP/2 uploads over long round
     trips: 64 KiB per round trip, about 5 Mbit/s at 100 ms. HTTP/1.1
     uploads keep TCP's window, as their bodies wait in the kernel;
@@ -1232,10 +1234,10 @@ larger than the one it sits in has no effect.
   - client connections per client address. Behind the shoot's
     balancer, with `externalTrafficPolicy: Local`, the ingress sees the
     client's address, so a cap per client can be built;
-  - the number of environments a tenant may make public. Every instance
+  - the number of environments a project may make public. Every instance
     of the ingress holds every entry of the table, up to 2 MiB each
     coded ([What it holds](#what-it-holds)), and every `ferund` with a
-    stream builds them all, so one tenant's many public environments
+    stream builds them all, so one project's many public environments
     grow the memory of all of them;
   - the builder's parsed deployment specs (`table.Specs`), bounded by
     count, 4096, not by bytes. A stored spec has at most 1 MiB
@@ -1325,7 +1327,7 @@ wildcard. A name without a certificate of its own gets a wildcard
 domain's that covers it (`*.` and its parent, ADR 0045), before the
 zones' wildcards.
 
-An SNI that the tenant zone's wildcard covers (`--tenant-zone-tls-cert`,
+An SNI that the project zone's wildcard covers (`--project-zone-tls-cert`,
 one label under the zone, as a wildcard does) gets that one. Every other
 SNI, or none, gets the operator's wildcard `*.<apps zone>`. Both come
 from files that cert-manager renews into a Secret and the kubelet into
@@ -1338,45 +1340,46 @@ unknown host is the proxy's 404. TLS 1.2 and newer, ALPN `h2` and
 
 `--apps-zone` of `ferund` names it, and `Hello` hands it to the ingress.
 The Gardener deployment derives it from its domain, `apps.<DOMAIN>`
-(`apps.fecode.dev`); domains of tenants come later, beside it. DNS: a
+(`apps.fecode.dev`); domains of projects come later, beside it. DNS: a
 wildcard record `*.<apps zone>` pointing at the ingress's balancer, DNS
 only.
 
-### The tenant zone
+### The project zone
 
-The tenants that people make get their default hosts under a zone of
+The projects that people make get their default hosts under a zone of
 their own (ADR 0031), such as `apps.run.example.com`, so that their
 labels and cookies stay away from the apps zone, where the platform's
-products have their hosts. `--tenant-zone` of `ferund` names it (empty:
+products have their hosts. `--project-zone` of `ferund` names it (empty:
 none; it needs `--apps-zone`, and neither zone may be or lie under the
-other); `Hello` and `Self` hand it to the ingress as `tenantZone`. It
+other); `Hello` and `Self` hand it to the ingress as `projectZone`. It
 has the apps zone's rules: an operator's wildcard certificate, cookies
 made host-only, no claims of names under it, the labels above, and no
 plain labels, since it has no owners.
 
-- **A tenant's zone** is `tenants.zone` (migration `0027`): NULL, the
-  apps zone, for the tenants operators make
-  (`POST /api/v1/admin/tenants`) and for every tenant while there is no
-  tenant zone; the tenant zone's name for the tenants people make, set
-  at their creation (`model.Zones.ForNewTenant`, `store.MakeTenant`).
-  FeCode's tenant `fecode` stays in the apps zone with its plain labels.
-- **An operator moves a tenant**, `PUT /api/v1/admin/tenants/{tenant}/zone
+- **A project's zone** is `projects.zone` (migration `0027`): NULL, the
+  apps zone, for the projects operators make
+  (`POST /api/v1/admin/projects`) and for every project while there is no
+  project zone; the project zone's name for the projects people make, set
+  at their creation (`model.Zones.ForNewProject`, `store.MakeProject`).
+  FeCode's one project at FeRun, `fecode`, stays in the apps zone with its
+  plain labels.
+- **An operator moves a project**, `PUT /api/v1/admin/projects/{project}/zone
   {"zone": "apps.run.example.com"}` (or the apps zone's name). Its
   environments' hosts move as a changed label does: each keeps its
-  label where it may in the new zone (free, or the tenant's there, and
-  not a plain one unless the tenant owns the new zone's plain names),
+  label where it may in the new zone (free, or the project's there, and
+  not a plain one unless the project owns the new zone's plain names),
   else gets its natural label or its fallback there; the labels left
-  behind stay the tenant's. The old hosts answer 404 at once. The
+  behind stay the project's. The old hosts answer 404 at once. The
   answer lists every environment with its label before and after and
-  its new host; an activity row `tenant_zone_set` records the move.
-- A tenant whose `tenants.zone` names a zone the platform does not serve
-  (after `--tenant-zone` changed) has no default hosts, and publishing is
+  its new host; an activity row `project_zone_set` records the move.
+- A project whose `projects.zone` names a zone the platform does not serve
+  (after `--project-zone` changed) has no default hosts, and publishing is
   a 409, until an operator moves it.
-- **The operator** publishes a wildcard record `*.<tenant zone>` to the
+- **The operator** publishes a wildcard record `*.<project zone>` to the
   ingress's balancer, a wildcard certificate for it into the ingress's
-  pods (`--tenant-zone-tls-cert`, `--tenant-zone-tls-key`), and, as for
+  pods (`--project-zone-tls-cert`, `--project-zone-tls-key`), and, as for
   the apps zone, a Public Suffix List entry is recommended. Without that
-  certificate the tenant zone's hosts get the apps zone's wildcard,
+  certificate the project zone's hosts get the apps zone's wildcard,
   which no client accepts for them.
 
 ### Cookies
@@ -1384,7 +1387,7 @@ plain labels, since it has no owners.
 Apps under `apps.fecode.dev` share their registrable domain with the
 platform's hosts (`run`, `id`, FeCode), so an app could set cookies for
 `fecode.dev` that reach them (cookie tossing, login CSRF) or for other
-apps under the zone. On a host under the apps zone or the tenant zone the ingress therefore
+apps under the zone. On a host under the apps zone or the project zone the ingress therefore
 removes, from every `Set-Cookie` header of a response (any status, a
 1xx's and an upgrade's included), each `Domain` attribute whose value,
 without a leading dot and in lower case, is anything but the request's
@@ -1393,7 +1396,7 @@ the host as its `Domain`, passes unchanged; the other attributes, their
 spelling and the headers' order are kept. Removals are counted
 (`ferun_ingress_cookie_domains_removed_total`) and logged at debug, once
 per host and minute. Hosts outside the zone, the domains, are not
-rewritten: a domain is its tenant's own registrable name.
+rewritten: a domain is its project's own registrable name.
 
 The ingress's own cookies of [visits](#cookies-and-headers),
 `__Host-ferun_visit` and `__Host-ferun_challenge`, are taken out of every
@@ -1461,7 +1464,7 @@ expiry.
 |---|---|
 | `ferun_ingress_requests_total{class}` | requests answered, by status class, `upgraded` or `aborted` |
 | `ferun_ingress_upstream_errors_total{kind}` | failed attempts: `dial`, `response`, or `wait` (no connection came free in time) |
-| `ferun_ingress_rejected_total{limit}`, `ferun_ingress_inflight` | requests answered 503 because a limit was taken: `inflight_env`, `inflight_tenant`, `inflight`, `held_env`, `held_tenant` or `held`; requests forwarded now |
+| `ferun_ingress_rejected_total{limit}`, `ferun_ingress_inflight` | requests answered 503 because a limit was taken: `inflight_env`, `inflight_project`, `inflight`, `held_env`, `held_project` or `held`; requests forwarded now |
 | `ferun_ingress_upstream_refused_total`, `…_retries_total`, `…_last_resort_total`, `…_too_large_total`, `…_client_refused_total` | refused connections, retries, picks of a last-resort endpoint, 413s, 403s of a route's `from` |
 | `ferun_ingress_headers_rejected_total{reason}` | requests rejected for their headers: `fields` (431), `trailers` (400) |
 | `ferun_ingress_held_total`, `…_hold_timeouts_total`, `…_wakes_total`, `ferun_ingress_held` | held requests, those that hit their bound, wakes asked for; held now |
@@ -1471,10 +1474,10 @@ expiry.
 | `ferun_ingress_upstream_connections`, `ferun_ingress_endpoints`, `ferun_ingress_endpoint_nodes{admitted}`, `ferun_ingress_hosts` | the data path now |
 | `ferun_ingress_domain_certificates`, `ferun_ingress_acme_challenges`, `ferun_ingress_acme_answers_total{result}` | hosts with a certificate of their own; the challenges in the table; requests under `/.well-known/acme-challenge/`, `answered` or `unknown` |
 | `ferun_ingress_access_log_sent_total`, `…_dropped_total`, `ferun_ingress_access_log_pending` | access log records the sink took, those dropped (no `--sink-endpoint`, a full buffer, a refusal), those waiting (a batch on its way to the sink included) |
-| `ferun_ingress_spans_sent_total`, `…_dropped_total` | server spans of batched records the sink took, and those dropped (failed, refused or rejected by the sink, or without a tenant) |
+| `ferun_ingress_spans_sent_total`, `…_dropped_total` | server spans of batched records the sink took, and those dropped (failed, refused or rejected by the sink, or without a project) |
 | `ferun_ingress_table_age_seconds`, `ferun_ingress_mesh_nodes{handshake}`, `ferun_ingress_mesh_handshake_age_seconds{node}`, `ferun_ingress_mesh_peers`, `ferun_ingress_mesh_configured` | the table's age and the mesh's health |
 | `ferun_ingress_mesh_repairs_total`, `ferun_ingress_mesh_port` | repairs of the paths to lost nodes ([Lost paths](#lost-paths)); the device's port |
-| `ferun_ingress_info{name,version}`, `ferun_ingress_ready`, `ferun_ingress_draining`, `ferun_ingress_control_connected`, `ferun_ingress_control_refusals_total`, `ferun_ingress_identity_removed`, `ferun_ingress_identity_not_after_seconds`, `ferun_ingress_tls_not_after_seconds`, `ferun_ingress_tenant_zone_tls_not_after_seconds` (with a tenant zone's certificate) | the instance |
+| `ferun_ingress_info{name,version}`, `ferun_ingress_ready`, `ferun_ingress_draining`, `ferun_ingress_control_connected`, `ferun_ingress_control_refusals_total`, `ferun_ingress_identity_removed`, `ferun_ingress_identity_not_after_seconds`, `ferun_ingress_tls_not_after_seconds`, `ferun_ingress_project_zone_tls_not_after_seconds` (with a project zone's certificate) | the instance |
 
 ## Shutdown
 
@@ -1549,9 +1552,9 @@ On the Gardener shoot
   the pod.
 - **The certificate** `apps-wildcard`, `*.${APPS_ZONE}`, from
   cert-manager's DNS-01 issuer into the Secret `apps-wildcard-tls`; with
-  a tenant zone, a second one, `*.<tenant zone>`, into a Secret of its
-  own, mounted beside it and named by `--tenant-zone-tls-cert` and
-  `--tenant-zone-tls-key` ([deploy/gardener/README.md](../../deploy/gardener/README.md)).
+  a project zone, a second one, `*.<project zone>`, into a Secret of its
+  own, mounted beside it and named by `--project-zone-tls-cert` and
+  `--project-zone-tls-key` ([deploy/gardener/README.md](../../deploy/gardener/README.md)).
 - **The balancer**, the Service `ferun-ingress` of type `LoadBalancer`
   (80 → 8080, 443 → 8443), with `externalTrafficPolicy: Local`: a
   worker passes a connection only to its own instance, without
@@ -1690,8 +1693,8 @@ open question.
 | A new leader | No effect on the table or the data path; `mesh-peers`, `env-groups` and the idle loop pause for the election. | the lease's TTL |
 | A replica stops | It leaves the table in about 100 ms and the idle pooled connections to it are closed; its pod goes after 10 s, which cuts longer requests; the ingress closes what is still open after 30 s. | |
 | An environment is unpublished | New requests get 404; the open connections to its instances, upgraded ones included, are closed. | about 100 ms |
-| An app accepts connections and never answers | Its requests wait for a connection 10 s at most; at most 256 of them are forwarded at once per instance (512 for all its tenant's environments), and the others get 503 at once. Other tenants keep their shares, and the instance's memory stays bounded. | 256 requests per instance |
-| A service stays pending | Its requests are held up to the pending bound, at most 128 at once per instance (256 for all its tenant's environments); other tenants' requests are still held. | 128 per instance |
+| An app accepts connections and never answers | Its requests wait for a connection 10 s at most; at most 256 of them are forwarded at once per instance (512 for all its project's environments), and the others get 503 at once. Other projects keep their shares, and the instance's memory stays bounded. | 256 requests per instance |
+| A service stays pending | Its requests are held up to the pending bound, at most 128 at once per instance (256 for all its project's environments); other projects' requests are still held. | 128 per instance |
 | Held or stuck requests with large bodies or headers | Each keeps at most 64 KiB of its body that came (HTTP/2's window) and 32 KiB of headers in 100 fields; trailers are refused. The default caps take at most about 950 MiB of the 1.5 GiB limit. | about 250 KiB per held, 350 KiB per forwarded request |
 | A new replica becomes ready | It is an endpoint once its ports are recorded (the prepare hook puts its group before the pod exists) and its node is fresh and admitted. | about 100 ms |
 | A new route on an unchanged service | Apply wakes `env-groups`; the port is in the table once admitted; meanwhile requests wait the pending bound. | one `env-groups` pass |
@@ -1719,7 +1722,7 @@ open question.
   proxy against `httptest` upstreams (routing, gating, holds, the wake
   bound, a client that goes away, draining, the body limit, retries, the
   idle timeout, cookies, the limits against an app that never answers,
-  the shares per tenant and per environment, each wait for a connection,
+  the shares per project and per environment, each wait for a connection,
   HTTP/2's streams, the memory of held HTTP/2 requests with large bodies,
   the header bounds, the connections cut when the table changes, a
   dial under way included, the certificate by SNI with a renewal and
@@ -1741,7 +1744,7 @@ open question.
   re-join retired, one key per peer across nodes and ingresses with two
   interleaved writers, supersession, the renewal's refusals, the mesh's
   peers, the connection check), public
-  environments and their labels (reuse by the same tenant only, the
+  environments and their labels (reuse by the same project only, the
   fallback, the check constraint), the admission records and the
   notifications, holds and the fence.
 - **The controller**: the first publish rolls once and puts `ing-` with

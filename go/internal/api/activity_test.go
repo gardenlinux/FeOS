@@ -45,25 +45,25 @@ func TestSandboxActivity(t *testing.T) {
 	base := time.Now().Add(-time.Minute).UnixNano()
 	exit, dur := int64(3), int64(1500)
 	rows := []store.ActivityRow{
-		{TsNs: base + 1, SandboxID: sb, PodID: sb, TenantID: testTenant, Node: "n1", StartID: start, Seq: 1,
+		{TsNs: base + 1, SandboxID: sb, PodID: sb, ProjectID: testProject, Node: "n1", StartID: start, Seq: 1,
 			Source: store.SourceFeosd, Kind: "pod_state", Category: "lifecycle", Name: "pod RUNNING ()",
 			Detail: json.RawMessage(`{"state":"RUNNING"}`)},
-		{TsNs: base + 2, SandboxID: sb, TenantID: testTenant, InstanceID: "i1", Source: store.SourceFerund,
+		{TsNs: base + 2, SandboxID: sb, ProjectID: testProject, InstanceID: "i1", Source: store.SourceFerund,
 			Kind: "tool_start", Category: "tool", SpanID: "op-1", ParentSpanID: "run-1", Tool: "bash",
 			Params: json.RawMessage(`{"command":"ls"}`)},
-		{TsNs: base + 5, SandboxID: sb, TenantID: testTenant, InstanceID: "i1", Source: store.SourceFerund,
+		{TsNs: base + 5, SandboxID: sb, ProjectID: testProject, InstanceID: "i1", Source: store.SourceFerund,
 			Kind: "tool_end", Category: "tool", SpanID: "op-1", ParentSpanID: "run-1", Tool: "bash", ExitCode: &exit,
 			DurationNs: &dur, Output: "out"},
-		{TsNs: base + 6, SandboxID: sb, PodID: sb, TenantID: testTenant, Node: "n1", StartID: start, Seq: 6,
+		{TsNs: base + 6, SandboxID: sb, PodID: sb, ProjectID: testProject, Node: "n1", StartID: start, Seq: 6,
 			Source: store.SourceAuthn, Kind: "kube_request", Category: "credential", Name: "GET /api 200"},
 	}
 	if err := e.st.InsertActivity(ctx, rows...); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.st.InsertTraffic(ctx,
-		store.TrafficRow{TsNs: base + 3, Node: "n1", StartID: start, Seq: 3, PodID: sb, SandboxID: sb, TenantID: testTenant,
+		store.TrafficRow{TsNs: base + 3, Node: "n1", StartID: start, Seq: 3, PodID: sb, SandboxID: sb, ProjectID: testProject,
 			Kind: "flow", Detail: json.RawMessage(`{"flow":{"bytes_sent":"10"}}`)},
-		store.TrafficRow{TsNs: base + 4, Node: "n1", StartID: start, Seq: 4, PodID: sb, SandboxID: sb, TenantID: testTenant,
+		store.TrafficRow{TsNs: base + 4, Node: "n1", StartID: start, Seq: 4, PodID: sb, SandboxID: sb, ProjectID: testProject,
 			Kind: "dns", Detail: json.RawMessage(`{"dns":{"name":"x."}}`)},
 	); err != nil {
 		t.Fatal(err)
@@ -156,10 +156,10 @@ func TestActivityGapsOfThePage(t *testing.T) {
 	start1, start2 := uuid.New(), uuid.New()
 	base := time.Now().Add(-time.Minute).UnixNano()
 	if err := e.st.InsertTraffic(ctx, store.TrafficRow{TsNs: base + 1, Node: "n2", StartID: start2, Seq: 1, PodID: sb,
-		SandboxID: sb, TenantID: testTenant, Kind: "flow", Detail: json.RawMessage(`{"flow":{}}`)}); err != nil {
+		SandboxID: sb, ProjectID: testProject, Kind: "flow", Detail: json.RawMessage(`{"flow":{}}`)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.st.InsertActivity(ctx, store.ActivityRow{TsNs: base + 2, SandboxID: sb, PodID: sb, TenantID: testTenant,
+	if err := e.st.InsertActivity(ctx, store.ActivityRow{TsNs: base + 2, SandboxID: sb, PodID: sb, ProjectID: testProject,
 		Node: "n1", StartID: start1, Seq: 1, Source: store.SourceFeosd, Kind: "pod_state", Category: "lifecycle"}); err != nil {
 		t.Fatal(err)
 	}
@@ -225,13 +225,13 @@ func TestNodeActivity(t *testing.T) {
 	}
 }
 
-// A tenant reads its sandbox's activity on its own route (ADR 0031): a
+// A project reads its sandbox's activity on its own route (ADR 0031): a
 // reader of the sandbox's environment, and FeCode's admin token, get its
 // rows and traffic without the fleet's part (a placement without the
 // other nodes' verdicts, no overbooking); an operator gets them whole;
-// another tenant's sandbox is absent to a tenant-wide grant, a sandbox of
+// another project's sandbox is absent to a project-wide grant, a sandbox of
 // another environment to an environment's reader.
-func TestTenantSandboxActivity(t *testing.T) {
+func TestProjectSandboxActivity(t *testing.T) {
 	t.Parallel()
 	w := newPeopleWorld(t, envOptions{})
 	ctx := context.Background()
@@ -250,7 +250,7 @@ func TestTenantSandboxActivity(t *testing.T) {
 	inProd := w.podIn(t, "GET /api/v1/sandboxes/{id}", w.prod)
 	base := time.Now().Add(-time.Minute).UnixNano()
 	ferundRow := func(ts int64, of podid.ID, kind, name, detail string) store.ActivityRow {
-		return store.ActivityRow{TsNs: base + ts, SandboxID: of, TenantID: testTenant, InstanceID: "i1", Node: "n1",
+		return store.ActivityRow{TsNs: base + ts, SandboxID: of, ProjectID: testProject, InstanceID: "i1", Node: "n1",
 			Source: store.SourceFerund, Kind: kind, Category: "lifecycle", Name: name, Detail: json.RawMessage(detail)}
 	}
 	tool := ferundRow(3, sb, "tool_start", "", `{}`)
@@ -260,12 +260,12 @@ func TestTenantSandboxActivity(t *testing.T) {
 			`"candidates":[{"node":"n1","feasible":true},{"node":"n2","feasible":false,"reason":"memory: 3900 of 4096 MiB booked"}]}`),
 		ferundRow(2, sb, activity.KindOverbooked, "node n1 overbooked by sandbox "+id+": memory", `{"node":"n1","gate":"memory"}`),
 		tool,
-		ferundRow(4, foreign.ID, "tool_start", "the other tenant's", `{}`),
+		ferundRow(4, foreign.ID, "tool_start", "the other project's", `{}`),
 	); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.e.st.InsertTraffic(ctx, store.TrafficRow{TsNs: base + 5, Node: "n1", StartID: uuid.New(), Seq: 1, PodID: sb,
-		SandboxID: sb, TenantID: testTenant, Kind: "flow", Detail: json.RawMessage(`{"flow":{"bytes_sent":"10"}}`)}); err != nil {
+		SandboxID: sb, ProjectID: testProject, Kind: "flow", Detail: json.RawMessage(`{"flow":{"bytes_sent":"10"}}`)}); err != nil {
 		t.Fatal(err)
 	}
 

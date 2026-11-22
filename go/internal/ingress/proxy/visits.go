@@ -94,7 +94,7 @@ func navigation(r *http.Request) bool {
 // navigation (nav false, or a navigation of a frame: a Sec-Fetch-Dest
 // other than document) says it comes from another site or another host
 // of the same site (Sec-Fetch-Site same-site or cross-site). Hosts under
-// one zone are one site, so a fetch, or an iframe, of another tenant's
+// one zone are one site, so a fetch, or an iframe, of another project's
 // page carries the visit cookie: it counts as without a visit, and gets
 // no sign-in either. Only the browser's own top-level navigation from
 // elsewhere keeps its visit.
@@ -144,7 +144,7 @@ func setVisitor(h http.Header, v *visitReq) {
 // answerAs notes, for the access log, where an answer of the ingress's
 // own about a visit went: the environment and the route's service.
 func (q *request) answerAs(tg target) {
-	q.env, q.tenant, q.service = tg.env.id, tg.env.tenant, tg.route.Service
+	q.env, q.project, q.service = tg.env.id, tg.env.project, tg.route.Service
 }
 
 // checkVisit is the visit check of a guarded environment (ADR 0054),

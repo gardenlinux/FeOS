@@ -319,7 +319,7 @@ func TestLoopsAndWakeups(t *testing.T) {
 		t.Fatalf("beta ran %d times; the hint was alpha's", beta.runs.Load())
 	}
 	// A hint no loop's name holds, and "", wake every loop.
-	notify(t, d, "tenant")
+	notify(t, d, "project")
 	waitFor(t, "every loop woken", 5*time.Second, func() bool { return alpha.runs.Load() == 3 && beta.runs.Load() == 2 })
 	notify(t, d, "")
 	waitFor(t, "every loop woken by \"\"", 5*time.Second, func() bool { return alpha.runs.Load() == 4 && beta.runs.Load() == 3 })
@@ -484,7 +484,7 @@ func TestWoken(t *testing.T) {
 		{"tombstone", []int{1}},
 		{"drain", []int{2}},
 		{"down", []int{0}},
-		{"tenant", []int{0, 1, 2}},
+		{"project", []int{0, 1, 2}},
 		{"", []int{0, 1, 2}},
 		{"*", []int{0, 1, 2}},
 	} {

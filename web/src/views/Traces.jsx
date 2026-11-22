@@ -368,12 +368,12 @@ function TraceView({ st, trace, utc, onTrace, onLines }) {
 }
 
 // Traces is a trace (item, its ID) of the environment.
-export function Traces({ tenant, env, st, item, navigate }) {
+export function Traces({ project, env, st, item, navigate }) {
   const [tz] = useTimeZone();
-  const onTrace = (trace) => navigate(envPath(tenant, env, 'traces', trace));
+  const onTrace = (trace) => navigate(envPath(project, env, 'traces', trace));
   if (!st) return <p className="empty">Loading…</p>;
   return (
     <TraceView st={st} trace={item} utc={tz === 'utc'} onTrace={onTrace}
-      onLines={() => navigate(envPath(tenant, env, 'logs', '', null, queryOf({ trace: item })))} />
+      onLines={() => navigate(envPath(project, env, 'logs', '', null, queryOf({ trace: item })))} />
   );
 }

@@ -26,20 +26,20 @@ const html = (el) => renderToStaticMarkup(el);
 const text = (el) => html(el).replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&quot;/g, '"')
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 const card = (kind, name, extra = {}) => (
-  <AccessCard tenant={T} env={E} kind={kind} name={name} spec={SPEC} catalog={CATALOG} secrets={SECRETS} identities={IDS}
+  <AccessCard project={T} env={E} kind={kind} name={name} spec={SPEC} catalog={CATALOG} secrets={SECRETS} identities={IDS}
     usage={USAGE} now={NOW} navigate={nav} {...extra} />);
 
 describe("a service's Secrets", () => {
   it('heads as Secrets, where its keys live, with the way to all of the environment\'s', () => {
     const out = html(card('service', 'api'));
     expect(text(card('service', 'api'))).toMatch(/^ Secrets where its keys live All of the environment's Identity /);
-    expect(out).toContain(`href="/tenants/${T}/environments/${E}/secrets" class="small sg-all">All of the environment&#x27;s</a>`);
+    expect(out).toContain(`href="/projects/${T}/environments/${E}/secrets" class="small sg-all">All of the environment&#x27;s</a>`);
   });
 
   it('says first who it is: its SPIFFE ID, copyable, and when its first certificate ends, per pod on hover', () => {
     const out = html(card('service', 'api'));
     const all = text(card('service', 'api'));
-    expect(out).toContain('<span class="mono small acc-spiffe">spiffe://run.fecore.dev/tenant/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/service/api</span>');
+    expect(out).toContain('<span class="mono small acc-spiffe">spiffe://run.fecore.dev/project/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/service/api</span>');
     expect(out).toContain('title="copy the SPIFFE ID"');
     expect(all).toMatch(/Identity .* cert until \S+ \S+ in 21h, the first of 2 pods/);
     expect(out).toContain('d7r2m4k9pqs on node-a: until 2026-11-20');
@@ -86,24 +86,24 @@ describe("a service's Secrets", () => {
     const all = text(card('service', 'api'));
     expect(all).toContain('ERP_URL → api.vendor.example at its own name, intercepted at the node');
     expect(all).toContain('OAuth2 · HTTP secret erp v3 · latest v4 · its url');
-    expect(out).toContain(`href="/tenants/${T}/environments/${E}/secrets/http/erp"`);
+    expect(out).toContain(`href="/projects/${T}/environments/${E}/secrets/http/erp"`);
     expect(all).toContain('1,204 req/24h · 2 refused · 1 blocked');
     expect(out).toContain('<span class="bad"> · 2 refused · 1 blocked</span>');
     expect(out).toContain('last problem 2026-11-19');
     expect(out).toContain('403 denied_path: path /admin is not allowed by binding erp');
     expect(out).toContain('sent by service api 1,200 · sandbox c3kv9mwq2hd 4');
     // Its outbound requests in its logs, and the last problem's trace.
-    expect(out).toContain(`href="/tenants/${T}/environments/${E}/objects/service/api/logs?source=egress&amp;since=1d"`);
-    expect(out).toContain(`href="/tenants/${T}/environments/${E}/traces/4bf92f3577b34da6a3ce929d0e0e4736"`);
+    expect(out).toContain(`href="/projects/${T}/environments/${E}/objects/service/api/logs?source=egress&amp;since=1d"`);
+    expect(out).toContain(`href="/projects/${T}/environments/${E}/traces/4bf92f3577b34da6a3ce929d0e0e4736"`);
   });
 
   it('a binding of the spec, still shown: its upstream, its key from secrets, what becomes of it, its 24 h', () => {
     const out = html(card('service', 'api'));
     const all = text(card('service', 'api'));
-    expect(out).toContain(`href="/tenants/${T}/environments/${E}/secrets/binding/mail"`);
+    expect(out).toContain(`href="/projects/${T}/environments/${E}/secrets/binding/mail"`);
     expect(all).toContain('mail → mail.example reached as http://mail at the node basic · secret mail-pass');
     expect(all).toContain('binding in the spec — becomes an HTTP secret');
-    expect(out).toContain(`href="/tenants/${T}/environments/${E}/secrets/secret/mail-pass"`);
+    expect(out).toContain(`href="/projects/${T}/environments/${E}/secrets/secret/mail-pass"`);
     expect(all).toContain('no request in 24h');
   });
 
@@ -120,11 +120,11 @@ describe("a service's Secrets", () => {
   it('an addon by its type and fields, a secret by its variables and pinned version, the registry login at the node', () => {
     const out = html(card('service', 'api'));
     const all = text(card('service', 'api'));
-    expect(out).toContain(`href="/tenants/${T}/environments/${E}/objects/addon/db"`);
+    expect(out).toContain(`href="/projects/${T}/environments/${E}/objects/addon/db"`);
     expect(all).toContain('db → postgres by identity database app · role api_svc · DATABASE_URL');
     expect(all).toContain('bus → nats in the container BUS_URL');
     expect(all).toContain('SESSION_KEY ← session-key in the container secret v2');
-    expect(out).toContain(`href="/tenants/${T}/environments/${E}/secrets/secret/session-key"`);
+    expect(out).toContain(`href="/projects/${T}/environments/${E}/secrets/secret/session-key"`);
     expect(all).toContain('image pull ← ghcr-pull at the node the node pulls with it');
     // A plain variable hands over no key: no row.
     expect(all).not.toContain('PLAIN');
@@ -158,7 +158,7 @@ describe("a service's Secrets", () => {
 describe("a job's Secrets", () => {
   it('its identity without a pod, its addon by identity with its role', () => {
     const all = text(card('job', 'migrate'));
-    expect(all).toContain('spiffe://run.fecore.dev/tenant/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/job/migrate');
+    expect(all).toContain('spiffe://run.fecore.dev/project/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/job/migrate');
     expect(all).toContain('no pod now');
     expect(all).toContain('db → postgres by identity role owner · DATABASE_URL');
   });
@@ -166,13 +166,13 @@ describe("a job's Secrets", () => {
 
 describe("an object's keys on its overview", () => {
   const line = (kind, name, extra = {}) => (
-    <KeysCount tenant={T} env={E} kind={kind} name={name} spec={SPEC} catalog={CATALOG} usage={USAGE} navigate={nav} {...extra} />);
+    <KeysCount project={T} env={E} kind={kind} name={name} spec={SPEC} catalog={CATALOG} usage={USAGE} navigate={nav} {...extra} />);
 
   it('counts its targets by where the key lives and leads to its Config', () => {
     const all = text(line('service', 'api'));
     expect(all).toMatch(/^ Keys: 1 by identity · 3 at the node · 2 in the container /);
     expect(all).toContain('— each with its source, its identity and certificate: Config');
-    expect(html(line('service', 'api'))).toContain(`href="/tenants/${T}/environments/${E}/objects/service/api/config"`);
+    expect(html(line('service', 'api'))).toContain(`href="/projects/${T}/environments/${E}/objects/service/api/config"`);
     expect(text(line('job', 'migrate'))).toMatch(/^ Keys: 1 by identity — /);
   });
 

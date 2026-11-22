@@ -162,8 +162,9 @@ func (e *Engine) syncOnce(ctx context.Context, id podid.ID) error {
 func (e *Engine) applySync(ctx context.Context, read store.Sandbox, obs observation) (applied, deferred bool, err error) {
 	var events []activity.Event
 	var keys []store.TombstoneKey
+	var tls *tlsPush
 	err = e.st.InTx(ctx, func(tx *store.Store) error {
-		applied, deferred, events, keys = false, false, nil, nil
+		applied, deferred, events, keys, tls = false, false, nil, nil, nil
 		row, err := tx.LockSandbox(ctx, read.ID, store.ForUpdate)
 		if errors.Is(err, model.ErrNotFound) {
 			applied = true
@@ -192,7 +193,7 @@ func (e *Engine) applySync(ctx context.Context, read store.Sandbox, obs observat
 		if err := c.commit(ctx); err != nil {
 			return err
 		}
-		applied, events, keys = true, c.events, c.tombstoneKeys()
+		applied, events, keys, tls = true, c.events, c.tombstoneKeys(), c.tls
 		return nil
 	})
 	if err != nil {
@@ -205,7 +206,7 @@ func (e *Engine) applySync(ctx context.Context, read store.Sandbox, obs observat
 		}
 	}
 	e.record(events...)
-	e.processAfterCommit(afterCommit{tombstones: keys})
+	e.processAfterCommit(afterCommit{tombstones: keys, tls: tls})
 	return applied, deferred, nil
 }
 

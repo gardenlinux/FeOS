@@ -7,19 +7,19 @@
 // class of every route, stated at the route and nowhere else:
 //
 //	admin     /api/v1/admin/…            an operator's UI session, or Basic (--admin-users)
-//	person    /api/v1/tenants, /api/v1/invitations/{token}[/accept]
-//	                                     a signed-in person's session, no tenant (ADR 0031)
-//	tenant    /api/v1/sandboxes[/{id}]   a tenant's token, or a person's session that
-//	                                     names its tenant (FeRun-Tenant), with
+//	person    /api/v1/projects, /api/v1/invitations/{token}[/accept]
+//	                                     a signed-in person's session, no project (ADR 0031)
+//	project    /api/v1/sandboxes[/{id}]   a project's token, or a person's session that
+//	                                     names its project (FeRun-Project), with
 //	                                     the role and scope each route states
 //	                                     (ADR 0031, 0035): create, list, delete,
 //	          /api/v1/tools              pause, resume, groups, tokens, access; the
 //	          /api/v1/environments[/…]   environments (ADR 0018) but their door;
 //	          /api/v1/domains[/…]        the domains (ADR 0021)
-//	          /api/v1/providers[/…]      the tenant's access providers (ADR 0054)
-//	          /api/v1/jobs[/…]           the tenants' jobs (ADR 0018)
-//	          /api/v1/tenant             the token's tenant (the sink asks, ADR 0026)
-//	          /api/v1/tenant/…           leaving it, its members and their grants,
+//	          /api/v1/providers[/…]      the project's access providers (ADR 0054)
+//	          /api/v1/jobs[/…]           the projects' jobs (ADR 0018)
+//	          /api/v1/project             the token's project (the sink asks, ADR 0026)
+//	          /api/v1/project/…           leaving it, its members and their grants,
 //	                                     invitations, tokens (ADR 0031)
 //	sandbox   /api/v1/sandboxes/{id}/…   the sandbox's own token: everything that
 //	                                     acts inside the sandbox
@@ -29,8 +29,8 @@
 //	                                     a service token (ADR 0026): the sink's
 //	                                     certificates
 //	provider  /api/v1/challenges/…,      a provider of visitors (ADR 0054):
-//	          /api/v1/visits/{visit}     ferun-auth's service token, or a tenant's
-//	                                     principal as in the tenant class; the
+//	          /api/v1/visits/{visit}     ferun-auth's service token, or a project's
+//	                                     principal as in the project class; the
 //	                                     visits service decides which
 //	                                     environments it answers for
 //	auth      /api/v1/visits/end,        ferun-auth's service token only (ADR
@@ -42,10 +42,10 @@
 //	                                     (the key of ferund's questions to a
 //	                                     provider, ADR 0054)
 //
-// The two token classes stay apart: a tenant's token is not accepted on a
-// sandbox route, not even for a sandbox the tenant owns (the forward class
+// The two token classes stay apart: a project's token is not accepted on a
+// sandbox route, not even for a sandbox the project owns (the forward class
 // answers it 401 "forwarding needs a sandbox token"), and a sandbox's
-// token is unknown on a tenant route. Whoever names something they may not
+// token is unknown on a project route. Whoever names something they may not
 // see gets the answer of an absent thing (404); a principal that sees it
 // but lacks the role gets 403 role_required. Every
 // unknown route under /api/ is a 404 {"error": "no such route: METHOD
@@ -75,6 +75,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/config"
 	"github.com/gardenlinux/feos/go/internal/db"
 	envs "github.com/gardenlinux/feos/go/internal/env"
+	"github.com/gardenlinux/feos/go/internal/env/spec"
 	ingresssvc "github.com/gardenlinux/feos/go/internal/ingress/service"
 	"github.com/gardenlinux/feos/go/internal/leader"
 	"github.com/gardenlinux/feos/go/internal/model"
@@ -93,7 +94,7 @@ type Engine interface {
 	Pause(ctx context.Context, id podid.ID) error
 	Resume(ctx context.Context, id podid.ID) error
 	Delete(ctx context.Context, owner string, id podid.ID) (store.Sandbox, bool, error)
-	DeleteTenant(ctx context.Context, tenant string) (bool, error)
+	DeleteProject(ctx context.Context, project string) (bool, error)
 	Touch(id podid.ID)
 }
 
@@ -133,75 +134,75 @@ type Bindings interface {
 	CheckCredential(http.ResponseWriter, *http.Request, bindings.Env)
 	SandboxCredentialNames(ctx context.Context, id podid.ID) ([]string, error)
 	CheckSandboxCredentials(ctx context.Context, env uuid.UUID, names []string) error
-	SetSandboxCredentials(ctx context.Context, tenant string, env uuid.UUID, id podid.ID, names []string) error
+	SetSandboxCredentials(ctx context.Context, project string, env uuid.UUID, id podid.ID, names []string) error
 	// The HTTP secrets (ADR 0055): an environment's check of one, and
 	// those a sandbox names, with the secrets' codes.
 	CheckSecret(http.ResponseWriter, *http.Request, bindings.Env)
 	CheckSandboxSecrets(ctx context.Context, env uuid.UUID, names []string) error
-	SetSandboxSecrets(ctx context.Context, tenant string, env uuid.UUID, id podid.ID, names []string) error
+	SetSandboxSecrets(ctx context.Context, project string, env uuid.UUID, id podid.ID, names []string) error
 }
 
 // Environments is the environments service (*env.Service, ADR 0018):
-// one method per environment route, tenant class, and the route door, a
+// one method per environment route, project class, and the route door, a
 // class of its own. nil: no environment route is registered.
 type Environments interface {
-	CreateEnv(ctx context.Context, tenant string, req envs.CreateEnvRequest) (envs.EnvStatus, bool, error)
-	ListEnvs(ctx context.Context, tenant string, labels map[string]string) (envs.EnvList, error)
-	GetEnv(ctx context.Context, tenant, envRef string) (envs.EnvStatus, error)
-	RenameEnv(ctx context.Context, tenant, envRef string, req envs.RenameEnvRequest) (envs.EnvStatus, error)
-	DeleteEnv(ctx context.Context, tenant, envRef string) error
-	PlanSpec(ctx context.Context, tenant string, req envs.PlanSpecRequest) (envs.PlanSpecAnswer, error)
-	Addons(ctx context.Context, tenant string) (envs.AddonCatalog, error)
-	Plan(ctx context.Context, tenant, envRef string, req envs.PlanRequest) (envs.PlanAnswer, error)
-	Apply(ctx context.Context, tenant, envRef string, req envs.ApplyRequest) (envs.ApplyAnswer, error)
-	Deployments(ctx context.Context, tenant, envRef string, limit int) (envs.DeploymentList, error)
-	Deployment(ctx context.Context, tenant, envRef string, number int) (envs.DeploymentDetail, error)
-	Revert(ctx context.Context, tenant, envRef string, number int, req envs.RevertRequest) (envs.ApplyAnswer, error)
-	PutObject(ctx context.Context, tenant, envRef, kind, name string, req envs.PutObjectRequest) (envs.ObjectAnswer, error)
-	DeleteObject(ctx context.Context, tenant, envRef, kind, name string, req envs.DeleteObjectRequest) (envs.ObjectAnswer, error)
-	Clone(ctx context.Context, tenant, envRef string, req envs.CloneRequest) (envs.EnvStatus, error)
-	Tags(ctx context.Context, tenant, envRef string) (envs.TagList, error)
-	Tag(ctx context.Context, tenant, envRef, tag string) (envs.Tag, error)
-	PutTag(ctx context.Context, tenant, envRef, tag string, req envs.PutTagRequest) (envs.Tag, error)
-	DeleteTag(ctx context.Context, tenant, envRef, tag string) error
-	Secrets(ctx context.Context, tenant, envRef string) (envs.SecretList, error)
-	Secret(ctx context.Context, tenant, envRef, name string) (envs.SecretInfo, error)
-	PutSecret(ctx context.Context, tenant, envRef, name string, req envs.PutSecretRequest) (envs.SecretVersion, error)
-	DeleteSecret(ctx context.Context, tenant, envRef, name string) error
-	Incidents(ctx context.Context, tenant, envRef string, openOnly bool) (envs.IncidentList, error)
-	Incident(ctx context.Context, tenant, envRef string, id int64) (envs.Incident, error)
-	AccessLogs(ctx context.Context, tenant, envRef string, q envs.AccessLogQuery) (envs.AccessLogList, error)
-	Traffic(ctx context.Context, tenant, envRef, window string) (envs.Traffic, error)
-	BindingUsage(ctx context.Context, tenant, envRef, window string) (envs.BindingUsage, error)
-	Identities(ctx context.Context, tenant, envRef string) (envs.Identities, error)
-	Logs(ctx context.Context, tenant, envRef, kind, name string, lines, replica int) (envs.LogsAnswer, error)
-	RestartService(ctx context.Context, tenant, envRef, name string) error
-	RunJob(ctx context.Context, tenant, envRef, name string) error
-	CheckBinding(ctx context.Context, tenant, envRef, name string, req envs.BindingCheckRequest) (
+	CreateEnv(ctx context.Context, project string, req envs.CreateEnvRequest) (envs.EnvStatus, bool, error)
+	ListEnvs(ctx context.Context, project string, labels map[string]string) (envs.EnvList, error)
+	GetEnv(ctx context.Context, project, envRef string) (envs.EnvStatus, error)
+	RenameEnv(ctx context.Context, project, envRef string, req envs.RenameEnvRequest) (envs.EnvStatus, error)
+	DeleteEnv(ctx context.Context, project, envRef string) error
+	PlanSpec(ctx context.Context, project string, req envs.PlanSpecRequest, format spec.Format) (envs.PlanSpecAnswer, error)
+	Addons(ctx context.Context, project string) (envs.AddonCatalog, error)
+	Plan(ctx context.Context, project, envRef string, req envs.PlanRequest, format spec.Format) (envs.PlanAnswer, error)
+	Apply(ctx context.Context, project, envRef string, req envs.ApplyRequest, format spec.Format) (envs.ApplyAnswer, error)
+	Deployments(ctx context.Context, project, envRef string, limit int) (envs.DeploymentList, error)
+	Deployment(ctx context.Context, project, envRef string, number int) (envs.DeploymentDetail, error)
+	Revert(ctx context.Context, project, envRef string, number int, req envs.RevertRequest) (envs.ApplyAnswer, error)
+	PutObject(ctx context.Context, project, envRef, kind, name string, req envs.PutObjectRequest) (envs.ObjectAnswer, error)
+	DeleteObject(ctx context.Context, project, envRef, kind, name string, req envs.DeleteObjectRequest) (envs.ObjectAnswer, error)
+	Clone(ctx context.Context, project, envRef string, req envs.CloneRequest, format spec.Format) (envs.EnvStatus, error)
+	Tags(ctx context.Context, project, envRef string) (envs.TagList, error)
+	Tag(ctx context.Context, project, envRef, tag string) (envs.Tag, error)
+	PutTag(ctx context.Context, project, envRef, tag string, req envs.PutTagRequest) (envs.Tag, error)
+	DeleteTag(ctx context.Context, project, envRef, tag string) error
+	Secrets(ctx context.Context, project, envRef string) (envs.SecretList, error)
+	Secret(ctx context.Context, project, envRef, name string) (envs.SecretInfo, error)
+	PutSecret(ctx context.Context, project, envRef, name string, req envs.PutSecretRequest) (envs.SecretVersion, error)
+	DeleteSecret(ctx context.Context, project, envRef, name string) error
+	Incidents(ctx context.Context, project, envRef string, openOnly bool) (envs.IncidentList, error)
+	Incident(ctx context.Context, project, envRef string, id int64) (envs.Incident, error)
+	AccessLogs(ctx context.Context, project, envRef string, q envs.AccessLogQuery) (envs.AccessLogList, error)
+	Traffic(ctx context.Context, project, envRef, window string) (envs.Traffic, error)
+	BindingUsage(ctx context.Context, project, envRef, window string) (envs.BindingUsage, error)
+	Identities(ctx context.Context, project, envRef string) (envs.Identities, error)
+	Logs(ctx context.Context, project, envRef, kind, name string, lines, replica int) (envs.LogsAnswer, error)
+	RestartService(ctx context.Context, project, envRef, name string) error
+	RunJob(ctx context.Context, project, envRef, name string) error
+	CheckBinding(ctx context.Context, project, envRef, name string, req envs.BindingCheckRequest) (
 		*bindings.HTTPPreflightResult, error)
-	CreateRouteToken(ctx context.Context, tenant, envRef string) (envs.RouteToken, error)
-	RevokeRouteTokens(ctx context.Context, tenant, envRef string) error
-	SetPublic(ctx context.Context, tenant, envRef string, req envs.PublicRequest) (envs.PublicAnswer, error)
+	CreateRouteToken(ctx context.Context, project, envRef string) (envs.RouteToken, error)
+	RevokeRouteTokens(ctx context.Context, project, envRef string) error
+	SetPublic(ctx context.Context, project, envRef string, req envs.PublicRequest) (envs.PublicAnswer, error)
 	ServeRoute(w http.ResponseWriter, r *http.Request)
 }
 
-// Visitors is the visits service (*visits.Service, ADR 0054): a tenant's
+// Visitors is the visits service (*visits.Service, ADR 0054): a project's
 // access providers, the challenges providers answer, the visits they
 // read, and ferun-auth's routes. Its answers are written as they come;
 // every refusal is an *apierr.Error of its own. nil (ferund without
 // --secret-key-file): none of its routes is registered.
 type Visitors interface {
 	Kinds() []string
-	ListProviders(ctx context.Context, tenant string) (visits.ProviderList, error)
-	GetProvider(ctx context.Context, tenant, name string) (visits.Provider, error)
-	PutProvider(ctx context.Context, tenant, name string, in visits.ProviderIn, madeBy string) (visits.Provider, bool, error)
-	DeleteProvider(ctx context.Context, tenant, name string) error
+	ListProviders(ctx context.Context, project string) (visits.ProviderList, error)
+	GetProvider(ctx context.Context, project, name string) (visits.Provider, error)
+	PutProvider(ctx context.Context, project, name string, in visits.ProviderIn, madeBy string) (visits.Provider, bool, error)
+	DeleteProvider(ctx context.Context, project, name string) error
 	OpenChallenge(ctx context.Context, c visits.Caller, sealed string) (visits.Challenge, error)
 	AcceptChallenge(ctx context.Context, c visits.Caller, in visits.Accept) (visits.Answer, error)
 	RejectChallenge(ctx context.Context, c visits.Caller, sealed string) (visits.Answer, error)
 	GetVisit(ctx context.Context, c visits.Caller, id string) (visits.Visit, error)
 	EndBySession(ctx context.Context, in visits.EndSession) (int, error)
-	OIDCProvider(ctx context.Context, tenant, name string) (visits.OIDCProvider, error)
+	OIDCProvider(ctx context.Context, project, name string) (visits.OIDCProvider, error)
 	JWKS(ctx context.Context) ([]byte, error)
 }
 
@@ -232,8 +233,12 @@ type Config struct {
 	// Secure when it is https, and the Origin of a request authenticated
 	// by a session must be its origin.
 	PublicURL string
-	// OIDC configures human sign-in; nil: none.
+	// OIDC configures human sign-in; nil: none. Its issuer is also the one
+	// whose access tokens an integration signs in with (ADR 0056).
 	OIDC *OIDCConfig
+	// APIAudience is the audience an integration's access token holds
+	// (--api-audience), compared exactly; "": PublicURL.
+	APIAudience string
 	// SessionTTL is the absolute lifetime of a UI session.
 	SessionTTL time.Duration
 
@@ -245,21 +250,22 @@ type Config struct {
 	// JoinTokenTTL is a join token's lifetime when the request names none.
 	JoinTokenTTL time.Duration
 
-	// TenantCreation says who makes tenants with POST /api/v1/tenants
-	// (--tenant-creation, ADR 0031): TenantCreationPeople (also "") or
-	// TenantCreationOperators.
-	TenantCreation string
-	// TenantsPerPerson bounds the tenants one person makes there that are
-	// not being deleted (--tenants-per-person); 0: no bound. Operators are
+	// ProjectCreation says whether the account default is open
+	// (--project-creation, ADR 0059): ProjectCreationPeople (also ""), to
+	// every signed-in person, or ProjectCreationOperators, to its people
+	// and the operators.
+	ProjectCreation string
+	// ProjectsPerPerson bounds the projects one person makes there that are
+	// not being deleted (--projects-per-person); 0: no bound. Operators are
 	// not bound.
-	TenantsPerPerson int
-	// ReservedTenantNames are names no tenant made there may have, beside
+	ProjectsPerPerson int
+	// ReservedProjectNames are names no project made there may have, beside
 	// operator, admin, api and www: the zone owners' and the platform's
 	// host labels.
-	ReservedTenantNames []string
-	// TenantDefaults are the limits of the tenants people make
-	// (--tenant-default-*, ADR 0031); nil: none.
-	TenantDefaults store.TenantLimits
+	ReservedProjectNames []string
+	// ProjectDefaults are the limits of the projects people make
+	// (--project-default-*, ADR 0031); nil: none.
+	ProjectDefaults store.ProjectLimits
 
 	// The fleet's timings, which the nodes view shows (its "defaults"):
 	// the interval nodes report telemetry at (zero:
@@ -270,7 +276,7 @@ type Config struct {
 	TelemetryInterval, NodeTTL, LostGrace, DrainTimeout time.Duration
 
 	// Zones are the platform's zones of default hosts (ADR 0021, ADR
-	// 0031), which an operator moves tenants between.
+	// 0031), which an operator moves projects between.
 	Zones model.Zones
 
 	Log *slog.Logger
@@ -305,8 +311,8 @@ type Deps struct {
 	Ingress Ingress
 	// Domains serves the domain routes; nil: none are registered.
 	Domains Domains
-	// TenantJobs serves the tenants' jobs' routes; nil: none are registered.
-	TenantJobs TenantJobs
+	// ProjectJobs serves the projects' jobs' routes; nil: none are registered.
+	ProjectJobs ProjectJobs
 	// Visitors serves the routes of access providers, challenges and
 	// visits (ADR 0054); nil: none are registered.
 	Visitors Visitors
@@ -381,6 +387,9 @@ func newServer(cfg Config, deps Deps) *server {
 		cfg.TelemetryInterval = config.TelemetryInterval
 	}
 	cfg.PublicURL = strings.TrimSuffix(cfg.PublicURL, "/")
+	if cfg.APIAudience == "" {
+		cfg.APIAudience = cfg.PublicURL
+	}
 	st := deps.Store
 	if st == nil && deps.DB != nil {
 		st = store.New(deps.DB)
@@ -431,22 +440,22 @@ type class string
 const (
 	classPublic class = "public"
 	classAdmin  class = "admin"
-	// classPerson is a signed-in person's session without a tenant (ADR
-	// 0031): making a tenant, taking an invitation.
+	// classPerson is a signed-in person's session without a project (ADR
+	// 0031): making a project, taking an invitation.
 	classPerson  class = "person"
-	classTenant  class = "tenant"
+	classProject class = "project"
 	classSandbox class = "sandbox"
 	classMCP     class = "mcp"
 	classForward class = "forward"
 	// classRoute is the route door's (ANY /api/v1/environments/{env}/http/
 	// {path...}): a route token of the environment, plain-text answers, a
-	// tenant's token refused; the environments service checks it.
+	// project's token refused; the environments service checks it.
 	classRoute class = "route"
 	// classService is a platform service's (ADR 0026): a service token
 	// (service_tokens), POST /api/v1/service-certificates.
 	classService class = "service"
 	// classProvider is a provider's of visitors (ADR 0054): ferun-auth's
-	// service token (kind auth), or a tenant's principal as classTenant
+	// service token (kind auth), or a project's principal as classProject
 	// takes it, with no need at the route: the visits service decides
 	// what each may answer, and answers everything else 404.
 	classProvider class = "provider"
@@ -454,7 +463,7 @@ const (
 	classAuth class = "auth"
 )
 
-// route is one line of the route table. need is a tenant-class route's
+// route is one line of the route table. need is a project-class route's
 // role and scope (ADR 0031); nil for the other classes.
 type route struct {
 	pattern string
@@ -478,8 +487,8 @@ func (s *server) routes() []route {
 		rs = append(rs, route{pattern: pattern, class: c, handler: h})
 	}
 	operator := func(pattern string, h apiHandler) { add(classAdmin, pattern, s.admin(h)) }
-	tenant := func(n need, pattern string, h apiHandler) {
-		rs = append(rs, route{pattern: pattern, class: classTenant, need: &n, handler: s.tenant(n, h)})
+	project := func(n need, pattern string, h apiHandler) {
+		rs = append(rs, route{pattern: pattern, class: classProject, need: &n, handler: s.project(n, h)})
 	}
 	sandbox := func(pattern string, h apiHandler) { add(classSandbox, pattern, s.sandbox(h)) }
 	sandboxHTTP := func(pattern string, h func(http.ResponseWriter, *http.Request)) {
@@ -489,19 +498,19 @@ func (s *server) routes() []route {
 	person := func(pattern string, h apiHandler) { add(classPerson, pattern, s.person(h)) }
 	service := func(pattern string, h apiHandler) { add(classService, pattern, s.service(h)) }
 
-	// Operators: tenants, the node fleet, join tokens, the ingress's
+	// Operators: projects, the node fleet, join tokens, the ingress's
 	// instances, the instances and the activity log of every node and
-	// sandbox, whole and a deleted one's too. Nobody's tenant: a node's
+	// sandbox, whole and a deleted one's too. Nobody's project: a node's
 	// activity and a placement's verdicts tell of the whole fleet, and a
-	// drain takes capacity from everyone. A tenant reads its own
+	// drain takes capacity from everyone. A project reads its own
 	// sandboxes' activity on its route, without the fleet's part.
-	operator("GET /api/v1/admin/tenants", s.listTenants)
-	operator("POST /api/v1/admin/tenants", s.createTenant)
-	operator("DELETE /api/v1/admin/tenants/{tenant}", s.deleteTenant)
-	operator("GET /api/v1/admin/tenants/{tenant}/tokens", s.listTenantTokens)
-	operator("POST /api/v1/admin/tenants/{tenant}/tokens", s.createTenantToken)
-	operator("DELETE /api/v1/admin/tenants/{tenant}/tokens/{hash}", s.revokeTenantToken)
-	operator("PUT /api/v1/admin/tenants/{tenant}/zone", s.setTenantZone)
+	operator("GET /api/v1/admin/projects", s.listProjects)
+	operator("POST /api/v1/admin/projects", s.createProject)
+	operator("DELETE /api/v1/admin/projects/{project}", s.deleteProject)
+	operator("GET /api/v1/admin/projects/{project}/tokens", s.listProjectTokens)
+	operator("POST /api/v1/admin/projects/{project}/tokens", s.createProjectToken)
+	operator("DELETE /api/v1/admin/projects/{project}/tokens/{hash}", s.revokeProjectToken)
+	operator("PUT /api/v1/admin/projects/{project}/zone", s.setProjectZone)
 	operator("GET /api/v1/admin/nodes", s.listNodes)
 	operator("PATCH /api/v1/admin/nodes/{node}", s.patchNode)
 	operator("DELETE /api/v1/admin/nodes/{node}", s.removeNode)
@@ -517,26 +526,26 @@ func (s *server) routes() []route {
 	operator("DELETE /api/v1/admin/ingresses/{name}", s.removeIngress)
 	operator("GET /api/v1/admin/instances", s.listInstances)
 
-	// Tenants: the sandbox as a thing one owns, and the tokens that reach
+	// Projects: the sandbox as a thing one owns, and the tokens that reach
 	// into it. A foreign sandbox is indistinguishable from an absent one.
 	// A sandbox is in an environment (ADR 0035): its routes need the role
-	// on it, an environment's grant or the tenant's; the list shows what
+	// on it, an environment's grant or the project's; the list shows what
 	// the principal reads.
-	tenant(onTenant(read), "GET /api/v1/tools", s.listTools)
-	tenant(byHandler(write), "POST /api/v1/sandboxes", s.createSandbox)
-	tenant(member, "GET /api/v1/sandboxes", s.listSandboxes)
-	tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}", s.getSandbox)
-	tenant(onSandbox(write), "DELETE /api/v1/sandboxes/{id}", s.deleteSandbox)
-	tenant(onSandbox(write), "POST /api/v1/sandboxes/{id}/pause", s.pauseSandbox)
-	tenant(onSandbox(write), "POST /api/v1/sandboxes/{id}/resume", s.resumeSandbox)
-	tenant(onSandbox(write), "PUT /api/v1/sandboxes/{id}/reaches", s.putSandboxReaches)
-	tenant(onSandbox(write), "PUT /api/v1/sandboxes/{id}/image-credentials", s.putImageCredentials)
-	tenant(onSandbox(write), "DELETE /api/v1/sandboxes/{id}/image-credentials", s.deleteImageCredentials)
-	tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/tokens", s.listSandboxTokens)
-	tenant(onSandbox(write), "POST /api/v1/sandboxes/{id}/tokens", s.createSandboxToken)
-	tenant(onSandbox(write), "DELETE /api/v1/sandboxes/{id}/tokens/{hash}", s.revokeSandboxToken)
-	tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/access", s.access)
-	tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/activity", s.tenantSandboxActivity)
+	project(onProject(read), "GET /api/v1/tools", s.listTools)
+	project(byHandler(write), "POST /api/v1/sandboxes", s.createSandbox)
+	project(member, "GET /api/v1/sandboxes", s.listSandboxes)
+	project(onSandbox(read), "GET /api/v1/sandboxes/{id}", s.getSandbox)
+	project(onSandbox(write), "DELETE /api/v1/sandboxes/{id}", s.deleteSandbox)
+	project(onSandbox(write), "POST /api/v1/sandboxes/{id}/pause", s.pauseSandbox)
+	project(onSandbox(write), "POST /api/v1/sandboxes/{id}/resume", s.resumeSandbox)
+	project(onSandbox(write), "PUT /api/v1/sandboxes/{id}/reaches", s.putSandboxReaches)
+	project(onSandbox(write), "PUT /api/v1/sandboxes/{id}/image-credentials", s.putImageCredentials)
+	project(onSandbox(write), "DELETE /api/v1/sandboxes/{id}/image-credentials", s.deleteImageCredentials)
+	project(onSandbox(read), "GET /api/v1/sandboxes/{id}/tokens", s.listSandboxTokens)
+	project(onSandbox(write), "POST /api/v1/sandboxes/{id}/tokens", s.createSandboxToken)
+	project(onSandbox(write), "DELETE /api/v1/sandboxes/{id}/tokens/{hash}", s.revokeSandboxToken)
+	project(onSandbox(read), "GET /api/v1/sandboxes/{id}/access", s.access)
+	project(onSandbox(read), "GET /api/v1/sandboxes/{id}/activity", s.projectSandboxActivity)
 
 	// The sandbox's own token: the tool baseline over REST. Each route
 	// makes the same tools.Runner call that MCP makes, with the call's id
@@ -568,7 +577,7 @@ func (s *server) routes() []route {
 	// The Kubernetes, SSH and HTTP bindings, only while they are on: off,
 	// their routes fall to the /api/ catch-all, which a client reads as
 	// "this platform has no such surface". The sets are the sandbox's, the
-	// preflights the tenant's (they need no sandbox).
+	// preflights the project's (they need no sandbox).
 	if b := s.deps.Bindings; b != nil && b.Enabled() {
 		sandboxHTTP("PUT /api/v1/sandboxes/{id}/kube", b.PutKube)
 		sandboxHTTP("GET /api/v1/sandboxes/{id}/kube", b.GetKube)
@@ -577,61 +586,66 @@ func (s *server) routes() []route {
 		sandboxHTTP("GET /api/v1/sandboxes/{id}/ssh", b.GetSSH)
 		sandboxHTTP("DELETE /api/v1/sandboxes/{id}/ssh", b.DeleteSSH)
 		sandboxHTTP("POST /api/v1/sandboxes/{id}/ssh/{name}/check", b.CheckSSH)
-		tenant(onTenant(write), "POST /api/v1/kube/preflight", serve(b.KubePreflight))
-		tenant(onTenant(write), "POST /api/v1/ssh/preflight", serve(b.SSHPreflight))
+		project(onProject(write), "POST /api/v1/kube/preflight", serve(b.KubePreflight))
+		project(onProject(write), "POST /api/v1/ssh/preflight", serve(b.SSHPreflight))
 		// A sandbox's own HTTP set takes no write (ADR 0055): a sandbox
 		// names HTTP secrets of its environment. A set stated before
 		// serves until its sandbox ends; it reads and deletes as before.
 		sandboxHTTP("PUT /api/v1/sandboxes/{id}/http", goneHTTPSet)
 		sandboxHTTP("GET /api/v1/sandboxes/{id}/http", b.GetHTTP)
 		sandboxHTTP("DELETE /api/v1/sandboxes/{id}/http", b.DeleteHTTP)
-		tenant(onTenant(write), "POST /api/v1/http/preflight", serve(b.HTTPPreflight))
+		project(onProject(write), "POST /api/v1/http/preflight", serve(b.HTTPPreflight))
 
 		// The environments' credentials (ADR 0033), and the ones of its
 		// environment a sandbox names.
 		cred := func(n need, pattern string, h func(http.ResponseWriter, *http.Request, bindings.Env)) {
-			tenant(n, pattern, s.inEnv(h))
+			project(n, pattern, s.inEnv(h))
 		}
 		cred(onEnv(read), "GET /api/v1/environments/{env}/credentials", b.ListCredentials)
 		cred(onEnv(read), "GET /api/v1/environments/{env}/credentials/{name}", b.GetCredential)
 		cred(onEnv(write), "PUT /api/v1/environments/{env}/credentials/{name}", b.PutCredential)
 		cred(onEnv(write), "DELETE /api/v1/environments/{env}/credentials/{name}", b.DeleteCredential)
 		cred(onEnv(write), "POST /api/v1/environments/{env}/credentials/{name}/check", b.CheckCredential)
-		tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/credentials", s.getSandboxCredentials)
-		tenant(onSandbox(write), "PUT /api/v1/sandboxes/{id}/credentials", s.putSandboxCredentials)
+		project(onSandbox(read), "GET /api/v1/sandboxes/{id}/credentials", s.getSandboxCredentials)
+		project(onSandbox(write), "PUT /api/v1/sandboxes/{id}/credentials", s.putSandboxCredentials)
 		// The HTTP secrets (ADR 0055), which the credentials' routes above
 		// are aliases of for one release: an environment's check of one,
 		// and those of its environment a sandbox names. The environment's
 		// list, read, write and delete of its secrets of both kinds are
 		// the environments' routes.
 		cred(onEnv(write), "POST /api/v1/environments/{env}/secrets/{name}/check", b.CheckSecret)
-		tenant(onSandbox(read), "GET /api/v1/sandboxes/{id}/secrets", s.getSandboxSecrets)
-		tenant(onSandbox(write), "PUT /api/v1/sandboxes/{id}/secrets", s.putSandboxSecrets)
+		project(onSandbox(read), "GET /api/v1/sandboxes/{id}/secrets", s.getSandboxSecrets)
+		project(onSandbox(write), "PUT /api/v1/sandboxes/{id}/secrets", s.putSandboxSecrets)
 	}
 
-	// The environments (ADR 0018): the tenant's, and their route door.
-	s.envRoutes(tenant, add)
+	// The environments (ADR 0018): the project's, and their route door.
+	s.envRoutes(project, add)
 
-	// The domains (ADR 0021): the tenant's claims on names, and their
+	// The domains (ADR 0021): the project's claims on names, and their
 	// bindings to its environments.
-	s.domainRoutes(tenant)
+	s.domainRoutes(project)
 
-	// The tenants' jobs (ADR 0018): a container run to its end, once.
-	s.tenantJobRoutes(tenant)
+	// The projects' jobs (ADR 0018): a container run to its end, once.
+	s.projectJobRoutes(project)
 
-	// The sink (ADR 0026): a token's tenant, its instances' certificates
+	// The sink (ADR 0026): a token's project, its instances' certificates
 	// and their service tokens.
-	s.sinkRoutes(operator, service, tenant)
+	s.sinkRoutes(operator, service, project)
 
-	// Visitors (ADR 0054): the tenant's access providers, the challenges
+	// Visitors (ADR 0054): the project's access providers, the challenges
 	// and visits their providers answer and read, and ferun-auth's own
 	// routes; only with the visits service (--secret-key-file).
-	s.visitorRoutes(tenant, add, public)
+	s.visitorRoutes(project, add, public)
 
-	// People (ADR 0031): the tenants they make, the members, their
+	// People (ADR 0031): the projects they make, the members, their
 	// grants, invitations and tokens; the operators' switch of a person.
-	s.memberRoutes(operator, person, tenant)
-	s.quotaRoutes(operator, tenant)
+	s.memberRoutes(operator, person, project)
+	// Integrations (ADR 0056): their registration, and a project's grants
+	// to them.
+	s.integrationRoutes(operator, person, project)
+	s.quotaRoutes(operator, project)
+	// Accounts (ADR 0059): whom a project's use is charged to.
+	s.accountRoutes(operator, person, project)
 
 	// The doors with classes of their own: their answers are plain text
 	// (forward) or the MCP door's, not this API's JSON.

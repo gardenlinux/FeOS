@@ -230,8 +230,8 @@ func TestDiskBookings(t *testing.T) {
 	e := h.eng()
 	sized := func(gib int) store.Sandbox {
 		t.Helper()
-		sb, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: testImage,
-			VCPUs: 1, MemoryMiB: 512, DiskGiB: gib, EnvironmentID: h.boxEnv(testTenant)})
+		sb, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: podid.Mint(), Owner: testProject, Image: testImage,
+			VCPUs: 1, MemoryMiB: 512, DiskGiB: gib, EnvironmentID: h.boxEnv(testProject)})
 		if err != nil {
 			t.Fatal(err)
 		}

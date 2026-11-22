@@ -667,7 +667,7 @@ mod tests {
                     http_binding::Credential::Headers(HeaderCredential {
                         headers: [
                             ("X-Auth".to_string(), "Token abcdef123456".to_string()),
-                            ("X-Tenant".to_string(), "42".to_string()),
+                            ("X-Project".to_string(), "42".to_string()),
                         ]
                         .into(),
                     }),
@@ -705,9 +705,9 @@ mod tests {
         };
         let b64 = |s: &str| base64::engine::general_purpose::STANDARD.encode(s);
 
-        let (out, n) = redact("headers", "Token abcdef123456 | abcdef123456 | tenant 42");
+        let (out, n) = redact("headers", "Token abcdef123456 | abcdef123456 | project 42");
         assert_eq!(n, 2);
-        assert_eq!(out, "redacted********** | redacted**** | tenant 42");
+        assert_eq!(out, "redacted********** | redacted**** | project 42");
 
         let pair = b64("svc-user:pa55-w0rd");
         let (out, n) = redact(

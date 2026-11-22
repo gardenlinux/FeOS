@@ -257,7 +257,7 @@ func TestOutcomeStaleRecord(t *testing.T) {
 	sb := h.sandbox(512)
 	// A pod of this ID from an earlier incarnation is still on the node.
 	old := uuid.New()
-	stale := podSpec(store.Sandbox{ID: sb.ID, Owner: testTenant, Incarnation: old, VCPUs: 1, MemoryMiB: 512, ImageRef: testImage})
+	stale := podSpec(store.Sandbox{ID: sb.ID, Owner: testProject, Incarnation: old, VCPUs: 1, MemoryMiB: 512, ImageRef: testImage})
 	if _, err := h.pods("n1").CreatePod(bg, &podv1.CreatePodRequest{PodId: sb.ID.String(), Spec: stale}); err != nil {
 		t.Fatal(err)
 	}

@@ -44,7 +44,7 @@ func TestLoopsList(t *testing.T) {
 	want := map[string]time.Duration{LoopDownSweep: 5 * time.Second, LoopLostGrace: 30 * time.Second, LoopDrain: 5 * time.Second,
 		LoopTombstones: 10 * time.Second, LoopStaleOps: 10 * time.Second, LoopUnknownSweep: 15 * time.Second,
 		LoopRepair: 30 * time.Second, LoopPendingDescribe: 30 * time.Second, LoopProcessHolds: time.Minute,
-		LoopExpiredHolds: time.Minute, LoopTenantDeletion: time.Minute}
+		LoopExpiredHolds: time.Minute, LoopProjectDeletion: time.Minute}
 	for n, iv := range want {
 		if got[n] != iv {
 			t.Errorf("loop %s: %v, want %v", n, got[n], iv)
@@ -56,7 +56,7 @@ func TestLoopsList(t *testing.T) {
 		t.Fatalf("loops %v", got)
 	}
 	// The hints of ferun_leader wake them by name.
-	for _, hint := range []string{"down", "drain", "tombstone", "tenant"} {
+	for _, hint := range []string{"down", "drain", "tombstone", "project"} {
 		found := false
 		for n := range got {
 			found = found || strings.Contains(n, hint)

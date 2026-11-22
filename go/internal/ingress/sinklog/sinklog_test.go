@@ -51,7 +51,7 @@ func attrs(kvs []*commonv1.KeyValue) map[string]any {
 func TestBatch(t *testing.T) {
 	t0 := time.Date(2026, 10, 31, 12, 0, 0, 0, time.FixedZone("x", 3600))
 	rec := func(env, svc, path string, status int, outcome string) wire.AccessLogEntry {
-		return wire.AccessLogEntry{Time: t0, DurationNs: 1500, Env: env, Tenant: "acme", Service: svc, Instance: "i1",
+		return wire.AccessLogEntry{Time: t0, DurationNs: 1500, Env: env, Project: "acme", Service: svc, Instance: "i1",
 			Host: "app.apps.example", Method: "GET", Path: path, Proto: "HTTP/2.0", Status: status, Outcome: outcome,
 			BytesIn: 3, BytesOut: 12, ClientIP: "203.0.113.9", UserAgent: "ua", Attempts: 2, HeldNs: 7,
 			TraceID: "4bf92f3577b34da6a3ce929d0e0e4736", SpanID: "00f067aa0ba902b7", ParentSpanID: "b7ad6b7169203331"}
@@ -66,7 +66,8 @@ func TestBatch(t *testing.T) {
 	}
 	web := req.ResourceLogs[0]
 	want := map[string]any{
-		"ferun.pod": "ingress/in-0", "ferun.container": "e1/web", "ferun.log_id": "run-1", "ferun.tenant": "acme",
+		"ferun.pod": "ingress/in-0", "ferun.container": "e1/web", "ferun.log_id": "run-1", "ferun.project": "acme",
+		"ferun.tenant":      "acme", // KEEP-TENANT: for the sink before ADR 0061
 		"ferun.environment": "e1", "ferun.kind": "service", "ferun.object": "web", "ferun.source": "ingress",
 	}
 	if got := attrs(web.GetResource().GetAttributes()); !maps.Equal(got, want) {
@@ -110,7 +111,7 @@ func TestBatch(t *testing.T) {
 	if a := attrs(req.ResourceLogs[0].GetScopeLogs()[0].GetLogRecords()[0].GetAttributes()); a["log.offset"] != int64(2) {
 		t.Errorf("the next batch's offset %v", a)
 	}
-	// Only records without a tenant: no request.
+	// Only records without a project: no request.
 	if req, taken, skipped := s.Batch([]wire.AccessLogEntry{{Env: "e1"}}); req != nil || taken != 1 || skipped != 1 {
 		t.Errorf("no record: %v %d %d", req, taken, skipped)
 	}
@@ -120,7 +121,7 @@ func TestBatch(t *testing.T) {
 // record at least.
 func TestBatchBounds(t *testing.T) {
 	s := NewStreams("in-0", "run-1")
-	e := wire.AccessLogEntry{Time: time.Now(), Env: "e1", Tenant: "acme", Service: "web", Status: 200, Outcome: "2xx"}
+	e := wire.AccessLogEntry{Time: time.Now(), Env: "e1", Project: "acme", Service: "web", Status: 200, Outcome: "2xx"}
 	many := slices.Repeat([]wire.AccessLogEntry{e}, MaxRecords+5)
 	if _, taken, _ := s.Batch(many); taken != MaxRecords {
 		t.Errorf("taken %d", taken)

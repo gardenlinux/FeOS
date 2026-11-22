@@ -4,7 +4,7 @@
 [![GitHub License](https://img.shields.io/static/v1?label=License&message=Apache-2.0&color=blue)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://makeapullrequest.com)
 
-FeOS runs untrusted code of many tenants in **pods**: Firecracker microVMs
+FeOS runs untrusted code of many projects in **pods**: Firecracker microVMs
 with containers in them, which cost no memory while they are idle and are
 back in under a second, on the same node or another one. On top of it,
 **FeRun**, a replicated control plane, offers two products:
@@ -30,7 +30,7 @@ FeOS is written in Rust, statically linked against musl; FeRun in Go.
                                   │
   ┌───────────────────────────────┴───────────────────────────────┐
   │ control plane: FeRun, ferund in replicas over PostgreSQL      │
-  │ tenants, sandboxes, environments, placement, idle policies    │
+  │ projects, sandboxes, environments, placement, idle policies   │
   └───────────────────────────────┬───────────────────────────────┘
                                   │ feos.* gRPC APIs over mTLS
                                   │ (the node connects out)

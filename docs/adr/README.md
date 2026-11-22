@@ -40,18 +40,18 @@ want is in [BACKLOG.md](BACKLOG.md).
 | [0027](0027-the-guests-clock.md) | A guest's clock follows its node's, slewed from measurements over vsock | Accepted |
 | [0028](0028-http-bindings.md) | HTTP bindings: APIs by a name, the credential added on the node | Accepted |
 | [0029](0029-static-sites.md) | Static sites: immutable bundles, served from the object store, switched blue-green | Proposed |
-| [0030](0030-cdns.md) | CDNs in front of the ingress, declared on a tenant's domain | Proposed |
-| [0031](0031-people-in-ferun.md) | People in FeRun: tenants with members, grants, and the tenants' console | Accepted |
+| [0030](0030-cdns.md) | CDNs in front of the ingress, declared on a project's domain | Proposed |
+| [0031](0031-people-in-ferun.md) | People in FeRun: projects with members, grants, and the projects' console | Accepted |
 | [0032](0032-the-deployment-builder.md) | The deployment builder: one draft, forms and JSON, planned on every change | Accepted |
 | [0033](0033-credentials-of-an-environment.md) | Credentials of an environment: a binding stated once, versioned, used by name | Superseded by [ADR 0055](0055-a-secret-is-a-value-or-an-http-api.md) |
 | [0034](0034-reachability-from-declarations.md) | Reachability from declarations | Merged into [ADR 0012](0012-reachability-from-declarations.md) |
-| [0035](0035-everything-runs-in-an-environment.md) | Everything runs in an environment: sandboxes and tenants' jobs belong to one | Accepted |
+| [0035](0035-everything-runs-in-an-environment.md) | Everything runs in an environment: sandboxes and projects' jobs belong to one | Accepted |
 | [0036](0036-a-workloads-identity.md) | A workload's identity: one ID per service, job, addon and sandbox | Merged into [ADR 0014](0014-identity-and-credentials.md) |
 | [0037](0037-environments-can-be-renamed.md) | An environment can be renamed | Merged into [ADR 0018](0018-environments-and-deployments.md) |
 | [0038](0038-addons-admit-a-workload-by-its-certificate.md) | Addons admit a workload by its certificate and by nothing else | Accepted |
 | [0039](0039-valkey-admits-a-workload-by-its-certificate.md) | Valkey admits a workload by its certificate and by nothing else | Merged into [ADR 0038](0038-addons-admit-a-workload-by-its-certificate.md) |
 | [0040](0040-addons.md) | Addons: managed backing services from blueprints, on volumes of their own | Accepted |
-| [0041](0041-jobs.md) | Jobs of an environment, and a tenant's job that runs exactly once | Accepted |
+| [0041](0041-jobs.md) | Jobs of an environment, and a project's job that runs exactly once | Accepted |
 | [0042](0042-attached-services.md) | Attached services: a service as a supervised process in a sandbox | Accepted |
 | [0043](0043-the-route-door.md) | The route door: ferund serves an environment's HTTP routes with route tokens | Accepted |
 | [0044](0044-secrets.md) | Secrets of an environment: versioned values that a deployment pins | Accepted |
@@ -60,14 +60,14 @@ want is in [BACKLOG.md](BACKLOG.md).
 | [0050](0050-node-pulls-images.md) | The node pulls images, and a bake pod unpacks them | Proposed |
 | [0052](0052-pushed-membership-deltas.md) | Membership changes reach the nodes as pushed deltas, members before names | Proposed |
 | [0053](0053-kubernetes-and-ssh-bindings.md) | Kubernetes and SSH bindings: the host adds the credential | Proposed |
-| [0054](0054-visitors-of-an-environment.md) | Visitors: a guarded environment admits whom its tenant's access provider vouches for | Accepted |
+| [0054](0054-visitors-of-an-environment.md) | Visitors: a guarded environment admits whom its project's access provider vouches for | Accepted |
 | [0055](0055-a-secret-is-a-value-or-an-http-api.md) | A secret is a value or an HTTP API: one object per key, its kind says where it lives | Accepted |
-| [0056](0056-an-integration-works-in-the-tenants-that-grant-it.md) | An integration is a principal that works in the tenants whose admins grant it a role | Proposed |
+| [0056](0056-an-integration-works-in-the-projects-that-grant-it.md) | An integration is a principal that works in the projects whose admins grant it a role | Proposed |
 | [0057](0057-the-spec-is-one-format-for-every-caller.md) | The spec is one format for every caller: a published module, JSON or YAML | Proposed |
 | [0058](0058-a-spec-says-what-its-code-expects-of-a-secret.md) | A spec says what its code expects of a secret, and the plan checks it | Proposed |
-| [0059](0059-a-tenant-is-on-an-account.md) | A tenant is on an account, which says whom its use is charged to | Proposed |
+| [0059](0059-a-project-is-on-an-account.md) | A project is on an account, which says whom its use is charged to | Proposed |
 | [0060](0060-a-protected-environment-is-changed-by-a-grant-on-itself.md) | A protected environment is changed by a grant on itself, and by an integration only for a person | Proposed |
-| [0061](0061-what-ferun-called-a-tenant-is-a-project.md) | What FeRun called a tenant is a project | Proposed |
+| [0061](0061-what-ferun-called-a-tenant-is-a-project.md) | What FeRun called a tenant is a project <!-- KEEP-TENANT: ADR 0061's title and file name --> | Proposed |
 
 ## Rules
 

@@ -37,7 +37,7 @@ func newCredsFixture(t *testing.T) *credsFixture {
 	h := newHarness(t)
 	f := &credsFixture{harness: h, serial: h.joined("n1")}
 	h.joined("n2")
-	if _, _, err := h.st.CreateTenant(bg, "acme"); err != nil {
+	if _, _, err := h.st.CreateProject(bg, "acme"); err != nil {
 		t.Fatal(err)
 	}
 	f.pod = podid.Mint()
@@ -72,7 +72,7 @@ func TestIssuePodCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The sandbox's workload ID, its environment by its ID (ADR 0036, 0037).
-	want := "spiffe://feos.test/tenant/acme/env/" + f.env.String() + "/sandbox/" + f.pod.String()
+	want := "spiffe://feos.test/project/acme/env/" + f.env.String() + "/sandbox/" + f.pod.String()
 	if resp.GetCertificate().GetSpiffeId() != want {
 		t.Fatalf("SPIFFE ID %q; want %q", resp.GetCertificate().GetSpiffeId(), want)
 	}
@@ -106,7 +106,7 @@ func TestIssuePodCredentials(t *testing.T) {
 		string(c.HPKEPublicKey) != string(f.pub) || c.BindingsVersion != "v1" {
 		t.Fatalf("issued cert %+v", c)
 	}
-	if n := f.count(`SELECT count(*) FROM activity WHERE sandbox_id = $1 AND tenant_id = 'acme' AND kind = 'pod_credentials'
+	if n := f.count(`SELECT count(*) FROM activity WHERE sandbox_id = $1 AND project_id = 'acme' AND kind = 'pod_credentials'
 		AND node = 'n1' AND detail->>'bindings_version' = 'v1' AND detail->>'serial' = $2
 		AND length(detail->>'hpke_key_sha256') = 64`, f.pod, pki.Serial(leaf)); n != 1 {
 		t.Fatalf("%d pod_credentials rows", n)

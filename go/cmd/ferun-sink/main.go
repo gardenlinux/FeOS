@@ -3,7 +3,7 @@
 
 // Command ferun-sink is the platform's log store (ADR 0026): it takes the
 // nodes' OTLP logs over mTLS, keeps them in its PostgreSQL and then as
-// chunks in an object store, and answers tenants' reads over HTTP.
+// chunks in an object store, and answers projects' reads over HTTP.
 //
 //	ferun-sink [serve] [flags]   run the sink (the default)
 //	ferun-sink version           print the version
@@ -26,6 +26,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/gardenlinux/feos/go/internal/config/oldnames"
 	"github.com/gardenlinux/feos/go/internal/sink"
 )
 
@@ -34,6 +35,10 @@ import (
 var version = ""
 
 func main() {
+	if err := oldnames.Refuse(os.Environ()); err != nil {
+		fmt.Fprintf(os.Stderr, "ferun-sink: %v\n", err)
+		os.Exit(2)
+	}
 	os.Exit(run(os.Args[1:], os.Getenv, os.Stdout, os.Stderr))
 }
 

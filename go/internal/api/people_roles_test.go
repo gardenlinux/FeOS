@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -27,11 +28,11 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// routeNeeds is the role and scope of every tenant-class route (ADR
-// 0031): the contract of which role may call what. A tenant route missing
+// routeNeeds is the role and scope of every project-class route (ADR
+// 0031): the contract of which role may call what. A project route missing
 // here, or with another need in the table, fails TestRouteNeeds.
 var routeNeeds = map[string]string{
-	"GET /api/v1/tools":                                         "read tenant",
+	"GET /api/v1/tools":                                         "read project",
 	"POST /api/v1/sandboxes":                                    "write checked by the handler",
 	"GET /api/v1/sandboxes":                                     "member",
 	"GET /api/v1/sandboxes/{id}":                                "read sandbox's environment",
@@ -46,9 +47,9 @@ var routeNeeds = map[string]string{
 	"DELETE /api/v1/sandboxes/{id}/tokens/{hash}":               "write sandbox's environment",
 	"GET /api/v1/sandboxes/{id}/access":                         "read sandbox's environment",
 	"GET /api/v1/sandboxes/{id}/activity":                       "read sandbox's environment",
-	"POST /api/v1/kube/preflight":                               "write tenant",
-	"POST /api/v1/ssh/preflight":                                "write tenant",
-	"POST /api/v1/http/preflight":                               "write tenant",
+	"POST /api/v1/kube/preflight":                               "write project",
+	"POST /api/v1/ssh/preflight":                                "write project",
+	"POST /api/v1/http/preflight":                               "write project",
 	"GET /api/v1/environments/{env}/credentials":                "read environment",
 	"GET /api/v1/environments/{env}/credentials/{name}":         "read environment",
 	"PUT /api/v1/environments/{env}/credentials/{name}":         "write environment",
@@ -59,15 +60,15 @@ var routeNeeds = map[string]string{
 	"POST /api/v1/environments/{env}/secrets/{name}/check":      "write environment",
 	"GET /api/v1/sandboxes/{id}/secrets":                        "read sandbox's environment",
 	"PUT /api/v1/sandboxes/{id}/secrets":                        "write sandbox's environment",
-	"GET /api/v1/tenant":                                        "member",
-	"POST /api/v1/environments":                                 "write tenant",
+	"GET /api/v1/project":                                       "member",
+	"POST /api/v1/environments":                                 "write project",
 	"GET /api/v1/environments":                                  "member",
-	"POST /api/v1/environments/plan":                            "read tenant",
+	"POST /api/v1/environments/plan":                            "read project",
 	"GET /api/v1/addons":                                        "member",
 	"GET /api/v1/environments/{env}":                            "read environment",
-	"PATCH /api/v1/environments/{env}":                          "admin environment or write tenant",
-	"DELETE /api/v1/environments/{env}":                         "admin environment or write tenant",
-	"POST /api/v1/environments/{env}/plan":                      "write environment",
+	"PATCH /api/v1/environments/{env}":                          "admin environment or write project unless protected",
+	"DELETE /api/v1/environments/{env}":                         "admin environment or write project unless protected",
+	"POST /api/v1/environments/{env}/plan":                      "write environment, protection aside",
 	"POST /api/v1/environments/{env}/deployments":               "write environment",
 	"GET /api/v1/environments/{env}/deployments":                "read environment",
 	"GET /api/v1/environments/{env}/deployments/{n}":            "read environment",
@@ -79,7 +80,7 @@ var routeNeeds = map[string]string{
 	"GET /api/v1/environments/{env}/tags/{tag}":                 "read environment",
 	"PUT /api/v1/environments/{env}/tags/{tag}":                 "write environment",
 	"DELETE /api/v1/environments/{env}/tags/{tag}":              "write environment",
-	"POST /api/v1/environments/{env}/clone":                     "write tenant",
+	"POST /api/v1/environments/{env}/clone":                     "write project",
 	"GET /api/v1/environments/{env}/secrets":                    "read environment",
 	"GET /api/v1/environments/{env}/secrets/{name}":             "read environment",
 	"PUT /api/v1/environments/{env}/secrets/{name}":             "write environment",
@@ -93,16 +94,18 @@ var routeNeeds = map[string]string{
 	"POST /api/v1/environments/{env}/services/{name}/restart":   "write environment",
 	"POST /api/v1/environments/{env}/jobs/{name}/run":           "write environment",
 	"POST /api/v1/environments/{env}/bindings/{name}/check":     "write environment",
-	"POST /api/v1/environments/{env}/route-tokens":              "admin environment",
-	"DELETE /api/v1/environments/{env}/route-tokens":            "admin environment",
+	"POST /api/v1/environments/{env}/route-tokens":              "write environment",
+	"DELETE /api/v1/environments/{env}/route-tokens":            "write environment",
 	"PUT /api/v1/environments/{env}/public":                     "admin environment",
-	"POST /api/v1/domains":                                      "admin tenant",
+	"PUT /api/v1/environments/{env}/protected":                  "admin environment",
+	"GET /api/v1/environments/{env}/principals":                 "admin environment",
+	"POST /api/v1/domains":                                      "admin project",
 	"GET /api/v1/domains":                                       "member",
 	"GET /api/v1/domains/{id}":                                  "member",
-	"DELETE /api/v1/domains/{id}":                               "admin tenant",
+	"DELETE /api/v1/domains/{id}":                               "admin project",
 	"PUT /api/v1/domains/{id}/environment":                      "admin checked by the handler",
 	"DELETE /api/v1/domains/{id}/environment":                   "admin checked by the handler",
-	"POST /api/v1/domains/{id}/check":                           "admin tenant",
+	"POST /api/v1/domains/{id}/check":                           "admin project",
 	"POST /api/v1/jobs":                                         "write checked by the handler",
 	"GET /api/v1/jobs":                                          "member",
 	"GET /api/v1/jobs/{id}":                                     "read job's environment",
@@ -110,30 +113,40 @@ var routeNeeds = map[string]string{
 	"GET /api/v1/jobs/{id}/logs":                                "read job's environment",
 	"POST /api/v1/jobs/{id}/cancel":                             "write job's environment",
 
-	"GET /api/v1/tenant/quota":                      "member",
-	"GET /api/v1/tenant/members":                    "member",
-	"PUT /api/v1/tenant/members/{person}/grants":    "admin checked by the handler",
-	"DELETE /api/v1/tenant/members/{person}/grants": "admin checked by the handler",
-	"POST /api/v1/tenant/leave":                     "member",
-	"GET /api/v1/tenant/invitations":                "member",
-	"POST /api/v1/tenant/invitations":               "admin checked by the handler",
-	"DELETE /api/v1/tenant/invitations/{id}":        "admin checked by the handler",
-	"GET /api/v1/tenant/tokens":                     "admin tenant",
-	"POST /api/v1/tenant/tokens":                    "admin tenant",
-	"DELETE /api/v1/tenant/tokens/{hash}":           "admin tenant",
+	"GET /api/v1/project/quota":                      "member",
+	"GET /api/v1/project/members":                    "member",
+	"PUT /api/v1/project/members/{person}/grants":    "admin by scope, no integration",
+	"DELETE /api/v1/project/members/{person}/grants": "admin by scope, no integration",
+	"POST /api/v1/project/leave":                     "member",
+	"GET /api/v1/project/invitations":                "member, no integration",
+	"POST /api/v1/project/invitations":               "admin by scope, no integration",
+	"DELETE /api/v1/project/invitations/{id}":        "admin by scope, no integration",
+	"GET /api/v1/project/tokens":                     "admin project, no integration",
+	"POST /api/v1/project/tokens":                    "admin project, no integration",
+	"DELETE /api/v1/project/tokens/{hash}":           "admin project, no integration",
+	"PUT /api/v1/project/tokens/{hash}/grants":       "admin by scope, no integration",
+	"DELETE /api/v1/project/tokens/{hash}/grants":    "admin by scope, no integration",
+
+	// Integrations (ADR 0056).
+	"PUT /api/v1/project/integrations/{integration}/grants":    "admin by scope, no integration",
+	"DELETE /api/v1/project/integrations/{integration}/grants": "admin by scope or the integration itself",
+
+	// Accounts (ADR 0059).
+	"GET /api/v1/project/account": "member, no integration",
+	"POST /api/v1/project/move":   "admin project, no integration",
 
 	// Visitors (ADR 0054), with the visits service.
 	"GET /api/v1/providers":               "member",
 	"GET /api/v1/providers/{provider}":    "member",
-	"PUT /api/v1/providers/{provider}":    "admin tenant",
-	"DELETE /api/v1/providers/{provider}": "admin tenant",
+	"PUT /api/v1/providers/{provider}":    "admin project",
+	"DELETE /api/v1/providers/{provider}": "admin project",
 }
 
 // roleSkips are the routes TestRoles does not call: their effect would
 // change the principals it goes on with (TestMembers covers them).
-var roleSkips = map[string]bool{"POST /api/v1/tenant/leave": true}
+var roleSkips = map[string]bool{"POST /api/v1/project/leave": true}
 
-// Every tenant-class route states its need in the table, as this test
+// Every project-class route states its need in the table, as this test
 // does; no other class has one.
 func TestRouteNeeds(t *testing.T) {
 	t.Parallel()
@@ -142,11 +155,11 @@ func TestRouteNeeds(t *testing.T) {
 	seen := map[string]bool{}
 	for _, rt := range e.srv.routes() {
 		switch {
-		case rt.class != classTenant && rt.need != nil:
+		case rt.class != classProject && rt.need != nil:
 			diff = append(diff, rt.pattern+": a need on class "+string(rt.class))
-		case rt.class == classTenant && rt.need == nil:
+		case rt.class == classProject && rt.need == nil:
 			diff = append(diff, rt.pattern+": no need")
-		case rt.class == classTenant:
+		case rt.class == classProject:
 			seen[rt.pattern] = true
 			if want, ok := routeNeeds[rt.pattern]; !ok {
 				diff = append(diff, rt.pattern+": in the table, not in the test")
@@ -166,37 +179,58 @@ func TestRouteNeeds(t *testing.T) {
 	}
 }
 
-// principal is a test's caller in testTenant: a token or a person's
-// session, and the roles the test expects it to have.
+// principal is a test's caller in testProject: a token, a person's
+// session or an integration, and the roles the test expects it to have.
 type principal struct {
 	name string
 	// token is the bearer; "" for a session.
 	token string
 	// cookie is the session's cookie value.
-	cookie string
-	tenant auth.Role
-	envs   map[string]auth.Role // by environment name
+	cookie  string
+	project auth.Role
+	envs    map[string]auth.Role // by environment name
+	// integration: token is an integration's JWT, which names person
+	// (FeRun-Person) when it is not "", whose grants are named; unknown,
+	// the person named is none FeRun knows.
+	integration bool
+	person      string
+	named       *side
+	unknown     bool
 }
 
-// request is a request of p: the bearer, or the cookie with FeRun-Tenant
-// and the UI's CSRF header.
+// side is one side's grants, of a named person.
+type side struct {
+	project auth.Role
+	envs    map[string]auth.Role
+}
+
+// request is a request of p: the bearer, or the cookie with FeRun-Project
+// and the UI's CSRF header; an integration's bearer with FeRun-Project
+// and FeRun-Person.
 func (p principal) request(method, path string, body any) request {
 	h := http.Header{}
 	rq := request{method: method, path: path, body: body, header: h}
 	if p.token != "" {
 		h.Set("Authorization", bearerOf(p.token))
+		if p.integration {
+			h.Set(projectHeader, testProject)
+			if p.person != "" {
+				h.Set(personHeader, p.person)
+			}
+		}
 		return rq
 	}
-	h.Set(tenantHeader, testTenant)
+	h.Set(projectHeader, testProject)
 	h.Set(csrfHeader, csrfValue)
 	rq.cookies = []*http.Cookie{{Name: cookieSession, Value: p.cookie}}
 	return rq
 }
 
-// peopleWorld is an API with OIDC on, testTenant's environments stage and
+// peopleWorld is an API with OIDC on, testProject's environments stage and
 // prod, and principals of each kind.
 type peopleWorld struct {
 	e           *env
+	p           *oidctest.Provider
 	stage, prod uuid.UUID
 	// persons by principal name
 	persons map[string]uuid.UUID
@@ -208,21 +242,21 @@ func newPeopleWorld(t *testing.T, o envOptions) *peopleWorld {
 	p := oidctest.New(t, oidc.AlgRS256)
 	o.oidc, o.publicURL = oidcConfig(p), testPublicURL
 	e := newEnv(t, o)
-	w := &peopleWorld{e: e, stage: mkEnvRow(t, e, testTenant, "stage"), prod: mkEnvRow(t, e, testTenant, "prod"),
+	w := &peopleWorld{e: e, p: p, stage: mkEnvRow(t, e, testProject, "stage"), prod: mkEnvRow(t, e, testProject, "prod"),
 		persons: map[string]uuid.UUID{}}
-	mustTenant(t, e, "other")
+	mustProject(t, e, "other")
 	mkEnvRow(t, e, "other", "stage")
 	return w
 }
 
-// token mints a token of testTenant with its own grant.
+// token mints a token of testProject with its own grant.
 func (w *peopleWorld) token(t *testing.T, role string, env uuid.UUID) string {
 	t.Helper()
-	tok, hash, err := mintTenantToken()
+	tok, hash, err := mintProjectToken()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.e.st.InsertTenantToken(context.Background(), store.TenantToken{Hash: hash, TenantID: testTenant,
+	if _, err := w.e.st.InsertProjectToken(context.Background(), store.ProjectToken{Hash: hash, ProjectID: testProject,
 		Role: role, EnvironmentID: env}); err != nil {
 		t.Fatal(err)
 	}
@@ -241,8 +275,8 @@ func (w *peopleWorld) person(t *testing.T, name string, operator bool, grants ..
 	w.persons[name] = p.ID
 	for _, g := range grants {
 		g.PersonID = p.ID
-		if g.TenantID == "" {
-			g.TenantID = testTenant
+		if g.ProjectID == "" {
+			g.ProjectID = testProject
 		}
 		if _, err := w.e.st.PutGrant(ctx, g); err != nil {
 			t.Fatal(err)
@@ -256,47 +290,160 @@ func (w *peopleWorld) person(t *testing.T, name string, operator bool, grants ..
 	return cookie
 }
 
+// providerPerson makes a person of the provider's issuer, whom an
+// integration names by sub, with the grants.
+func (w *peopleWorld) providerPerson(t *testing.T, sub string, grants ...store.Grant) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	p, err := w.e.st.UpsertPerson(ctx, w.p.Issuer, sub, sub+"@example.test", "Person "+sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.persons[sub] = p.ID
+	for _, g := range grants {
+		g.PersonID = p.ID
+		if g.ProjectID == "" {
+			g.ProjectID = testProject
+		}
+		if _, err := w.e.st.PutGrant(ctx, g); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return p.ID
+}
+
+// integration registers an integration of the provider with the grants
+// in testProject (a grant's PersonID is ignored) and returns a bearer of
+// it for the API.
+func (w *peopleWorld) integration(t *testing.T, name string, grants ...store.Grant) string {
+	t.Helper()
+	ctx := context.Background()
+	in, _, err := w.e.st.PutIntegration(ctx, store.IntegrationIn{Name: name, Title: "Integration " + name,
+		URL: "https://" + name + ".example.test", Issuer: w.p.Issuer, Subject: "client-" + name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range grants {
+		project := g.ProjectID
+		if project == "" {
+			project = testProject
+		}
+		if _, err := w.e.st.PutIntegrationGrant(ctx, project, in.ID, g.EnvironmentID, g.Role, "basic:test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return w.p.AccessToken("client-"+name, map[string]any{"aud": testPublicURL})
+}
+
 // principals are the callers of the role tests.
 func (w *peopleWorld) principals(t *testing.T) []principal {
 	R, W, A := auth.RoleRead, auth.RoleWrite, auth.RoleAdmin
-	return []principal{
-		{name: "admin token (FeCode's)", token: w.e.tenantToken, tenant: A},
-		{name: "read token", token: w.token(t, "read", uuid.Nil), tenant: R},
-		{name: "write token", token: w.token(t, "write", uuid.Nil), tenant: W},
+	ps := []principal{
+		{name: "admin token (FeCode's)", token: w.e.projectToken, project: A},
+		{name: "read token", token: w.token(t, "read", uuid.Nil), project: R},
+		{name: "write token", token: w.token(t, "write", uuid.Nil), project: W},
 		{name: "stage write token", token: w.token(t, "write", w.stage), envs: map[string]auth.Role{"stage": W}},
-		{name: "operator", cookie: w.person(t, "op", true), tenant: A},
-		{name: "tenant read, stage admin", cookie: w.person(t, "ra", false,
-			store.Grant{Role: "read"}, store.Grant{Role: "admin", EnvironmentID: w.stage}), tenant: R,
+		{name: "operator", cookie: w.person(t, "op", true), project: A},
+		{name: "project read, stage admin", cookie: w.person(t, "ra", false,
+			store.Grant{Role: "read"}, store.Grant{Role: "admin", EnvironmentID: w.stage}), project: R,
 			envs: map[string]auth.Role{"stage": A}},
-		{name: "tenant write", cookie: w.person(t, "tw", false, store.Grant{Role: "write"}), tenant: W},
-		{name: "tenant admin", cookie: w.person(t, "ta", false, store.Grant{Role: "admin"}), tenant: A},
+		{name: "project write", cookie: w.person(t, "tw", false, store.Grant{Role: "write"}), project: W},
+		{name: "project admin", cookie: w.person(t, "ta", false, store.Grant{Role: "admin"}), project: A},
 		{name: "stage read", cookie: w.person(t, "sr", false, store.Grant{Role: "read", EnvironmentID: w.stage}),
 			envs: map[string]auth.Role{"stage": R}},
 		{name: "prod write", cookie: w.person(t, "pw", false, store.Grant{Role: "write", EnvironmentID: w.prod}),
 			envs: map[string]auth.Role{"prod": W}},
 	}
+	// Integrations (ADR 0056), each its own registration; the person
+	// named, the provider's.
+	n := len(w.persons)
+	id := func(s string) string { return s + "-" + strconv.Itoa(n) }
+	w.providerPerson(t, id("pa"), store.Grant{Role: "admin"})
+	w.providerPerson(t, id("ps"), store.Grant{Role: "read", EnvironmentID: w.stage})
+	w.providerPerson(t, id("pw"), store.Grant{Role: "write"})
+	ps = append(ps,
+		principal{name: "integration (project write)", integration: true, project: W,
+			token: w.integration(t, id("iw"), store.Grant{Role: "write"})},
+		principal{name: "integration (project admin)", integration: true, project: A,
+			token: w.integration(t, id("ia"), store.Grant{Role: "admin"})},
+		principal{name: "integration (env admin)", integration: true, envs: map[string]auth.Role{"stage": A},
+			token: w.integration(t, id("ie"), store.Grant{Role: "admin", EnvironmentID: w.stage})},
+		principal{name: "integration naming a project admin", integration: true, project: A, person: id("pa"),
+			named: &side{project: A}, token: w.integration(t, id("na"), store.Grant{Role: "admin"})},
+		principal{name: "integration (stage write) naming a project write", integration: true,
+			envs: map[string]auth.Role{"stage": W}, person: id("pw"), named: &side{project: W},
+			token: w.integration(t, id("nw"), store.Grant{Role: "write", EnvironmentID: w.stage})},
+		principal{name: "integration naming env read", integration: true, project: W, person: id("ps"),
+			named: &side{envs: map[string]auth.Role{"stage": R}}, token: w.integration(t, id("nr"), store.Grant{Role: "write"})},
+		principal{name: "integration naming an unknown person", integration: true, project: A, person: id("nobody"),
+			unknown: true, token: w.integration(t, id("nu"), store.Grant{Role: "admin"})},
+	)
+	return ps
+}
+
+// counted is what a project grant counts for on an environment that is
+// protected or not (ADR 0060), as the test reads the ADR.
+func counted(g auth.Role, protected bool) auth.Role {
+	if protected && g != auth.RoleAdmin {
+		return min(g, auth.RoleRead)
+	}
+	return g
+}
+
+// roles are p's role on the project, on the stage environment (protected
+// or not) and, for its plan, on stage were it not protected, as the test
+// reads ADR 0031, 0056 and 0060.
+func (p principal) roles(protected bool) (onProject, onStage, plan auth.Role) {
+	onProject = p.project
+	onStage = max(counted(p.project, protected), p.envs["stage"])
+	plan = max(p.project, p.envs["stage"])
+	if n := p.named; n != nil {
+		onProject = min(onProject, n.project)
+		onStage = min(onStage, max(counted(n.project, protected), n.envs["stage"]))
+		plan = min(plan, max(n.project, n.envs["stage"]))
+	} else if p.integration && protected {
+		onStage = min(onStage, auth.RoleRead)
+	}
+	return onProject, onStage, plan
 }
 
 // expected is what the role model says of p on a route of need want (the
-// path's environment "stage"): "pass", "403" or "404".
-func expected(p principal, want string) string {
+// path's environment "stage", protected or not): "pass", "403", "404",
+// "refused" (integration_refused) or "" for a need the handler checks.
+func expected(p principal, want string, protected bool) string {
 	role := func(s string) auth.Role { r, _ := auth.ParseRole(s); return r }
+	if p.unknown {
+		return "404"
+	}
+	if strings.Contains(want, ", no integration") && p.integration {
+		return "refused"
+	}
+	want = strings.TrimSuffix(strings.TrimSuffix(want, ", no integration"), " or the integration itself")
+	if strings.HasSuffix(want, "checked by the handler") || strings.HasSuffix(want, " by scope") {
+		return ""
+	}
+	onProject, onStage, plan := p.roles(protected)
 	words := strings.Fields(want)
 	switch {
 	case want == "member":
 		return "pass"
-	case strings.HasSuffix(want, " tenant") && len(words) == 2:
-		if p.tenant >= role(words[0]) {
+	case strings.HasSuffix(want, " project") && len(words) == 2:
+		if onProject >= role(words[0]) {
 			return "pass"
 		}
 		return "403"
 	case strings.Contains(want, "environment"):
-		eff := max(p.tenant, p.envs["stage"])
-		if eff >= role(words[0]) || (len(words) == 5 && p.tenant >= role(words[3])) {
-			return "pass"
+		have := onStage
+		if strings.HasSuffix(want, "protection aside") && have > auth.RoleNone {
+			have = plan
 		}
-		if eff == auth.RoleNone {
+		switch {
+		case onStage == auth.RoleNone:
 			return "404"
+		case have >= role(words[0]):
+			return "pass"
+		case strings.HasSuffix(want, "unless protected") && !protected && onProject >= role(words[3]):
+			return "pass"
 		}
 		return "403"
 	}
@@ -304,23 +451,27 @@ func expected(p principal, want string) string {
 }
 
 // outcome reads an answer as the role check's: refused 403 with
-// role_required, 404 for an environment, tenant, sandbox or job not seen,
-// else pass.
+// role_required, 403 integration_refused, 404 for an environment,
+// project, sandbox or job not seen, else pass.
 func outcome(w *httptest.ResponseRecorder) string {
 	var b struct{ Error, Code, Role, Scope string }
 	_ = json.Unmarshal(w.Body.Bytes(), &b)
 	switch {
 	case w.Code == http.StatusForbidden && b.Code == "role_required":
 		return "403"
-	case w.Code == http.StatusNotFound && (b.Error == "no such environment" || b.Error == "no such tenant" ||
+	case w.Code == http.StatusForbidden && b.Code == codeIntegrationRefused:
+		return "refused"
+	case w.Code == http.StatusNotFound && (b.Error == "no such environment" || b.Error == "no such project" ||
 		strings.HasPrefix(b.Error, "unknown sandbox ") || b.Error == "no such job"):
 		return "404"
+	case w.Code == http.StatusUnauthorized:
+		return "401"
 	}
 	return "pass"
 }
 
 // podIn is the {id} of a request to pattern: a new sandbox, or a new
-// tenant's job (in the store and in the fake jobs), of environment env
+// project's job (in the store and in the fake jobs), of environment env
 // for the routes of one; a new ID for the others.
 func (w *peopleWorld) podIn(t *testing.T, pattern string, env uuid.UUID) string {
 	t.Helper()
@@ -329,43 +480,43 @@ func (w *peopleWorld) podIn(t *testing.T, pattern string, env uuid.UUID) string 
 	switch {
 	case strings.HasPrefix(path, "/api/v1/sandboxes/{id}"):
 		sb, err := w.e.st.CreateMintedSandbox(ctx, func(id podid.ID) store.NewSandbox {
-			return store.NewSandbox{ID: id, Owner: testTenant, Image: "img", VCPUs: 1, MemoryMiB: 512, EnvironmentID: env}
+			return store.NewSandbox{ID: id, Owner: testProject, Image: "img", VCPUs: 1, MemoryMiB: 512, EnvironmentID: env}
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return sb.ID.String()
 	case strings.HasPrefix(path, "/api/v1/jobs/{id}"):
-		var job store.TenantJob
+		var job store.ProjectJob
 		if err := w.e.st.InTx(ctx, func(tx *store.Store) error {
 			row, err := tx.CreateMintedSandbox(ctx, func(id podid.ID) store.NewSandbox {
-				return store.NewSandbox{ID: id, Owner: testTenant, Image: "img", VCPUs: 1, MemoryMiB: 512, EnvironmentID: env,
-					PodTemplate: &model.PodTemplate{}, TenantJob: true}
+				return store.NewSandbox{ID: id, Owner: testProject, Image: "img", VCPUs: 1, MemoryMiB: 512, EnvironmentID: env,
+					PodTemplate: &model.PodTemplate{}, ProjectJob: true}
 			})
 			if err != nil {
 				return err
 			}
-			job, err = tx.InsertTenantJob(ctx, store.TenantJob{ID: row.ID, Owner: testTenant, EnvID: env, RequestHash: "h",
+			job, err = tx.InsertProjectJob(ctx, store.ProjectJob{ID: row.ID, Owner: testProject, EnvID: env, RequestHash: "h",
 				Image: "img", ImageRef: "img"}, nil, time.Hour)
 			return err
 		}); err != nil {
 			t.Fatal(err)
 		}
-		f := w.e.tenantJobs
+		f := w.e.projectJobs
 		f.mu.Lock()
 		if f.jobs == nil {
-			f.jobs, f.keys = map[string]envs.TenantJobStatus{}, map[string]string{}
+			f.jobs, f.keys = map[string]envs.ProjectJobStatus{}, map[string]string{}
 		}
-		f.jobs[job.ID.String()] = envs.TenantJobStatus{ID: job.ID.String()}
+		f.jobs[job.ID.String()] = envs.ProjectJobStatus{ID: job.ID.String()}
 		f.mu.Unlock()
 		return job.ID.String()
 	}
 	return podid.Mint().String()
 }
 
-// Every tenant route answers each principal as the role model says: the
-// tenant's grant for what reaches beyond one environment, the higher of
-// the tenant's and the environment's grant on an environment's route, an
+// Every project route answers each principal as the role model says: the
+// project's grant for what reaches beyond one environment, the higher of
+// the project's and the environment's grant on an environment's route, an
 // environment without a grant absent (404), a role too low 403
 // role_required; a token's own scope counts as a person's grant does, an
 // operator is admin everywhere, and FeCode's token reaches everything.
@@ -373,22 +524,36 @@ func TestRoles(t *testing.T) {
 	t.Parallel()
 	w := newPeopleWorld(t, envOptions{bindings: &fakeBindings{on: true}, visitors: &fakeVisitors{}})
 	var bad []string
-	for _, p := range w.principals(t) {
-		for pattern, want := range routeNeeds {
-			if strings.HasSuffix(want, "checked by the handler") || roleSkips[pattern] {
-				continue
-			}
-			method, path := concrete(pattern, w.podIn(t, pattern, w.stage))
-			if pattern == "GET /api/v1/tenant" {
-				// The sink's ask, which says it filters by environment
-				// (TestTenantAnswersWhatIsRead).
-				path += "?filter=environments"
-			}
-			got := outcome(w.e.serve(p.request(method, path, nil)))
-			if exp := expected(p, want); got != exp {
-				bad = append(bad, p.name+": "+pattern+": "+got+", want "+exp)
+	ps := w.principals(t)
+	for _, protected := range []bool{false, true} {
+		// ADR 0060: every route again on stage protected.
+		if _, _, err := w.e.st.SetEnvironmentProtected(context.Background(), w.stage, protected); err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range ps {
+			for pattern, want := range routeNeeds {
+				exp := expected(p, want, protected)
+				if exp == "" || roleSkips[pattern] {
+					continue
+				}
+				method, path := concrete(pattern, w.podIn(t, pattern, w.stage))
+				if pattern == "GET /api/v1/project" {
+					// The sink's ask, which says it filters by environment
+					// (TestProjectAnswersWhatIsRead).
+					path += "?filter=environments"
+				}
+				if got := outcome(w.e.serve(p.request(method, path, nil))); got != exp {
+					what := ""
+					if protected {
+						what = " (stage protected)"
+					}
+					bad = append(bad, p.name+what+": "+pattern+": "+got+", want "+exp)
+				}
 			}
 		}
+	}
+	if _, _, err := w.e.st.SetEnvironmentProtected(context.Background(), w.stage, false); err != nil {
+		t.Fatal(err)
 	}
 	sort.Strings(bad)
 	if len(bad) > 0 {
@@ -416,7 +581,7 @@ func TestRoles(t *testing.T) {
 		t.Fatalf("stage read lists %v", ids)
 	}
 	if ids := listed(w.principals(t)[1], ""); !slices.Contains(ids, inProd) || !slices.Contains(ids, inStage) {
-		t.Fatalf("tenant read lists %v", ids)
+		t.Fatalf("project read lists %v", ids)
 	}
 	resp = w.e.serve(sr.request("GET", "/api/v1/sandboxes?environment=prod", nil))
 	expect(t, resp, http.StatusNotFound, errBody("no such environment"))
@@ -442,54 +607,54 @@ func TestRoles(t *testing.T) {
 	expect(t, resp, http.StatusNotFound, errBody("no such environment"))
 }
 
-// The tenant of a request: a token's is its own, and a FeRun-Tenant that
-// names another is an unknown tenant; a session names it, needs a grant
+// The project of a request: a token's is its own, and a FeRun-Project that
+// names another is an unknown project; a session names it, needs a grant
 // there (or to be an operator's) and the CSRF rules of a session.
-func TestTenantPrincipal(t *testing.T) {
+func TestProjectPrincipal(t *testing.T) {
 	t.Parallel()
 	w := newPeopleWorld(t, envOptions{})
 	e := w.e
-	tok := func(tenant string) request {
-		return request{method: "GET", path: "/api/v1/tenant", header: http.Header{"Authorization": {bearerOf(e.tenantToken)},
-			tenantHeader: {tenant}}}
+	tok := func(project string) request {
+		return request{method: "GET", path: "/api/v1/project", header: http.Header{"Authorization": {bearerOf(e.projectToken)},
+			projectHeader: {project}}}
 	}
-	expect(t, e.serve(tok(testTenant)), http.StatusOK, `{"tenant":"acme","role":"admin","environments":[]}`+"\n")
-	expect(t, e.serve(tok("other")), http.StatusNotFound, errBody("no such tenant"))
-	// Another tenant's token never reaches this one's environments.
-	other := e.mintTenantToken("other")
+	expect(t, e.serve(tok(testProject)), http.StatusOK, `{"project":"acme","role":"admin","environments":[]}`+"\n")
+	expect(t, e.serve(tok("other")), http.StatusNotFound, errBody("no such project"))
+	// Another project's token never reaches this one's environments.
+	other := e.mintProjectToken("other")
 	expect(t, e.do("GET", "/api/v1/environments/"+w.stage.String(), bearerOf(other), nil), http.StatusOK, "")
-	if got := e.envs.last(t); got.tenant != "other" {
-		t.Fatalf("the call went to %q", got.tenant)
+	if got := e.envs.last(t); got.project != "other" {
+		t.Fatalf("the call went to %q", got.project)
 	}
 
 	member := w.person(t, "m", false, store.Grant{Role: "write"})
-	sess := func(method, path, tenant string, h http.Header) *httptest.ResponseRecorder {
+	sess := func(method, path, project string, h http.Header) *httptest.ResponseRecorder {
 		if h == nil {
 			h = http.Header{}
 		}
-		if tenant != "" {
-			h.Set(tenantHeader, tenant)
+		if project != "" {
+			h.Set(projectHeader, project)
 		}
 		return e.serve(request{method: method, path: path, header: h,
 			cookies: []*http.Cookie{{Name: cookieSession, Value: member}}})
 	}
-	expect(t, sess("GET", "/api/v1/tenant", testTenant, nil), http.StatusOK, `{"tenant":"acme","role":"write","environments":[]}`+"\n")
-	expect(t, sess("GET", "/api/v1/tenant", "", nil), http.StatusBadRequest,
-		errBody("a session names its tenant in the FeRun-Tenant header"))
-	expect(t, sess("GET", "/api/v1/tenant", "other", nil), http.StatusNotFound, errBody("no such tenant"))
-	expect(t, sess("GET", "/api/v1/tenant", "nope", nil), http.StatusNotFound, errBody("no such tenant"))
+	expect(t, sess("GET", "/api/v1/project", testProject, nil), http.StatusOK, `{"project":"acme","role":"write","environments":[]}`+"\n")
+	expect(t, sess("GET", "/api/v1/project", "", nil), http.StatusBadRequest,
+		errBody("a session names its project in the FeRun-Project header"))
+	expect(t, sess("GET", "/api/v1/project", "other", nil), http.StatusNotFound, errBody("no such project"))
+	expect(t, sess("GET", "/api/v1/project", "nope", nil), http.StatusNotFound, errBody("no such project"))
 	// CSRF: a change needs the header, and an Origin the public URL's.
-	expect(t, sess("POST", "/api/v1/environments", testTenant, nil), http.StatusForbidden,
+	expect(t, sess("POST", "/api/v1/environments", testProject, nil), http.StatusForbidden,
 		errBody("missing X-Requested-With header"))
-	expect(t, sess("POST", "/api/v1/environments", testTenant, http.Header{csrfHeader: {csrfValue},
+	expect(t, sess("POST", "/api/v1/environments", testProject, http.Header{csrfHeader: {csrfValue},
 		"Origin": {"https://evil.example"}}), http.StatusForbidden, errBody("cross-origin request refused"))
-	expect(t, sess("POST", "/api/v1/environments", testTenant, http.Header{csrfHeader: {csrfValue},
+	expect(t, sess("POST", "/api/v1/environments", testProject, http.Header{csrfHeader: {csrfValue},
 		"Origin": {testPublicURL}}), http.StatusOK, "")
-	// An operator is admin in every tenant.
+	// An operator is admin in every project.
 	op := w.person(t, "op", true)
-	w2 := e.serve(request{method: "GET", path: "/api/v1/tenant", header: http.Header{tenantHeader: {"other"}},
+	w2 := e.serve(request{method: "GET", path: "/api/v1/project", header: http.Header{projectHeader: {"other"}},
 		cookies: []*http.Cookie{{Name: cookieSession, Value: op}}})
-	expect(t, w2, http.StatusOK, `{"tenant":"other","role":"admin","environments":[]}`+"\n")
+	expect(t, w2, http.StatusOK, `{"project":"other","role":"admin","environments":[]}`+"\n")
 	// A session of the version before people (no person) is no
 	// principal; nor is an unknown cookie.
 	if _, err := e.st.InsertUISession(context.Background(), store.UISession{IDHash: store.HashToken("old"), Admin: true},
@@ -497,30 +662,30 @@ func TestTenantPrincipal(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []string{"old", "nope"} {
-		w2 = e.serve(request{method: "GET", path: "/api/v1/tenant", header: http.Header{tenantHeader: {testTenant}},
+		w2 = e.serve(request{method: "GET", path: "/api/v1/project", header: http.Header{projectHeader: {testProject}},
 			cookies: []*http.Cookie{{Name: cookieSession, Value: c}}})
-		expect(t, w2, http.StatusUnauthorized, errBody("tenant bearer required"))
+		expect(t, w2, http.StatusUnauthorized, errBody("project bearer required"))
 	}
 	// A disabled person's session is none.
 	if _, err := e.st.SetPersonDisabled(context.Background(), w.persons["m"], true); err != nil {
 		t.Fatal(err)
 	}
-	expect(t, sess("GET", "/api/v1/tenant", testTenant, nil), http.StatusUnauthorized, errBody("tenant bearer required"))
+	expect(t, sess("GET", "/api/v1/project", testProject, nil), http.StatusUnauthorized, errBody("project bearer required"))
 }
 
-// GET /api/v1/tenant, which the sink asks (ADR 0026, 0031), answers every
-// principal with its role on the tenant and the environments it holds a
+// GET /api/v1/project, which the sink asks (ADR 0026, 0031), answers every
+// principal with its role on the project and the environments it holds a
 // grant on: a person's session as a token, a token of an environment's
 // scope as such a person.
-func TestTenantAnswersWhatIsRead(t *testing.T) {
+func TestProjectAnswersWhatIsRead(t *testing.T) {
 	t.Parallel()
 	w := newPeopleWorld(t, envOptions{})
 	e := w.e
 	stage, prod := w.stage.String(), w.prod.String()
 	both := `["` + min(stage, prod) + `","` + max(stage, prod) + `"]`
-	const path = "/api/v1/tenant?filter=environments"
+	const path = "/api/v1/project?filter=environments"
 	asSession := func(cookie string) request {
-		return request{method: "GET", path: path, header: http.Header{tenantHeader: {testTenant}},
+		return request{method: "GET", path: path, header: http.Header{projectHeader: {testProject}},
 			cookies: []*http.Cookie{{Name: cookieSession, Value: cookie}}}
 	}
 	asToken := func(tok string) request {
@@ -531,24 +696,24 @@ func TestTenantAnswersWhatIsRead(t *testing.T) {
 		req  request
 		want string
 	}{
-		{"tenant read and stage admin", asSession(w.person(t, "r", false, store.Grant{Role: "read"},
-			store.Grant{Role: "admin", EnvironmentID: w.stage})), `{"tenant":"acme","role":"read","environments":["` + stage + `"]}`},
+		{"project read and stage admin", asSession(w.person(t, "r", false, store.Grant{Role: "read"},
+			store.Grant{Role: "admin", EnvironmentID: w.stage})), `{"project":"acme","role":"read","environments":["` + stage + `"]}`},
 		{"stage read", asSession(w.person(t, "sr", false, store.Grant{Role: "read", EnvironmentID: w.stage})),
-			`{"tenant":"acme","role":"","environments":["` + stage + `"]}`},
+			`{"project":"acme","role":"","environments":["` + stage + `"]}`},
 		{"stage and prod", asSession(w.person(t, "sp", false, store.Grant{Role: "read", EnvironmentID: w.stage},
-			store.Grant{Role: "write", EnvironmentID: w.prod})), `{"tenant":"acme","role":"","environments":` + both + `}`},
-		{"a token of prod", asToken(w.token(t, "write", w.prod)), `{"tenant":"acme","role":"","environments":["` + prod + `"]}`},
-		{"a token of the tenant", asToken(w.token(t, "read", uuid.Nil)), `{"tenant":"acme","role":"read","environments":[]}`},
+			store.Grant{Role: "write", EnvironmentID: w.prod})), `{"project":"acme","role":"","environments":` + both + `}`},
+		{"a token of prod", asToken(w.token(t, "write", w.prod)), `{"project":"acme","role":"","environments":["` + prod + `"]}`},
+		{"a token of the project", asToken(w.token(t, "read", uuid.Nil)), `{"project":"acme","role":"read","environments":[]}`},
 	} {
 		if got := e.serve(c.req); got.Code != http.StatusOK || got.Body.String() != c.want+"\n" {
 			t.Errorf("%s: %d %s, want %s", c.name, got.Code, got.Body.String(), c.want)
 		}
 		// A sink of before people does not filter: it would read the
-		// answer as the whole tenant's, and gets none of environments.
-		c.req.path = "/api/v1/tenant"
+		// answer as the whole project's, and gets none of environments.
+		c.req.path = "/api/v1/project"
 		got := e.serve(c.req)
 		if strings.Contains(c.want, `"role":""`) {
-			expect(t, got, http.StatusForbidden, `{"error":"this needs the role read on the tenant","code":"role_required","role":"read","scope":"tenant"}`+"\n")
+			expect(t, got, http.StatusForbidden, `{"error":"this needs the role read on the project","code":"role_required","role":"read","scope":"project"}`+"\n")
 		} else if got.Code != http.StatusOK {
 			t.Errorf("%s without the filter: %d %s", c.name, got.Code, got.Body.String())
 		}
@@ -643,13 +808,13 @@ func TestListsAndBindings(t *testing.T) {
 	expect(t, e.serve(ps[8].request("DELETE", "/api/v1/domains/d1/environment", nil)), http.StatusForbidden, "")
 	// prod write: the domain is not seen at all.
 	expect(t, bind(ps[9], "prod"), http.StatusNotFound, errBody("no such domain"))
-	// The tenant's admin binds anywhere.
+	// The project's admin binds anywhere.
 	expect(t, bind(ps[7], "prod"), http.StatusOK, "")
 	expect(t, bind(ps[0], "prod"), http.StatusOK, "")
 }
 
 // ferund records the principal on what it makes: a sandbox and its token
-// by a person's session (an operator's as theirs), a tenant token by an
+// by a person's session (an operator's as theirs), a project token by an
 // operator by Basic.
 func TestMadeBy(t *testing.T) {
 	t.Parallel()
@@ -680,10 +845,10 @@ func TestMadeBy(t *testing.T) {
 			t.Fatalf("%s: made_by %q, want %q", c.p.name, got, c.want)
 		}
 	}
-	resp := e.do("POST", "/api/v1/admin/tenants/acme/tokens", adminAuth(), map[string]string{"role": "read",
+	resp := e.do("POST", "/api/v1/admin/projects/acme/tokens", adminAuth(), map[string]string{"role": "read",
 		"environment": "stage", "label": "ci"})
 	expect(t, resp, http.StatusCreated, "")
-	toks, err := e.st.ListTenantTokens(context.Background(), testTenant)
+	toks, err := e.st.ListProjectTokens(context.Background(), testProject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -691,8 +856,8 @@ func TestMadeBy(t *testing.T) {
 	if last.Label != "ci" || last.Role != "read" || last.EnvironmentID != w.stage || last.MadeBy != "basic:"+testAdmin {
 		t.Fatalf("token %+v", last)
 	}
-	resp = e.do("POST", "/api/v1/admin/tenants/acme/tokens", adminAuth(), map[string]string{"role": "owner"})
+	resp = e.do("POST", "/api/v1/admin/projects/acme/tokens", adminAuth(), map[string]string{"role": "owner"})
 	expect(t, resp, http.StatusBadRequest, errBody(`role must be read, write or admin, got "owner"`))
-	resp = e.do("POST", "/api/v1/admin/tenants/acme/tokens", adminAuth(), map[string]string{"environment": "nope"})
-	expect(t, resp, http.StatusNotFound, errBody("tenant acme has no environment nope"))
+	resp = e.do("POST", "/api/v1/admin/projects/acme/tokens", adminAuth(), map[string]string{"environment": "nope"})
+	expect(t, resp, http.StatusNotFound, errBody("project acme has no environment nope"))
 }

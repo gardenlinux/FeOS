@@ -35,13 +35,13 @@ const (
 	traceLoads         = 4
 )
 
-// Services answers the service names of a tenant's spans of sel since
+// Services answers the service names of a project's spans of sel since
 // sinceNs, sorted.
 func (t *Traces) Services(ctx context.Context, sel quickwit.SpanQuery, sinceNs int64) ([]string, error) {
 	return t.names(ctx, sel, sinceNs, "service_name", func(d *quickwit.SpanDoc) string { return d.ServiceName })
 }
 
-// Operations answers the span names of a tenant's spans of sel (its
+// Operations answers the span names of a project's spans of sel (its
 // Service set) since sinceNs, sorted.
 func (t *Traces) Operations(ctx context.Context, sel quickwit.SpanQuery, sinceNs int64) ([]string, error) {
 	return t.names(ctx, sel, sinceNs, "span_name", func(d *quickwit.SpanDoc) string { return d.SpanName })
@@ -65,11 +65,11 @@ func (t *Traces) names(ctx context.Context, q quickwit.SpanQuery, sinceNs int64,
 	return slices.Compact(names), nil
 }
 
-// Trace answers a trace's spans of sel (its Tenant and TraceID set), from
+// Trace answers a trace's spans of sel (its Project and TraceID set), from
 // the index and its topic's tail (ADR 0026 §11), one per span ID, the earliest first, at most
 // maxTraceSpans; none: nil.
 func (t *Traces) Trace(ctx context.Context, sel quickwit.SpanQuery) ([]quickwit.SpanDoc, error) {
-	q := quickwit.SpanQuery{Tenant: sel.Tenant, TraceID: sel.TraceID, Environment: sel.Environment, Object: sel.Object,
+	q := quickwit.SpanQuery{Project: sel.Project, TraceID: sel.TraceID, Environment: sel.Environment, Object: sel.Object,
 		Job: sel.Job, Instance: sel.Instance, Source: sel.Source, Environments: sel.Environments, Max: maxTraceSpans}
 	spans, err := t.index.SearchSpans(ctx, t.pattern(), q)
 	if err != nil {
@@ -154,10 +154,10 @@ func (t *Traces) Find(ctx context.Context, q quickwit.SpanQuery, limit int) ([][
 
 // parseSpanSelector reads FeRun's selectors of the trace reads:
 // environment, object, job, instance and source (ingress, egress or
-// container); the reader's tenant, and its environments when it reads
+// container); the reader's project, and its environments when it reads
 // those only.
 func parseSpanSelector(v url.Values, acc Access) (quickwit.SpanQuery, error) {
-	q := quickwit.SpanQuery{Tenant: acc.Tenant, Environment: v.Get("environment"), Object: v.Get("object"), Job: v.Get("job"),
+	q := quickwit.SpanQuery{Project: acc.Project, Environment: v.Get("environment"), Object: v.Get("object"), Job: v.Get("job"),
 		Instance: v.Get("instance"), Source: v.Get("source"), Environments: acc.within()}
 	if !validSource(q.Source) {
 		return quickwit.SpanQuery{}, fmt.Errorf("source must be ingress, egress or container")

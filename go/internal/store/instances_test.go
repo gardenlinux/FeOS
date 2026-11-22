@@ -50,7 +50,7 @@ func TestClaimInstance(t *testing.T) {
 
 	// The first was killed during its stop: its row stays stopping, and
 	// an op it ran stays its own.
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	sb := mkSandbox(t, s, "acme")
 	place(t, s, sb.ID, "n1", model.StateRunning)
@@ -89,7 +89,7 @@ func TestClaimInstance(t *testing.T) {
 // description, which gives the claim's reason.
 func TestClaimReleasesAsAStop(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	ids := map[string]podid.ID{}
 	for _, owner := range []string{"stopping", "ended"} {

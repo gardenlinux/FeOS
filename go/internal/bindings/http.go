@@ -33,7 +33,7 @@ import (
 //	PUT    /api/v1/sandboxes/{id}/http   sandbox  the complete binding set
 //	GET    /api/v1/sandboxes/{id}/http   sandbox  the set, every secret field {"set": true}
 //	DELETE /api/v1/sandboxes/{id}/http   sandbox  no bindings
-//	POST   /api/v1/http/preflight        tenant   one binding, no sandbox
+//	POST   /api/v1/http/preflight        project   one binding, no sandbox
 //
 // A PUT states the whole set. It is stored with its credentials sealed,
 // a new interception CA is made when the set's intercepted names change,
@@ -82,34 +82,6 @@ type httpBindingIn struct {
 	ForwardedHost bool              `json:"forwardedHost"`
 	RateLimit     *httpRateLimitIn  `json:"rateLimit"`
 	Credential    *httpCredentialIn `json:"credential"`
-}
-
-// SecretSet stands for a secret field's value in an answer.
-type SecretSet struct {
-	Set bool `json:"set"`
-}
-
-// HTTPCredentialOut is a binding's credential as an answer carries it:
-// its kind and fields, every secret field {"set": true}.
-type HTTPCredentialOut struct {
-	Kind             string               `json:"kind"`
-	Headers          map[string]SecretSet `json:"headers,omitempty"`
-	User             string               `json:"user,omitempty"`
-	Password         *SecretSet           `json:"password,omitempty"`
-	TokenURL         string               `json:"tokenUrl,omitempty"`
-	ClientID         string               `json:"clientId,omitempty"`
-	ClientSecret     *SecretSet           `json:"clientSecret,omitempty"`
-	Scope            string               `json:"scope,omitempty"`
-	Audience         string               `json:"audience,omitempty"`
-	ClientAuthInBody bool                 `json:"clientAuthInBody,omitempty"`
-	CertPem          string               `json:"certPem,omitempty"`
-	KeyPem           *SecretSet           `json:"keyPem,omitempty"`
-}
-
-// HTTPRateLimitOut is a binding's rate limit as an answer carries it.
-type HTTPRateLimitOut struct {
-	PerSecond int `json:"perSecond"`
-	Burst     int `json:"burst"`
 }
 
 type httpBindingOut struct {
@@ -229,7 +201,7 @@ func httpBindingOf(p *fleetv1.HttpBinding) httpBinding {
 
 // ------------------------------------------------------------ validation --
 
-// ownerOf is the tenant of the sandbox a sandbox-class request was made
+// ownerOf is the project of the sandbox a sandbox-class request was made
 // as.
 func ownerOf(r *http.Request) string {
 	sb, _ := auth.SandboxFrom(r.Context())

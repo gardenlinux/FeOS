@@ -12,7 +12,7 @@ import (
 
 func TestSandboxesElsewhere(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	mkNode(t, s, "n2")
 	onNode, elsewhere, target := mkSandbox(t, s, "acme"), mkSandbox(t, s, "acme"), mkSandbox(t, s, "acme")

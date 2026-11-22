@@ -450,7 +450,7 @@ function Lines({ search, onAtEnd, many, trace, onTrace, q, onWord, utc, allKept 
 // of one object: what stands in for the store while it does not answer,
 // and all there is of an attached service (tailOnly), whose process
 // writes into its sandbox, not the store.
-export function LogSearch({ tenant, env, st, focus, navigate, tail, tailOnly, scoped = false }) {
+export function LogSearch({ project, env, st, focus, navigate, tail, tailOnly, scoped = false }) {
   const objects = (st && st.objects) || [];
   const [live, setLive] = useState(true);
   const [tz, setTz] = useTimeZone();
@@ -463,12 +463,12 @@ export function LogSearch({ tenant, env, st, focus, navigate, tail, tailOnly, sc
     const next = { ...focus, ...patch };
     for (const k of Object.keys(next)) if (next[k] == null || next[k] === '') delete next[k];
     navigate(scoped
-      ? envPath(tenant, env, 'logs', next.object, next.replica != null ? next.replica : null, queryOf(next))
-      : envPath(tenant, env, 'logs', '', null, queryOf(next, true)));
+      ? envPath(project, env, 'logs', next.object, next.replica != null ? next.replica : null, queryOf(next))
+      : envPath(project, env, 'logs', '', null, queryOf(next, true)));
   };
   // A trace link opens the trace's spans in the Traces tab, which lead
   // back to every line of it here.
-  const onTrace = (trace) => navigate(envPath(tenant, env, 'traces', trace));
+  const onTrace = (trace) => navigate(envPath(project, env, 'traces', trace));
   const onWord = (word, not) => {
     const q = toggleWord(focus.q, word, not);
     if (q != null) set({ q });
@@ -491,7 +491,7 @@ export function LogSearch({ tenant, env, st, focus, navigate, tail, tailOnly, sc
           </div>
         )}
         <What objects={objects} focus={focus} set={set} navigate={navigate} scoped={scoped}
-          pageOf={(item) => envPath(tenant, env, 'objects', item)} />
+          pageOf={(item) => envPath(project, env, 'objects', item)} />
         {!tailOnly && <>
         <div className="lg-searchrow">
           <label className="searchwrap grow">

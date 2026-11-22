@@ -18,7 +18,7 @@ import {
 } from './jobs.js';
 import { reachesOf } from './reach.js';
 import { EgressEditor, ReachesPicker, ReachesSummary, ReachesWords, useDeployed } from './Reach.jsx';
-import '../styles/tenant.css';
+import '../styles/project.css';
 
 // An environment's jobs made by a call (POST /api/v1/jobs, ADR 0041):
 // runs to completion, one pod each, never retried, in the environment
@@ -27,15 +27,15 @@ import '../styles/tenant.css';
 // newest first, with a label filter and the form of a new one; a job with
 // its log's tail, its result, a cancel while it has not ended and the
 // delete of its record. The jobs of the deployment are objects, on their
-// own pages. /tenants/:t/environments/:env/jobs[/:id]. The list is the
+// own pages. /projects/:t/environments/:env/jobs[/:id]. The list is the
 // environment's (envstatus.jsx), which the sidebar reads too. A change
 // needs write on the environment (write).
 
 const NEEDS_WRITE = 'needs write on this environment';
 
-export function Jobs({ tenant, env, sel, write = false, navigate }) {
-  if (sel) return <JobDetail key={sel} tenant={tenant} env={env} id={sel} write={write} navigate={navigate} />;
-  return <JobList tenant={tenant} env={env} write={write} navigate={navigate} />;
+export function Jobs({ project, env, sel, write = false, navigate }) {
+  if (sel) return <JobDetail key={sel} project={project} env={env} id={sel} write={write} navigate={navigate} />;
+  return <JobList project={project} env={env} write={write} navigate={navigate} />;
 }
 
 // PhaseLabel is a phase as a dot and its word.
@@ -55,7 +55,7 @@ export function withLabels(jobs, labels) {
 
 // ------------------------------------------------------------------- list --
 
-function JobList({ tenant, env, write, navigate }) {
+function JobList({ project, env, write, navigate }) {
   const sum = useSummary();
   const { st, jobs: all, podsErr, podsOk, refreshPods } = useEnvStatus();
   const [labels, setLabels] = useState([]);
@@ -68,7 +68,7 @@ function JobList({ tenant, env, write, navigate }) {
   const addLabels = (list) => setLabels((cur) => [...cur, ...list.filter((l) => !cur.includes(l))]);
   const counts = jobCounts(jobs);
   const declared = ((st && st.objects) || []).filter((o) => o.kind === 'job');
-  const pick = (j) => navigate(jobPath(tenant, env, j.id));
+  const pick = (j) => navigate(jobPath(project, env, j.id));
 
   return (
     <>
@@ -91,7 +91,7 @@ function JobList({ tenant, env, write, navigate }) {
         <RunForm env={env} onCancel={() => setOpen(false)} onRun={async (job) => {
           await refreshPods();
           sum.refresh();
-          navigate(jobPath(tenant, env, job.id));
+          navigate(jobPath(project, env, job.id));
         }} />)}
 
       <ErrBox error={podsErr} />
@@ -137,7 +137,7 @@ function JobList({ tenant, env, write, navigate }) {
                 <tr key={j.id} className="clickable" onClick={() => pick(j)}>
                   <td className="nowrap"><PhaseLabel phase={j.phase} /></td>
                   <td className="mono nowrap">
-                    <EnvLink to={jobPath(tenant, env, j.id)} navigate={navigate}>{shortId(j.id)}</EnvLink>
+                    <EnvLink to={jobPath(project, env, j.id)} navigate={navigate}>{shortId(j.id)}</EnvLink>
                   </td>
                   <td className="small"><ReachesWords reaches={reachesOf(j)} /></td>
                   <td className="mono small trunc" title={j.imageRef || j.image}>{j.image}</td>
@@ -160,12 +160,12 @@ function JobList({ tenant, env, write, navigate }) {
         A job made by a call is one container run to its end exactly once, with a deadline; it is never retried. Its
         record, with the exit code, the result and the log&apos;s tail, is kept {JOB_LIMITS.keptDays} days after it ends,
         then it goes, and with the environment. It reaches what its create says of the environment. Jobs queued or
-        running count towards the tenant&apos;s limits.
+        running count towards the project&apos;s limits.
         {declared.length > 0 && (
           <> The deployment&apos;s jobs run with their deployment or when asked, on their pages:{' '}
             {declared.map((o, i) => (
               <React.Fragment key={o.name}>{i > 0 && ', '}
-                <EnvLink to={objectPath(tenant, env, `job/${o.name}`)} navigate={navigate} className="mono">{o.name}</EnvLink>
+                <EnvLink to={objectPath(project, env, `job/${o.name}`)} navigate={navigate} className="mono">{o.name}</EnvLink>
               </React.Fragment>))}.</>)}
       </p>
     </>
@@ -269,7 +269,7 @@ export function RunForm({ env, onRun, onCancel }) {
           <button type="submit" className="primary" disabled={busy || errors.length > 0}>
             <Icon name="play" size={14} /> {busy ? 'Starting…' : 'Run'}</button>
           <button type="button" className="ghost" onClick={onCancel}>Cancel</button>
-          <span className="muted small">It runs once and is never retried. A new job past the tenant's limits is refused.</span>
+          <span className="muted small">It runs once and is never retried. A new job past the project's limits is refused.</span>
         </div>
       </form>
     </section>
@@ -281,7 +281,7 @@ export function RunForm({ env, onRun, onCancel }) {
 // JobDetail is a job's page in its environment's Activity: back to the
 // jobs, its head with Cancel, why it is in its phase, the job, its
 // result, its log and the delete of its record.
-function JobDetail({ tenant, env, id, write, navigate }) {
+function JobDetail({ project, env, id, write, navigate }) {
   const sum = useSummary();
   const { refreshPods } = useEnvStatus();
   const [job, setJob] = useState(null);
@@ -291,7 +291,7 @@ function JobDetail({ tenant, env, id, write, navigate }) {
   const [armed, arm, disarm] = useArm();
   const now = useNow(1000);
   const live = !job || onItsWay(job.phase);
-  const list = jobPath(tenant, env);
+  const list = jobPath(project, env);
 
   const refresh = useCallback(async () => {
     try {
@@ -329,7 +329,7 @@ function JobDetail({ tenant, env, id, write, navigate }) {
         <p className="empty">
           {elsewhere
             ? <>Job <span className="mono">{id}</span> runs in{' '}
-              <EnvLink to={jobPath(tenant, elsewhere.name || elsewhere.id, id)} navigate={navigate} className="mono">
+              <EnvLink to={jobPath(project, elsewhere.name || elsewhere.id, id)} navigate={navigate} className="mono">
                 {elsewhere.name || elsewhere.id}</EnvLink>.</>
             : <>No job <span className="mono">{id}</span> in {env}. A job&apos;s record goes {JOB_LIMITS.keptDays} days after it
               ended, when someone deleted it, or with its environment.</>}
@@ -383,7 +383,7 @@ function JobDetail({ tenant, env, id, write, navigate }) {
             <section className="pane">
               <div className="pane-toolbar"><h2><Icon name="jobs" size={14} /> The job</h2></div>
               <div className="kv-grid">
-                <KV k="environment"><EnvLink to={envPath(tenant, env)} navigate={navigate} className="mono">{env}</EnvLink></KV>
+                <KV k="environment"><EnvLink to={envPath(project, env)} navigate={navigate} className="mono">{env}</EnvLink></KV>
                 <KV k="reaches"><ReachesSummary pod={{ reaches: reachesOf(job), egress: job.egress }} /> <span className="muted small">fixed for its run</span></KV>
                 <KV k="image" className="mono">{job.image}</KV>
                 <KV k="pinned" className="mono small">

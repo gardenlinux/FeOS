@@ -15,7 +15,7 @@ depends:
   - ca-certificates
 description: |-
   FeRun control plane
-  ferund is FeOS's control plane: tenants, sandboxes, placement on nodes,
+  ferund is FeOS's control plane: projects, sandboxes, placement on nodes,
   idle policies, the REST API, MCP, the management UI and the ports of
   sandboxes, over PostgreSQL. Nodes running feosd connect to it over mTLS.
   This package runs one instance under systemd, for a single machine or

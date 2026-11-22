@@ -88,7 +88,7 @@ func newFakeAPIServer(t *testing.T) (*fakeAPIServer, string) {
 func (r *rig) kubePreflight(body map[string]any) (int, string, string) {
 	r.t.Helper()
 	b, _ := json.Marshal(body)
-	code, raw := r.tenantCall(http.MethodPost, "/api/v1/kube/preflight", string(b))
+	code, raw := r.projectCall(http.MethodPost, "/api/v1/kube/preflight", string(b))
 	_, c := codeOf(raw)
 	return code, raw, c
 }
@@ -239,7 +239,7 @@ func TestKubePreflightFailures(t *testing.T) {
 			t.Errorf("%s: %d %s, want %d %s", c.name, code, strings.TrimSpace(raw), c.status, c.code)
 		}
 	}
-	if code, raw := r.tenantCall(http.MethodPost, "/api/v1/kube/preflight", `{"server":`); code != http.StatusBadRequest ||
+	if code, raw := r.projectCall(http.MethodPost, "/api/v1/kube/preflight", `{"server":`); code != http.StatusBadRequest ||
 		!strings.Contains(raw, codeInvalidBinding) {
 		t.Errorf("bad JSON: %d %s", code, raw)
 	}

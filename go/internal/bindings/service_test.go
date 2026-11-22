@@ -479,7 +479,7 @@ func TestHandlersAnswerNoSuchRouteWhenOff(t *testing.T) {
 			req.SetPathValue("id", r.sb1.String())
 			req.SetPathValue("name", "gh")
 			ctx := auth.WithSandbox(req.Context(), auth.Sandbox{ID: r.sb1, Owner: "acme", TokenHash: store.HashToken(sb1Token)})
-			ctx = auth.WithTenant(ctx, auth.Tenant{Name: "acme"})
+			ctx = auth.WithProject(ctx, auth.Project{Name: "acme"})
 			w := httptest.NewRecorder()
 			c.h(w, req.WithContext(ctx))
 			msg, _ := codeOf(w.Body.String())

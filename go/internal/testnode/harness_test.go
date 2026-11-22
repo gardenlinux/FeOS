@@ -662,7 +662,7 @@ func sandboxSpec(id podid.ID, incarnation string) *podv1.PodSpec {
 		Resources:  &podv1.Resources{Vcpus: 2, MemoryMib: 1024},
 		Containers: []*podv1.ContainerSpec{{Name: "main", ImageRef: "ghcr.io/maltej/debian-ai:latest", Command: []string{"sleep", "infinity"}}},
 		Network:    &podv1.PodNetwork{},
-		Labels:     map[string]string{"ferun.sandbox": id.String(), "ferun.tenant": "t1", "ferun.incarnation": incarnation},
+		Labels:     map[string]string{"ferun.sandbox": id.String(), "ferun.project": "t1", "ferun.incarnation": incarnation},
 	}
 }
 

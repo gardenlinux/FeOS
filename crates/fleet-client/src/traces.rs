@@ -816,7 +816,7 @@ mod tests {
     }
 
     const POD_LABELS: [(&str, &str); 7] = [
-        ("ferun.tenant", "acme"),
+        ("ferun.project", "acme"),
         ("ferun.instance", "i1"),
         ("ferun.environment", "e1"),
         ("ferun.kind", "service"),
@@ -831,7 +831,7 @@ mod tests {
         let mut request = spans(vec![
             Some(vec![
                 string("service.name", "shop"),
-                string("ferun.tenant", "evil"),
+                string("ferun.project", "evil"),
                 string("ferun.source", "ingress"),
                 string("host.name", "h"),
             ]),
@@ -846,7 +846,7 @@ mod tests {
             ("ferun.node", "node-1"),
             ("ferun.object", "web"),
             ("ferun.pod", "p1"),
-            ("ferun.tenant", "acme"),
+            ("ferun.project", "acme"),
         ];
         let resources: Vec<_> = request
             .resource_spans
@@ -869,7 +869,7 @@ mod tests {
         assert_eq!(job.service, "j1");
         let both = labels(&[("ferun.job", "j1"), ("ferun.object", "o")]);
         assert_eq!(Sender::new("p".into(), &both).service, "o");
-        let none = Sender::new("p".into(), &labels(&[("ferun.tenant", "t")]));
+        let none = Sender::new("p".into(), &labels(&[("ferun.project", "t")]));
         assert_eq!(none.service, "unknown_service");
     }
 
@@ -1031,7 +1031,7 @@ mod tests {
         let pod = |id: &str, labelled: bool, addresses: &[&str]| TracedPod {
             id: id.into(),
             labels: match labelled {
-                true => labels(&[("ferun.tenant", "acme")]),
+                true => labels(&[("ferun.project", "acme")]),
                 false => HashMap::new(),
             },
             addresses: addresses.iter().map(|a| a.parse().unwrap()).collect(),
@@ -1090,7 +1090,7 @@ mod tests {
         );
         lock(&later.0).push(TracedPod {
             id: "new".into(),
-            labels: labels(&[("ferun.tenant", "acme")]),
+            labels: labels(&[("ferun.project", "acme")]),
             addresses: vec![address],
         });
         let sender = inner.sender_now(Some(address)).await.unwrap();
@@ -1153,7 +1153,7 @@ mod tests {
             .connect_lazy();
         let pods = Fixed(vec![TracedPod {
             id: "p1".into(),
-            labels: labels(&[("ferun.tenant", "acme"), ("ferun.job", "j1")]),
+            labels: labels(&[("ferun.project", "acme"), ("ferun.job", "j1")]),
             addresses: vec!["127.0.0.1".parse().unwrap()],
         }]);
         let traces = Traces::with_sink(pods, Box::new(move || Ok((channel.clone(), "n1".into()))));
@@ -1193,7 +1193,7 @@ mod tests {
     }
 
     fn request() -> ExportTraceServiceRequest {
-        spans(vec![Some(vec![string("ferun.tenant", "evil")])])
+        spans(vec![Some(vec![string("ferun.project", "evil")])])
     }
 
     #[tokio::test]
@@ -1213,7 +1213,7 @@ mod tests {
                 ("ferun.job", "j1"),
                 ("ferun.node", "n1"),
                 ("ferun.pod", "p1"),
-                ("ferun.tenant", "acme"),
+                ("ferun.project", "acme"),
                 ("service.name", "j1"),
             ])
         );
@@ -1292,7 +1292,7 @@ mod tests {
         assert_eq!(answer.partial_success.unwrap().rejected_spans, 2);
         let sent = lock(&took).pop().unwrap();
         let resource = sent.resource_spans[0].resource.as_ref().unwrap();
-        assert!(attributes(resource).contains(&("ferun.tenant".into(), "acme".into())));
+        assert!(attributes(resource).contains(&("ferun.project".into(), "acme".into())));
         // The other services are not served.
         let channel = Endpoint::from_shared(format!("http://{grpc}"))
             .unwrap()
@@ -1326,7 +1326,7 @@ mod tests {
             .connect_lazy();
         let pods = Fixed(vec![TracedPod {
             id: "p1".into(),
-            labels: labels(&[("ferun.tenant", "acme"), ("ferun.object", "shop")]),
+            labels: labels(&[("ferun.project", "acme"), ("ferun.object", "shop")]),
             addresses: vec!["169.254.16.5".parse().unwrap()],
         }]);
         let traces = Traces::with_sink(pods, Box::new(move || Ok((channel.clone(), "n1".into()))));
@@ -1339,7 +1339,7 @@ mod tests {
         let resource = sent.resource_spans[0].resource.as_ref().unwrap();
         let attributes = attributes(resource);
         for pair in [
-            ("ferun.tenant", "acme"),
+            ("ferun.project", "acme"),
             ("ferun.pod", "p1"),
             ("ferun.node", "n1"),
             ("service.name", "shop"),
@@ -1369,7 +1369,7 @@ mod tests {
             Fixed(Vec::new()),
             Box::new(|| Err(Status::unavailable("the control plane names no sink"))),
         );
-        let sender = Sender::new("p".into(), &labels(&[("ferun.tenant", "t")]));
+        let sender = Sender::new("p".into(), &labels(&[("ferun.project", "t")]));
         let refusal = traces.inner.export(&sender, request()).await.unwrap_err();
         assert_eq!(refusal.http(), (StatusCode::SERVICE_UNAVAILABLE, Some(2)));
 

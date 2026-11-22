@@ -13,14 +13,14 @@ import {
   phaseTone, deploymentTone, restartsOf, routesTo, specObject, splitItem, trafficOf, usedBy,
 } from './envs.js';
 import { builtinCatalog, planText, readCatalog } from './catalog.js';
-import { EnvLink, NEEDS, OpNote, TrafficTab, useOp } from './EnvTabs.jsx';
+import { EnvLink, OpNote, TrafficTab, needsWrite, useOp } from './EnvTabs.jsx';
 import { ObjectReach } from './EnvReach.jsx';
 import { ObjectAccess, ObjectKeysLine } from './ObjectAccess.jsx';
 import { ImageShort, InstanceTable, JobLine, LogsTab, ToneDot, ToneLabel, useLatestSpec } from './Environments.jsx';
 import { StateCard, WideSpark } from './EnvOverview.jsx';
 import '../styles/environments.css';
 
-// An object's page (/tenants/:t/environments/:env/objects/:kind/:name
+// An object's page (/projects/:t/environments/:env/objects/:kind/:name
 // [/:otab]): a service, an addon or a job of the environment's latest
 // deployment. Its head says what it is and how it is, with Restart or Run
 // now, and Edit; its views are the environment's where it has them
@@ -39,18 +39,18 @@ const Link = EnvLink;
 
 const TAB_ICONS = { overview: 'gauge', logs: 'file', traffic: 'chart', config: 'settings' };
 
-export function ObjectPage({ tenant, st, item, otab = 'overview', replica = null, search = '', ec, lastOk = 0, changed = () => {}, navigate }) {
+export function ObjectPage({ project, st, item, otab = 'overview', replica = null, search = '', ec, lastOk = 0, changed = () => {}, navigate }) {
   const spec = useLatestSpec(st);
   const id = splitItem(item);
   if (!id) return <p className="error">No object {item}.</p>;
-  return <ObjectView tenant={tenant} st={st} kind={id.kind} name={id.name} spec={spec} ec={ec} lastOk={lastOk}
+  return <ObjectView project={project} st={st} kind={id.kind} name={id.name} spec={spec} ec={ec} lastOk={lastOk}
     otab={otab} replica={replica} search={search} changed={changed} navigate={navigate} />;
 }
 
 // ObjectView is the page of kind/name in view otab, the status and spec
 // given (spec null while it loads).
 export function ObjectView({
-  tenant, st, kind, name, spec, ec, lastOk = 0, otab = 'overview', replica = null, search = '', changed = () => {}, navigate,
+  project, st, kind, name, spec, ec, lastOk = 0, otab = 'overview', replica = null, search = '', changed = () => {}, navigate,
 }) {
   const env = st.name;
   const item = `${kind}/${name}`;
@@ -59,7 +59,7 @@ export function ObjectView({
   const [op, run, clear] = useOp();
   const busy = !!(op && op.busy);
   const go = (to) => (e) => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); navigate(to); } };
-  const builder = envPath(tenant, env, 'builder', item);
+  const builder = envPath(project, env, 'builder', item);
   const manual = kind === 'job' && jobTrigger(spec, name) === 'manual';
   const tone = o ? objectTone(o) : 'absent';
   const image = objectImage(o || { kind, name }, spec);
@@ -70,19 +70,20 @@ export function ObjectView({
     <>
       {kind === 'service' && o && (
         <button disabled={!ec || !ec.write || busy}
-          title={ec && ec.write ? (isAttached(o) ? 'restart its process, never the sandbox' : 'replace its replicas one at a time') : NEEDS.write}
+          title={ec && ec.write ? (isAttached(o) ? 'restart its process, never the sandbox' : 'replace its replicas one at a time') : needsWrite(ec)}
           onClick={() => run(() => api.restartService(env, name).then(() => true),
             isAttached(o) ? `${name}: its process restarts.` : `${name}: its replicas restart one at a time, each once the one before is live again.`)
             .then((r) => { if (r) changed(); })}>
           <Icon name="refresh" size={14} /> Restart</button>)}
       {kind === 'job' && o && (
         <button className={manual ? 'primary' : ''} disabled={!ec || !ec.write || busy}
-          title={ec && ec.write ? 'a new run of the job, of the latest deployment' : NEEDS.write}
+          title={ec && ec.write ? 'a new run of the job, of the latest deployment' : needsWrite(ec)}
           onClick={() => run(() => api.runJob(env, name).then(() => true), `${name}: a new run starts.`)
             .then((r) => { if (r) changed(); })}>
           <Icon name="play" size={14} /> Run now</button>)}
       <a className="button" href={builder} onClick={go(builder)}
-        title={ec && ec.write ? `change ${name} in the builder: a draft, planned, applied as the next deployment` : 'read-only: needs write on this environment'}>
+        title={ec && ec.write ? `change ${name} in the builder: a draft, planned, applied as the next deployment`
+          : ec && ec.plan ? 'plan against it: deploying takes a grant on it (protected)' : `read-only: ${needsWrite(ec)}`}>
         <Icon name="blocks" size={14} /> Edit</a>
     </>
   );
@@ -93,7 +94,7 @@ export function ObjectView({
     <>
       <header className="pagehead objhead">
         <p className="pagehead-kind">{KIND_NAMES[kind] || kind} in{' '}
-          <Link to={envPath(tenant, env)} navigate={navigate}><EnvName name={env} className="" /></Link></p>
+          <Link to={envPath(project, env)} navigate={navigate}><EnvName name={env} className="" /></Link></p>
         <div className="pagehead-title">
           <h1>{name}</h1>
           <span className={'statepill ' + tone}><ToneDot tone={tone} title={tone} />{objectStateText(o)}</span>
@@ -102,7 +103,7 @@ export function ObjectView({
         </div>
         <p className="pagehead-sub">
           {o && isAttached(o) && (
-            <>attached in sandbox <Link to={sandboxPath(tenant, env, o.sandbox)} navigate={navigate}
+            <>attached in sandbox <Link to={sandboxPath(project, env, o.sandbox)} navigate={navigate}
               className="mono" title={o.sandbox}>{shortId(o.sandbox)}</Link></>)}
           {image.written && kind !== 'addon' && !(o && isAttached(o)) && <>image <ImageShort image={image} /></>}
           {o && kind === 'addon' && <><b>{o.type} {o.version}</b> · plan <b>{o.plan}</b> · {o.provisioned ? 'provisioned' : 'not provisioned yet'}</>}
@@ -114,7 +115,7 @@ export function ObjectView({
       </header>
       <nav className="tabbar obj-tabs" aria-label="views">
         {tabs.map((t) => {
-          const to = objectPath(tenant, env, item, t);
+          const to = objectPath(project, env, item, t);
           return (
             <a key={t} href={to} className={'tab' + (view === t ? ' on' : '')} aria-current={view === t ? 'page' : undefined} onClick={go(to)}>
               <Icon name={TAB_ICONS[t]} size={15} /> {OBJECT_TAB_LABELS[t]}
@@ -131,18 +132,18 @@ export function ObjectView({
             </span>
           </div>)}
         {view === 'overview' && (
-          <ObjectOverview tenant={tenant} st={st} o={o} so={so} spec={spec} kind={kind} name={name} ec={ec} navigate={navigate} />)}
+          <ObjectOverview project={project} st={st} o={o} so={so} spec={spec} kind={kind} name={name} ec={ec} navigate={navigate} />)}
         {view === 'logs' && (
-          <LogsTab tenant={tenant} env={env} st={st} item={item} replica={replica} search={search} navigate={navigate} />)}
-        {view === 'traffic' && <TrafficTab tenant={tenant} env={env} navigate={navigate} service={name} />}
+          <LogsTab project={project} env={env} st={st} item={item} replica={replica} search={search} navigate={navigate} />)}
+        {view === 'traffic' && <TrafficTab project={project} env={env} navigate={navigate} service={name} />}
         {view === 'config' && (
           <section className="pane objpage">
-            <Definition tenant={tenant} st={st} kind={kind} name={name} so={so} spec={spec} navigate={navigate} />
-            {access && <ObjectAccess tenant={tenant} st={st} kind={kind} name={name} spec={spec} navigate={navigate} />}
-            {so && <ObjectReach tenant={tenant} st={st} kind={kind} name={name} navigate={navigate} />}
-            {kind === 'service' && <RoutesTo tenant={tenant} st={st} spec={spec} name={name} navigate={navigate} />}
-            {kind === 'addon' && <AddonOutputs tenant={tenant} st={st} so={so} spec={spec} name={name} navigate={navigate} />}
-            {kind === 'service' && <UsedBy tenant={tenant} env={env} spec={spec} kind={kind} name={name} navigate={navigate} />}
+            <Definition project={project} st={st} kind={kind} name={name} so={so} spec={spec} navigate={navigate} />
+            {access && <ObjectAccess project={project} st={st} kind={kind} name={name} spec={spec} navigate={navigate} />}
+            {so && <ObjectReach project={project} st={st} kind={kind} name={name} navigate={navigate} />}
+            {kind === 'service' && <RoutesTo project={project} st={st} spec={spec} name={name} navigate={navigate} />}
+            {kind === 'addon' && <AddonOutputs project={project} st={st} so={so} spec={spec} name={name} navigate={navigate} />}
+            {kind === 'service' && <UsedBy project={project} env={env} spec={spec} kind={kind} name={name} navigate={navigate} />}
           </section>)}
       </div>
     </>
@@ -153,7 +154,7 @@ export function ObjectView({
 // (ObjectProblem), a service's and a job's keys counted (the way to its
 // Secrets in Config), its instances, the deployments that changed it, a
 // service's traffic, its incidents.
-function ObjectOverview({ tenant, st, o, so = null, spec = null, kind, name, ec, navigate }) {
+function ObjectOverview({ project, st, o, so = null, spec = null, kind, name, ec, navigate }) {
   const keys = (kind === 'service' || kind === 'job') && so;
   const env = st.name;
   const [incidents, setIncidents] = useState(null);
@@ -168,19 +169,19 @@ function ObjectOverview({ tenant, st, o, so = null, spec = null, kind, name, ec,
   usePoll(readIncidents, 10000);
   return (
     <div className="ov">
-      {o && <ObjectProblem tenant={tenant} st={st} o={o} incidents={incidents} navigate={navigate} />}
-      {keys && <ObjectKeysLine tenant={tenant} st={st} kind={kind} name={name} spec={spec} navigate={navigate} />}
+      {o && <ObjectProblem project={project} st={st} o={o} incidents={incidents} navigate={navigate} />}
+      {keys && <ObjectKeysLine project={project} st={st} kind={kind} name={name} spec={spec} navigate={navigate} />}
       {o && (
         <section className="card">
-          <Instances tenant={tenant} st={st} o={o} ec={ec} navigate={navigate} />
+          <Instances project={project} st={st} o={o} ec={ec} navigate={navigate} />
         </section>)}
-      {kind === 'service' && o && !isAttached(o) && <ServiceTraffic tenant={tenant} env={env} name={name} navigate={navigate} />}
+      {kind === 'service' && o && !isAttached(o) && <ServiceTraffic project={project} env={env} name={name} navigate={navigate} />}
       <section className="card">
-        <ChangedIn tenant={tenant} env={env} latest={st.deployment} kind={kind} name={name} navigate={navigate} />
+        <ChangedIn project={project} env={env} latest={st.deployment} kind={kind} name={name} navigate={navigate} />
       </section>
       {incidents && incidents.length > 0 && (
         <section className="card">
-          <ObjectIncidents tenant={tenant} env={env} list={incidents} navigate={navigate} />
+          <ObjectIncidents project={project} env={env} list={incidents} navigate={navigate} />
         </section>)}
     </div>
   );
@@ -191,7 +192,7 @@ function ObjectOverview({ tenant, st, o, so = null, spec = null, kind, name, ec,
 // its first instance that exited or failed (its detail and the end of its
 // log, read from its node), else what is not ready yet; with the way to
 // the logs and to its config.
-function ObjectProblem({ tenant, st, o, incidents, navigate }) {
+function ObjectProblem({ project, st, o, incidents, navigate }) {
   const env = st.name;
   const item = `${o.kind}/${o.name}`;
   const tone = objectTone(o);
@@ -208,13 +209,13 @@ function ObjectProblem({ tenant, st, o, incidents, navigate }) {
     return () => { live = false; };
   }, [env, o.kind, o.name, replica, inc && inc.id]);
   if (tone === 'running' || tone === 'absent') return null;
-  const logs = objectPath(tenant, env, item, 'logs', replica);
-  const config = objectPath(tenant, env, item, 'config');
+  const logs = objectPath(project, env, item, 'logs', replica);
+  const config = objectPath(project, env, item, 'config');
   const actions = (
     <>
       <Link to={logs} navigate={navigate} className="button">{replica != null ? `All logs of replica ${replica}` : 'Logs'}</Link>
       <Link to={config} navigate={navigate} className="button">Config</Link>
-      {inc && <Link to={envPath(tenant, env, 'incidents', inc.id)} navigate={navigate} className="button">Incident {inc.id}</Link>}
+      {inc && <Link to={envPath(project, env, 'incidents', inc.id)} navigate={navigate} className="button">Incident {inc.id}</Link>}
     </>
   );
   if (inc) {
@@ -244,7 +245,7 @@ function ObjectProblem({ tenant, st, o, incidents, navigate }) {
 
 // ServiceTraffic is a service's requests of the last hour through the
 // ingress.
-function ServiceTraffic({ tenant, env, name, navigate }) {
+function ServiceTraffic({ project, env, name, navigate }) {
   const [traffic, setTraffic] = useState(undefined);
   const read = useCallback(async () => {
     try { setTraffic(await api.traffic(env, '1h')); } catch { setTraffic(null); }
@@ -255,7 +256,7 @@ function ServiceTraffic({ tenant, env, name, navigate }) {
     <section className="card">
       <div className="card-head">
         <h2>Traffic</h2><span className="muted">last hour</span>
-        <Link to={objectPath(tenant, env, `service/${name}`, 'traffic')} navigate={navigate} className="card-more">Traffic</Link>
+        <Link to={objectPath(project, env, `service/${name}`, 'traffic')} navigate={navigate} className="card-more">Traffic</Link>
       </div>
       {traffic === undefined && <p className="muted">Loading…</p>}
       {traffic === null && <p className="muted">No numbers: the log store does not answer.</p>}
@@ -277,11 +278,11 @@ function ServiceTraffic({ tenant, env, name, navigate }) {
 // Definition is the object as the latest deployment's normalised spec
 // has it: its fields, then its environment. Its bindings are rows of
 // its Secrets (ObjectAccess.jsx).
-export function Definition({ tenant, st, kind, name, so, spec, navigate }) {
+export function Definition({ project, st, kind, name, so, spec, navigate }) {
   const env = st.name;
   const n = st.deployment;
   const head = (
-    <div className="sect">definition{n > 0 && <> · <Link to={envPath(tenant, env, 'deployments', n)} navigate={navigate}
+    <div className="sect">definition{n > 0 && <> · <Link to={envPath(project, env, 'deployments', n)} navigate={navigate}
       className="mono">deployment {n}</Link></>}</div>
   );
   if (!n) return <>{head}<p className="empty small">No deployment yet.</p></>;
@@ -289,7 +290,7 @@ export function Definition({ tenant, st, kind, name, so, spec, navigate }) {
   if (!so) return <>{head}<p className="empty small">Not in this deployment.</p></>;
   const rows = definitionRows(so, kind);
   const vars = envRows(so, spec);
-  const sandbox = (id) => sandboxPath(tenant, st.name, id);
+  const sandbox = (id) => sandboxPath(project, st.name, id);
   return (
     <>
       {head}
@@ -314,7 +315,7 @@ export function Definition({ tenant, st, kind, name, so, spec, navigate }) {
                 {vars.map((v) => (
                   <tr key={v.name}>
                     <td className="mono small objenv-name">{v.name}</td>
-                    <td className="mono small objenv-value"><EnvValue v={v} tenant={tenant} env={env} st={st} navigate={navigate} /></td>
+                    <td className="mono small objenv-value"><EnvValue v={v} project={project} env={env} st={st} navigate={navigate} /></td>
                   </tr>))}
               </tbody>
             </table>
@@ -329,13 +330,13 @@ export function Definition({ tenant, st, kind, name, so, spec, navigate }) {
 // host at its pinned version (a link to its page; its key stays at the
 // node, ADR 0055), an addon's output or a service's address (links to
 // their pages).
-export function EnvValue({ v, tenant, env, st, navigate }) {
+export function EnvValue({ v, project, env, st, navigate }) {
   if (v.form === 'plain') return v.text === '' ? <span className="muted">""</span> : <>{v.text}</>;
   if (v.form === 'http') {
     return (
       <span className="objref" title="the platform adds its key at the node; the variable holds its URL or host alone">
         <Icon name="lock" size={11} /> <span className="muted">{v.key} of HTTP secret </span>
-        <Link to={httpSecretPath(tenant, env, v.target)} navigate={navigate}>{v.target}</Link>
+        <Link to={httpSecretPath(project, env, v.target)} navigate={navigate}>{v.target}</Link>
         {v.version ? <span className="muted"> v{v.version}</span> : <span className="muted"> (latest)</span>}
       </span>
     );
@@ -344,13 +345,13 @@ export function EnvValue({ v, tenant, env, st, navigate }) {
     return (
       <span className="objref">
         <Icon name="lock" size={11} /> secret{' '}
-        <Link to={secretsPath(tenant, env, 'secret', v.target)} navigate={navigate} title="its row in the environment's secrets">{v.target}</Link>
+        <Link to={secretsPath(project, env, 'secret', v.target)} navigate={navigate} title="its row in the environment's secrets">{v.target}</Link>
         {v.version ? <span className="muted"> v{v.version}</span> : <span className="muted"> (latest)</span>}
       </span>
     );
   }
   const known = (st.objects || []).some((o) => `${o.kind}/${o.name}` === v.ref);
-  const to = envPath(tenant, env, 'objects', v.ref);
+  const to = envPath(project, env, 'objects', v.ref);
   return (
     <span className="objref">
       <span className="muted">{v.key || 'output'} of {v.form} </span>
@@ -361,7 +362,7 @@ export function EnvValue({ v, tenant, env, st, navigate }) {
 }
 
 // RoutesTo are the routes that send to the service.
-function RoutesTo({ tenant, st, spec, name, navigate }) {
+function RoutesTo({ project, st, spec, name, navigate }) {
   const list = routesTo(st, spec, name);
   return (
     <>
@@ -383,7 +384,7 @@ function RoutesTo({ tenant, st, spec, name, navigate }) {
                         ? <a className="mono host" href={r.url} target="_blank" rel="noreferrer">{r.url.replace(/^https:\/\//, '')}</a>
                         : r.host && r.door === 'ingress'
                           ? <span className="mono muted" title={r.host.startsWith('*.') ? 'every name the wildcard serves' : 'once the environment is served there'}>{r.host}{r.path}</span>
-                          : <Link to={envPath(tenant, st.name, 'access')} navigate={navigate} className="muted">the route door, with a route token</Link>}
+                          : <Link to={envPath(project, st.name, 'access')} navigate={navigate} className="muted">the route door, with a route token</Link>}
                     </td>
                   </tr>))}
               </tbody>
@@ -394,7 +395,7 @@ function RoutesTo({ tenant, st, spec, name, navigate }) {
 }
 
 // UsedBy are the objects whose environment names this one.
-function UsedBy({ tenant, env, spec, kind, name, navigate }) {
+function UsedBy({ project, env, spec, kind, name, navigate }) {
   const list = usedBy(spec, kind, name);
   if (!spec || (kind === 'service' && list.length === 0)) return null;
   return (
@@ -408,7 +409,7 @@ function UsedBy({ tenant, env, spec, kind, name, navigate }) {
               <tbody>
                 {list.map((u) => (
                   <tr key={`${u.from}/${u.var}`}>
-                    <td className="mono small"><Link to={envPath(tenant, env, 'objects', u.from)} navigate={navigate}>{u.from}</Link></td>
+                    <td className="mono small"><Link to={envPath(project, env, 'objects', u.from)} navigate={navigate}>{u.from}</Link></td>
                     <td className="mono small muted">{u.var}</td>
                     <td className="mono small">{u.text}</td>
                   </tr>))}
@@ -421,7 +422,7 @@ function UsedBy({ tenant, env, spec, kind, name, navigate }) {
 
 // AddonOutputs are an addon's type as the catalog has it: its output
 // keys (those its users name marked), its plan's size; then who uses it.
-function AddonOutputs({ tenant, st, so, spec, name, navigate }) {
+function AddonOutputs({ project, st, so, spec, name, navigate }) {
   // The builtin list until ferund's catalog answers (or when it has none).
   const [catalog, setCatalog] = useState(() => builtinCatalog());
   useEffect(() => {
@@ -450,7 +451,7 @@ function AddonOutputs({ tenant, st, so, spec, name, navigate }) {
           {plan && <KV k="plan" className="small">{planText(plan)}</KV>}
           <KV k="provisioned">{o ? (o.provisioned ? 'yes: its options are set up' : 'not yet') : '—'}</KV>
         </div>)}
-      <UsedBy tenant={tenant} env={st.name} spec={spec} kind="addon" name={name} navigate={navigate} />
+      <UsedBy project={project} env={st.name} spec={spec} kind="addon" name={name} navigate={navigate} />
     </>
   );
 }
@@ -458,7 +459,7 @@ function AddonOutputs({ tenant, st, so, spec, name, navigate }) {
 // Instances are what runs of the object: an image service's and an
 // addon's pods (the node an operator's link), an attached service's
 // process, a job's last run.
-function Instances({ tenant, st, o, ec, navigate }) {
+function Instances({ project, st, o, ec, navigate }) {
   const env = st.name;
   if (o.kind === 'job') {
     return (
@@ -474,7 +475,7 @@ function Instances({ tenant, st, o, ec, navigate }) {
         <div className="sect">process</div>
         <div className="kv-grid">
           <KV k="sandbox">
-            <Link to={sandboxPath(tenant, st.name, o.sandbox)} navigate={navigate} className="mono">{o.sandbox}</Link>
+            <Link to={sandboxPath(project, st.name, o.sandbox)} navigate={navigate} className="mono">{o.sandbox}</Link>
           </KV>
           <KV k="phase"><ToneLabel tone={phaseTone(o.phase)}>{o.phase || 'starting'}</ToneLabel></KV>
           <KV k="restarts" className={'mono' + (o.restarts > 0 ? ' warntext' : '')}>{o.restarts || 0}</KV>
@@ -490,7 +491,7 @@ function Instances({ tenant, st, o, ec, navigate }) {
       <div className="sect">instances <span className="count">· {n}</span>
         {o.kind === 'service' && <span className="muted"> of {o.desired || 0} replica{o.desired === 1 ? '' : 's'}</span>}</div>
       <InstanceTable instances={o.instances} latest={st.deployment} navigate={navigate} operator={!!(ec && ec.operator)}
-        logsTo={(replica) => envPath(tenant, env, 'logs', `${o.kind}/${o.name}`, replica)} />
+        logsTo={(replica) => envPath(project, env, 'logs', `${o.kind}/${o.name}`, replica)} />
       <p className="panel-note">The status keeps each instance's restarts and last exit; an incident keeps the exits that opened it.</p>
     </>
   );
@@ -498,7 +499,7 @@ function Instances({ tenant, st, o, ec, navigate }) {
 
 // ObjectIncidents are the environment's incidents of this object, newest
 // first (objectIncidents).
-function ObjectIncidents({ tenant, env, list, navigate }) {
+function ObjectIncidents({ project, env, list, navigate }) {
   if (!list || list.length === 0) return null;
   return (
     <>
@@ -507,7 +508,7 @@ function ObjectIncidents({ tenant, env, list, navigate }) {
         <table className="tbl objinc-tbl">
           <tbody>
             {list.slice(0, 8).map((i) => {
-              const to = envPath(tenant, env, 'incidents', i.id);
+              const to = envPath(project, env, 'incidents', i.id);
               const open = !i.closedAt;
               return (
                 <tr key={i.id} className={'clickable' + (open ? '' : ' dim')} onClick={() => navigate(to)}>
@@ -560,7 +561,7 @@ function useDiffs(env, latest) {
 
 // ChangedIn are the deployments, of the newest CHANGES_READ, whose diff
 // changed the object, with the fields from → to.
-function ChangedIn({ tenant, env, latest, kind, name, navigate }) {
+function ChangedIn({ project, env, latest, kind, name, navigate }) {
   const { list, older, done, err } = useDiffs(env, latest);
   const changes = changesTo(list, kind, name);
   return (
@@ -572,7 +573,7 @@ function ChangedIn({ tenant, env, latest, kind, name, navigate }) {
         {changes.map((c) => (
           <div key={c.number} className="objchange">
             <div className="diff-head">
-              <Link to={envPath(tenant, env, 'deployments', c.number)} navigate={navigate} className="mono strong">deployment {c.number}</Link>
+              <Link to={envPath(project, env, 'deployments', c.number)} navigate={navigate} className="mono strong">deployment {c.number}</Link>
               <ToneLabel tone={deploymentTone(c.state)}>{c.state}</ToneLabel>
               <span className={'badge ' + changeTone(c.change)}>{c.change}</span>
               {c.effect && <span className={'small ' + (heavyEffect(c.effect) ? 'bad' : 'muted')}>{c.effect}</span>}
@@ -600,7 +601,7 @@ function ChangedIn({ tenant, env, latest, kind, name, navigate }) {
       <p className="panel-note">
         {done ? `Read from the diffs of the last ${list.length} deployment${list.length === 1 ? '' : 's'}, one request each`
           : `Reading the diffs of the last ${CHANGES_READ} deployments, one request each: ${list.length} so far`}
-        {older && <>; older ones: <Link to={envPath(tenant, env, 'deployments')} navigate={navigate}>the deployments</Link></>}.
+        {older && <>; older ones: <Link to={envPath(project, env, 'deployments')} navigate={navigate}>the deployments</Link></>}.
       </p>
     </>
   );

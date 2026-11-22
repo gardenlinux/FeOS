@@ -26,11 +26,11 @@ yet decided.
 - ADR 0014: a reference to an addon's role grants that role to the
   referencing workload's ID; an addon maps the certificate to the role
   and never admits on the chain alone, since every workload of every
-  tenant is under one root; a client presents the ID through FeID or
+  project is under one root; a client presents the ID through FeID or
   through the guest's outbound TLS binding, TLS from the first byte with
   the upstream's ALPN or none. A workload's certificate carries its
   SPIFFE ID as its one URI name; its subject is `CN=<td>/<pod ID>` and
-  one `OU`, the workload's set ID, which the issuer writes and no tenant
+  one `OU`, the workload's set ID, which the issuer writes and no project
   chooses.
 - What the servers offer. PostgreSQL: the method `cert`, the client's
   certificate verified against its CA file and its CN, or with
@@ -86,10 +86,10 @@ yet decided.
   so that the map and the network name a workload by the same string
   (ADR 0012).
 - **Never a name.** An entry names the workload by what the issuer wrote
-  and no tenant chooses: the `OU`, a hash over the environment's ID, the
+  and no project chooses: the `OU`, a hash over the environment's ID, the
   object's kind and its name, or the SPIFFE ID, which carries the
-  tenant, the environment's ID and the object at once. A service `api`
-  of another tenant or environment has another entry and matches
+  project, the environment's ID and the object at once. A service `api`
+  of another project or environment has another entry and matches
   nothing, and the network would not let it reach the port in the first
   place.
 - The map decides who may become a role, not what the role may do. Two
@@ -153,7 +153,7 @@ yet decided.
   reads.
 
   ```text
-  # spiffe://run.fecode.dev/tenant/fecode/env/01a196e9-…/service/catalog
+  # spiffe://run.fecode.dev/project/fecode/env/01a196e9-…/service/catalog
   feid  "/^CN=[^,]+,OU=wl-3f9c0a7e2b514d86c1e9f03a7b2d4e58$"  catalog
   ```
 
@@ -243,7 +243,7 @@ yet decided.
   again.
 - **The URI name in PostgreSQL**: no released version reads it; the `OU`
   carries the workload for exactly this reason.
-- **The service's name in the map**: not unique; any tenant names any
+- **The service's name in the map**: not unique; any project names any
   object anything in any environment.
 - **A role per workload**, the role equal to the ID: roles stay the
   addon's option and the owners of their schemas, grants the
@@ -265,7 +265,7 @@ yet decided.
   step a line in the log, and `feos-authn` audits the handshakes
   already.
 - **Admission on the chain**, the CN equal to the role and no map: every
-  workload of every tenant is under one root (ADR 0014).
+  workload of every project is under one root (ADR 0014).
 - **Refusing Valkey 7.2 and 8** with an error: every running addon would
   stop at the release, and every definition that says 8 would fail its
   next deployment. An addon of 8 has to become 9 for a certificate

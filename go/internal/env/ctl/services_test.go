@@ -521,7 +521,7 @@ func TestRestartWaitsForALiveReplica(t *testing.T) {
 	// A row made before ADR 0019, with a UUID.
 	id := podid.ID(uuid.NewString())
 	idle := 0
-	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: testTenant, Image: testImage, VCPUs: 1,
+	if _, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: id, Owner: testProject, Image: testImage, VCPUs: 1,
 		MemoryMiB: 512, EnvironmentID: env.ID, Instance: true, PodTemplate: &model.PodTemplate{
 			SecurityGroups: []string{model.EnvGroupID(env.ID)}}, IdleAfterS: &idle}); err != nil {
 		t.Fatal(err)

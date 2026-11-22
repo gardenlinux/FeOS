@@ -75,7 +75,7 @@ func TestBindingUsage(t *testing.T) {
 	sink := &fakeEgressSink{}
 	srv := httptest.NewServer(sink)
 	t.Cleanup(srv.Close)
-	ctx := auth.WithTenant(h.ctx(), auth.Tenant{Name: tenantA, Token: "tok"})
+	ctx := auth.WithProject(h.ctx(), auth.Project{Name: projectA, Token: "tok"})
 
 	zeros := func(name string, u BindingUsage, why string) {
 		t.Helper()
@@ -86,30 +86,30 @@ func TestBindingUsage(t *testing.T) {
 			t.Errorf("%s: %+v %s", name, u, b)
 		}
 	}
-	u, err := h.svc.BindingUsage(ctx, tenantA, "shop", "24h")
+	u, err := h.svc.BindingUsage(ctx, projectA, "shop", "24h")
 	if err != nil {
 		t.Fatal(err)
 	}
 	zeros("no --sink-url", u, "(--sink-url)")
 	h.svc.d.SinkURL = srv.URL + "/"
-	if u, err = h.svc.BindingUsage(h.ctx(), tenantA, "shop", "24h"); err != nil {
+	if u, err = h.svc.BindingUsage(h.ctx(), projectA, "shop", "24h"); err != nil {
 		t.Fatal(err)
 	}
 	zeros("no token", u, "the caller's token or session")
 	if len(sink.asked) != 0 {
 		t.Fatalf("asked %v", sink.asked)
 	}
-	if _, err := h.svc.BindingUsage(auth.WithTenant(h.ctx(), auth.Tenant{Name: tenantB, Token: "tok"}), tenantB, "shop",
+	if _, err := h.svc.BindingUsage(auth.WithProject(h.ctx(), auth.Project{Name: projectB, Token: "tok"}), projectB, "shop",
 		"24h"); err == nil {
-		t.Error("another tenant's environment")
+		t.Error("another project's environment")
 	} else {
 		wantStatus(t, err, http.StatusNotFound, "no such environment")
 	}
-	_, err = h.svc.BindingUsage(ctx, tenantA, "shop", "7d")
+	_, err = h.svc.BindingUsage(ctx, projectA, "shop", "7d")
 	wantStatus(t, err, http.StatusBadRequest, `window must be 1h or 24h, got "7d"`)
 
 	before := time.Now()
-	if u, err = h.svc.BindingUsage(ctx, tenantA, envID.String(), "1h"); err != nil {
+	if u, err = h.svc.BindingUsage(ctx, projectA, envID.String(), "1h"); err != nil {
 		t.Fatal(err)
 	}
 	if len(sink.asked) != 1 || sink.asked[0] != "/api/v1/egress?environment="+envID.String()+" Bearer tok" ||
@@ -130,14 +130,14 @@ func TestBindingUsage(t *testing.T) {
 
 	// An environment without a deployment has its sandboxes' bindings.
 	h.create("empty", nil)
-	if u, err := h.svc.BindingUsage(ctx, tenantA, "empty", "24h"); err != nil || len(u.Bindings) != 2 || u.Bindings[0].Name != "erp" {
+	if u, err := h.svc.BindingUsage(ctx, projectA, "empty", "24h"); err != nil || len(u.Bindings) != 2 || u.Bindings[0].Name != "erp" {
 		t.Errorf("empty: %+v %v", u, err)
 	}
 
 	sink.mu.Lock()
 	sink.down = true
 	sink.mu.Unlock()
-	if u, err = h.svc.BindingUsage(ctx, tenantA, "shop", "24h"); err != nil {
+	if u, err = h.svc.BindingUsage(ctx, projectA, "shop", "24h"); err != nil {
 		t.Fatal(err)
 	}
 	zeros("the sink down", u, "the log store does not answer")
@@ -149,7 +149,7 @@ func TestBindingUsage(t *testing.T) {
 	sink.mu.Lock()
 	sink.down, sink.old = false, true
 	sink.mu.Unlock()
-	if u, err = h.svc.BindingUsage(ctx, tenantA, "shop", "24h"); err != nil {
+	if u, err = h.svc.BindingUsage(ctx, projectA, "shop", "24h"); err != nil {
 		t.Fatal(err)
 	}
 	zeros("an old sink", u, "the sink is older than this ferund")
@@ -159,7 +159,7 @@ func TestBindingUsage(t *testing.T) {
 	sink.mu.Lock()
 	sink.old, sink.foreign = false, true
 	sink.mu.Unlock()
-	if u, err = h.svc.BindingUsage(ctx, tenantA, "shop", "24h"); err != nil {
+	if u, err = h.svc.BindingUsage(ctx, projectA, "shop", "24h"); err != nil {
 		t.Fatal(err)
 	}
 	zeros("the sink's own 404", u, "the log store does not answer")

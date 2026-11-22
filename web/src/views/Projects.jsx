@@ -1,0 +1,442 @@
+// SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+// SPDX-License-Identifier: Apache-2.0
+
+import React, { useCallback, useEffect, useState } from 'react';
+import { api } from '../api.js';
+import { Icon } from '../Icon.jsx';
+import { Ago, ArmButton, ErrBox, LiveBadge, Secret, useArm, useNow, usePoll } from '../components.jsx';
+import { fmtDate } from '../format.js';
+import { QUOTA_ITEMS, ROLES, accountLabel, fmtQuota, moveTargets, useMe } from '../people.js';
+import { projectDeleteText, tokenRows } from './fleet.js';
+import { knownZones, limitsBody, limitsForm, limitsText, zoneMoveText } from './platformData.js';
+import { Fact, PageHead } from './platformParts.jsx';
+
+// The operators' projects: every project with its counts, limits and zone;
+// create, delete, edit the limits and the zone, and the project's tokens.
+// ferund stores a project's tokens as hashes only, so a token is shown
+// once, when it is made, for a client such as FeCode; the browser keeps
+// none. "Open as operator" works in the project with the session, as its
+// admin.
+
+export function Projects({ navigate }) {
+  const { reload } = useMe();
+  const [projects, setProjects] = useState(null);
+  const [people, setPeople] = useState(null);
+  const [err, setErr] = useState('');
+  const [name, setName] = useState('');
+  const [account, setAccount] = useState('');
+  const [accounts, setAccounts] = useState(null);
+  // /projects?new opens the form (the switcher's New project).
+  const [showCreate, setShowCreate] = useState(() => new URLSearchParams(location.search).has('new'));
+  const [created, setCreated] = useState(null); // {name, token}
+  const [open, setOpen] = useState(null); // {name, tab}
+  const [armed, arm, disarm] = useArm();
+  useNow(5000);
+
+  const refresh = useCallback(async () => {
+    try {
+      setProjects((await api.listProjects()).projects || []);
+      setErr('');
+    } catch (e) {
+      setErr(e.message);
+    }
+  }, []);
+  const lastOk = usePoll(refresh, 5000);
+  // The people name a project's maker; without them the ID shows.
+  useEffect(() => {
+    api.listPeople().then((r) => setPeople(r.people || []), () => setPeople([]));
+  }, []);
+  // The accounts (ADR 0059): where a new project goes, where one moves.
+  const readAccounts = useCallback(() => {
+    api.adminListAccounts().then((r) => setAccounts(r.accounts || []), () => setAccounts([]));
+  }, []);
+  useEffect(() => { readAccounts(); }, [readAccounts]);
+  const openAccounts = moveTargets(accounts, '');
+
+  const go = (t) => navigate(`/projects/${encodeURIComponent(t)}`);
+  const all = projects || [];
+  const zones = knownZones(all);
+  const maker = (id) => {
+    const p = (people || []).find((x) => x.id === id);
+    return p ? p.name || p.email : id.slice(0, 8);
+  };
+  const toggle = (t, tab) => setOpen(open && open.name === t && open.tab === tab ? null : { name: t, tab });
+
+  return (
+    <div className="platform">
+      <PageHead title="Projects" state={projects && <LiveBadge lastOk={lastOk} />}
+        actions={<button className={'primary' + (showCreate ? ' on' : '')} onClick={() => setShowCreate(!showCreate)}>
+          <Icon name="plus" size={14} /> New project</button>}
+        facts={projects && <>
+          <Fact n={all.length}>project{all.length === 1 ? '' : 's'}</Fact>
+          <Fact n={all.filter((t) => t.madeBy).length}>made by people</Fact>
+          <Fact n={all.reduce((a, t) => a + (Number(t.sandboxCount) || 0), 0)}>sandboxes</Fact>
+          <Fact n={all.reduce((a, t) => a + (Number(t.environmentCount) || 0), 0)}>environments</Fact>
+          {all.some((t) => t.deleting) && <Fact className="warn" n={all.filter((t) => t.deleting).length}>being deleted</Fact>}
+        </>} />
+
+      {(showCreate || created) && (
+        <section className="pane">
+          {showCreate && (
+            <form className="pf-form" onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                const n = name.trim();
+                const res = await api.createProject(n, account === 'default' ? '' : account);
+                setCreated({ name: n, token: res.token });
+                reload().catch(() => {});
+                setName('');
+                setShowCreate(false);
+                await refresh();
+              } catch (e2) {
+                setErr(e2.message);
+              }
+            }}>
+              <input className="mono" placeholder="project name: lowercase letters, digits, '.' and '-'" value={name} autoFocus
+                onChange={(e) => setName(e.target.value)} />
+              {openAccounts.length > 0 && (
+                <select value={account || 'default'} aria-label="the account" title="the account charged for its use"
+                  onChange={(e) => setAccount(e.target.value)}>
+                  {openAccounts.map((a) => <option key={a.name} value={a.name}>{accountLabel(a)}</option>)}
+                </select>)}
+              <button type="submit" className="primary" disabled={!name.trim()}><Icon name="plus" size={14} /> Create</button>
+              <button type="button" className="ghost" onClick={() => setShowCreate(false)}><Icon name="x" size={14} /></button>
+            </form>)}
+          {showCreate && <p className="muted small">A project an operator makes has no limits, the apps zone, a first token (admin) shown once, and is on the account you name.</p>}
+          {created && (
+            <Secret value={created.token} title={`Token of project ${created.name}`} onDismiss={() => setCreated(null)}>
+              <p className="muted small">For a client such as FeCode; this browser keeps it not.</p>
+            </Secret>)}
+        </section>)}
+
+      <section className="pane">
+        <ErrBox error={err} />
+        <div className="tblwrap"><table className="tbl">
+          <thead>
+            <tr>
+              <th>name</th>
+              <th>account</th>
+              <th>zone</th>
+              <th className="col-num">sandboxes</th>
+              <th className="col-num">environments</th>
+              <th>limits</th>
+              <th className="col-num">tokens</th>
+              <th className="col-when">created</th>
+              <th className="col-quick" />
+            </tr>
+          </thead>
+          <tbody>
+            {all.map((t) => {
+              const del = projectDeleteText(t);
+              const isOpen = open && open.name === t.name;
+              const btn = (tab, icon, label, title) => (
+                <button className={'ghost mini' + (isOpen && open.tab === tab ? ' on' : '')} title={title}
+                  onClick={() => toggle(t.name, tab)}><Icon name={icon} size={13} /> {label}</button>);
+              return (
+                <React.Fragment key={t.name}>
+                  <tr className={isOpen ? 'sel' : ''}>
+                    <td>
+                      <span className="mono strong">{t.name}</span>
+                      {t.deleting && <span className="badge warn">being deleted</span>}
+                      <div className="muted small nowrap">{t.madeBy ? <>by {maker(t.madeBy)}</> : 'by an operator'}</div>
+                    </td>
+                    <td className="small">{t.account
+                      ? <><span>{t.account.title || t.account.name}</span> <span className="mono muted">{t.account.name}</span></>
+                      : <span className="muted">—</span>}</td>
+                    <td className="mono small zone">{t.zone || <span className="muted">none served</span>}</td>
+                    <td className="col-num mono">{t.sandboxCount}</td>
+                    <td className="col-num mono">{t.environmentCount || 0}</td>
+                    <td className="project-limits">{limitsText(t.limits)}</td>
+                    <td className="col-num mono">{(t.tokens || []).length}</td>
+                    <td className="col-when muted">{fmtDate(t.createdAt)}</td>
+                    <td className="col-quick nowrap">
+                      {btn('account', 'building', 'account', 'the account charged for it, and a move')}
+                      {btn('limits', 'gauge', 'limits', "the project's limits")}
+                      {btn('zone', 'globe', 'zone', 'the zone of its default hosts')}
+                      {btn('tokens', 'key', 'tokens', "the project's tokens")}
+                      <button className="mini" title="work in this project, as its admin" onClick={() => go(t.name)}>
+                        Open as operator <Icon name="chevronRight" size={12} /></button>
+                      <ArmButton armKey={t.name} armed={armed} arm={arm} disarm={disarm} icon="trash"
+                        className="mini" confirmLabel={del.confirm} title={del.title}
+                        onConfirm={async () => {
+                          try {
+                            await api.deleteProject(t.name);
+                            await refresh();
+                            reload().catch(() => {});
+                          } catch (e) {
+                            setErr(e.message);
+                          }
+                        }} />
+                    </td>
+                  </tr>
+                  {isOpen && (
+                    <tr className="subrow">
+                      <td colSpan={9}>
+                        <div className="pf-sub">
+                          {open.tab === 'account' && (
+                            <ProjectAccountMove project={t} accounts={accounts} onChange={() => { refresh(); readAccounts(); reload().catch(() => {}); }} />)}
+                          {open.tab === 'limits' && <ProjectLimits project={t} onChange={refresh} />}
+                          {open.tab === 'zone' && <ProjectZone project={t} zones={zones} onChange={refresh} />}
+                          {open.tab === 'tokens' && <ProjectTokens project={t.name} onChange={refresh} />}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table></div>
+        {projects && projects.length === 0 && <p className="empty">No projects yet.</p>}
+        {!projects && !err && <p className="empty">Loading…</p>}
+
+        <p className="hint">
+          A project&apos;s token acts in the project with its role, for a program such as FeChat&apos;s backend; integrations
+          such as FeCode act by the grants its admins give them; people work in it with their sign-in and their grants.
+          Deleting a project revokes its tokens at once and deletes all its sandboxes and environments.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+// ProjectAccountMove is a project's account in the operators' list (ADR
+// 0059): where it is, and a move to another open account, armed.
+export function ProjectAccountMove({ project, accounts, onChange }) {
+  const current = project.account ? project.account.name : '';
+  const options = moveTargets(accounts, current);
+  const [target, setTarget] = useState('');
+  const [err, setErr] = useState('');
+  const [done, setDone] = useState(null);
+  const [armed, arm, disarm] = useArm();
+  const pick = options.find((a) => a.name === target) || options[0] || null;
+  return (
+    <div>
+      <p className="small">On account <b>{project.account ? accountLabel(project.account) : '—'}</b>.</p>
+      {accounts === null && <p className="muted small">Reading the accounts…</p>}
+      {accounts && options.length === 0 && <p className="muted small">No other open account.</p>}
+      {pick && (
+        <div className="pf-form">
+          <span className="muted small">move to</span>
+          <select value={pick.name} aria-label="the account to move to" onChange={(e) => setTarget(e.target.value)}>
+            {options.map((a) => <option key={a.name} value={a.name}>{accountLabel(a)}</option>)}
+          </select>
+          <ArmButton armKey="move" armed={armed} arm={arm} disarm={disarm} confirmLabel="move? charges go there from now on"
+            onConfirm={async () => {
+              try {
+                setDone(await api.adminMoveProject(project.name, pick.name));
+                setErr('');
+                onChange();
+              } catch (e) {
+                setErr(e.message);
+              }
+            }}>Move</ArmButton>
+        </div>)}
+      <ErrBox error={err} />
+      {done && <p className="small ok">{done.moved ? `Moved to ${accountLabel(done.account)}.` : 'It is there already.'}</p>}
+      <p className="muted small">
+        A move changes who is charged from that moment and nothing else: its name, hosts, domains, people, tokens, limits
+        and workloads stay. Both accounts see the move in their history.
+      </p>
+    </div>
+  );
+}
+
+// ProjectLimits edits a project's limits (ADR 0031): an empty field is no
+// limit, 0 is a limit. A save replaces all of them.
+export function ProjectLimits({ project, onChange }) {
+  const [form, setForm] = useState(() => limitsForm(project.limits));
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => { setMsg(''); setForm({ ...form, [k]: e.target.value }); };
+
+  return (
+    <form onSubmit={async (e) => {
+      e.preventDefault();
+      let body;
+      try {
+        body = limitsBody(form);
+      } catch (e2) {
+        setErr(e2.message);
+        return;
+      }
+      setBusy(true);
+      try {
+        const res = await api.setProjectLimits(project.name, body);
+        setForm(limitsForm(res.limits));
+        setErr('');
+        setMsg('saved');
+        await onChange();
+      } catch (e2) {
+        setErr(e2.message);
+      } finally {
+        setBusy(false);
+      }
+    }}>
+      <div className="limits-grid">
+        {QUOTA_ITEMS.map((it) => (
+          <label key={it.key}>
+            {it.label}{it.unit ? ` (${it.unit})` : ''}
+            <input className="num mono" value={form[it.key]} onChange={set(it.key)} inputMode="numeric" placeholder="no limit" />
+            {it.unit && form[it.key] && /^\d+$/.test(form[it.key].trim()) && (
+              <span className="use mono">{fmtQuota(it, Number(form[it.key]))}</span>)}
+          </label>
+        ))}
+      </div>
+      <ErrBox error={err} />
+      <div className="pf-form">
+        <button type="submit" className="primary" disabled={busy}>Save limits</button>
+        <button type="button" className="ghost" onClick={() => { setForm(limitsForm(project.limits)); setMsg(''); setErr(''); }}>Reset</button>
+        {msg && <span className="ok small">{msg}</span>}
+      </div>
+      <p className="muted small">
+        Empty: no limit; 0 is a limit. What runs over a lowered limit stays; the next create that asks for more is
+        refused (<code>quota_exceeded</code>). vCPUs and memory sum the project's sandboxes, its environments' services,
+        addons and running jobs.
+      </p>
+    </form>
+  );
+}
+
+// ProjectZone moves a project to another zone, and with it its
+// environments' default hosts: the old hosts answer 404 at once, so the
+// move is armed. The answer lists the environments whose hosts changed.
+export function ProjectZone({ project, zones, onChange }) {
+  const [zone, setZone] = useState(project.zone || '');
+  const [moved, setMoved] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [armed, arm, disarm] = useArm();
+  const changed = zone.trim() && zone.trim() !== project.zone;
+
+  return (
+    <div>
+      <div className="pf-form">
+        <span className="muted small">zone of its default hosts</span>
+        <input className="mono" list={`zones-${project.name}`} value={zone} onChange={(e) => { setZone(e.target.value); setMoved(null); }}
+          placeholder="the apps zone's or the project zone's name" />
+        <datalist id={`zones-${project.name}`}>{zones.map((z) => <option key={z} value={z} />)}</datalist>
+        <ArmButton armKey="zone" armed={armed} arm={arm} disarm={disarm} disabled={busy || !changed}
+          className="zone-move" confirmLabel="move? old hosts answer 404"
+          title={changed ? 'move the project and its environments\' default hosts' : 'pick another zone'}
+          onConfirm={async () => {
+            setBusy(true);
+            try {
+              const res = await api.setProjectZone(project.name, zone.trim());
+              setMoved(res);
+              setErr('');
+              await onChange();
+            } catch (e) {
+              setErr(e.message);
+            } finally {
+              setBusy(false);
+            }
+          }}>Move to this zone</ArmButton>
+      </div>
+      <ErrBox error={err} />
+      {moved && (
+        <div>
+          <p className="small"><span className="ok">Moved</span> to <span className="mono zone">{moved.zone}</span>.{' '}
+            {moved.environments.length === 0 ? 'No environment holds a host label: no host changed.' : 'The hosts that changed:'}</p>
+          {moved.environments.length > 0 && (
+            <ul className="zone-moves">
+              {moved.environments.map((m) => <li key={m.id}><span className="mono strong">{m.name}</span>: <span className="mono">{zoneMoveText(m)}</span></li>)}
+            </ul>)}
+        </div>)}
+      <p className="muted small">
+        Every environment that holds a host label moves it into the new zone: kept where it is free there, else its
+        natural label or a fallback. The old hosts answer 404 at once; the labels left behind stay the project's in
+        their zone. Domains are not touched.
+      </p>
+    </div>
+  );
+}
+
+// ProjectTokens lists, mints and revokes a project's tokens: a token has a
+// role, on the project or on one environment (by name or ID). A minted
+// token is shown once.
+export function ProjectTokens({ project, onChange }) {
+  const [tokens, setTokens] = useState(null);
+  const [label, setLabel] = useState('');
+  const [role, setRole] = useState('admin');
+  const [environment, setEnvironment] = useState('');
+  const [fresh, setFresh] = useState(null);
+  const [err, setErr] = useState('');
+  const [armed, arm, disarm] = useArm();
+
+  const refresh = useCallback(async () => {
+    try {
+      setTokens((await api.listProjectTokens(project)).tokens || []);
+      setErr('');
+    } catch (e) {
+      setErr(e.message);
+    }
+  }, [project]);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const rows = tokenRows(tokens);
+
+  return (
+    <div>
+      <ErrBox error={err} />
+      {fresh && (
+        <Secret value={fresh.token} title={`New token of project ${project}`} onDismiss={() => setFresh(null)}>
+          <p className="muted small">Role {fresh.role}{fresh.environment ? ` on environment ${fresh.environment}` : ' on the project'}.</p>
+        </Secret>)}
+      <div className="tblwrap"><table className="tbl">
+        <thead>
+          <tr><th>hash</th><th>label</th><th>role</th><th>made by</th><th className="col-when">created</th><th className="col-when">last used</th><th className="col-quick" /></tr>
+        </thead>
+        <tbody>
+          {rows.map((t) => (
+            <tr key={t.hash}>
+              <td className="mono muted" title={t.hash}>{t.hashPrefix}…</td>
+              <td>{t.label || <span className="muted">(no label)</span>}</td>
+              <td className="small">{t.role || 'admin'}{t.environment ? <span className="muted"> on <span className="mono" title={t.environment}>{t.environment.slice(0, 8)}</span></span> : ''}</td>
+              <td className="small muted">{t.madeBy || '—'}</td>
+              <td className="col-when muted">{fmtDate(t.createdAt)}</td>
+              <td className="col-when">{t.lastUsedAt ? <Ago iso={t.lastUsedAt} /> : <span className="muted">never</span>}</td>
+              <td className="col-quick">
+                <ArmButton armKey={t.hash} armed={armed} arm={arm} disarm={disarm} icon="trash"
+                  className="mini" confirmLabel="revoke?"
+                  onConfirm={async () => {
+                    try {
+                      await api.revokeProjectToken(project, t.hash);
+                      await refresh();
+                      onChange();
+                    } catch (e) {
+                      setErr(e.message);
+                    }
+                  }}>Revoke</ArmButton>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table></div>
+      {tokens && tokens.length === 0 && <p className="empty">No tokens: nothing but people can act in this project.</p>}
+      <form className="pf-form" style={{ marginTop: 10 }} onSubmit={async (e) => {
+        e.preventDefault();
+        try {
+          const body = { label: label.trim(), role, environment: environment.trim() };
+          const res = await api.mintProjectToken(project, body);
+          setFresh({ token: res.token, role, environment: body.environment });
+          setLabel('');
+          setEnvironment('');
+          await refresh();
+          onChange();
+        } catch (e2) {
+          setErr(e2.message);
+        }
+      }}>
+        <input placeholder="label (e.g. fecode)" value={label} onChange={(e) => setLabel(e.target.value)} />
+        <select value={role} onChange={(e) => setRole(e.target.value)} title="the token's role">
+          {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <input className="mono" placeholder="environment (empty: the project)" value={environment}
+          onChange={(e) => setEnvironment(e.target.value)} title="an environment's name or ID: the token acts on it alone" />
+        <button type="submit" className="primary"><Icon name="key" size={14} /> Mint a token</button>
+      </form>
+    </div>
+  );
+}

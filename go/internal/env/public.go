@@ -17,26 +17,26 @@ import (
 )
 
 // textNoAppsZone refuses a publish on a platform without an apps zone;
-// textZoneOff one of a tenant whose zone the platform does not serve.
+// textZoneOff one of a project whose zone the platform does not serve.
 const (
 	textNoAppsZone = "the platform serves no apps zone (--apps-zone); an environment cannot be public"
-	textZoneOff    = "the platform serves no zone %s, tenant %s's; an environment cannot be public until an operator moves the tenant"
+	textZoneOff    = "the platform serves no zone %s, project %s's; an environment cannot be public until an operator moves the project"
 )
 
 // The refusals of a chosen host label.
 const (
 	textHostLabelNotPublic = "hostLabel is given only with public: true"
 	textBadHostLabel       = "hostLabel %q: a chosen host label is a DNS label of at most 63 lowercase letters, digits and hyphens with \"--\" in it, not at its third and fourth characters, and not ending in a hyphen and 16 hex characters"
-	textHostLabelTaken     = "host label %s is another tenant's or another environment's"
-	// textBadOwnedHostLabel refuses a label of a tenant that owns the apps
+	textHostLabelTaken     = "host label %s is another project's or another environment's"
+	// textBadOwnedHostLabel refuses a label of a project that owns the apps
 	// zone, which may leave out the "--".
 	textBadOwnedHostLabel = "hostLabel %q: a chosen host label is a DNS label of at most 63 lowercase letters, digits and hyphens, not with \"--\" at its third and fourth characters, and not ending in a hyphen and 16 hex characters"
 	// textPlainLabelZone refuses a plain label of a zone owner whose
-	// hosts are in the tenant zone, which has no owners (ADR 0031).
-	textPlainLabelZone = "hostLabel %q: a plain host label is only for the apps zone; tenant %s has its hosts in %s, where a chosen host label has \"--\" in it"
+	// hosts are in the project zone, which has no owners (ADR 0031).
+	textPlainLabelZone = "hostLabel %q: a plain host label is only for the apps zone; project %s has its hosts in %s, where a chosen host label has \"--\" in it"
 	// textHostLabelNatural refuses a plain label that is the natural label
-	// of an existing tenant's environment.
-	textHostLabelNatural = "host label %s is the natural label of environment %s of tenant %s"
+	// of an existing project's environment.
+	textHostLabelNatural = "host label %s is the natural label of environment %s of project %s"
 )
 
 // The refusals of an access (ADR 0054).
@@ -45,7 +45,7 @@ const (
 	textProviderNoVisitors = "a provider goes with access visitors"
 	textAccessNotPublic    = "access goes with public true"
 	textVisitsNeedKey      = "this installation guards no environments: ferund runs without --secret-key-file"
-	textUnknownProvider    = "no provider %s in this tenant"
+	textUnknownProvider    = "no provider %s in this project"
 	textNeedsFerunAuth     = "visitors of %s need ferun-auth, which this installation does not run"
 )
 
@@ -57,37 +57,37 @@ const (
 	CodeFerunAuthRequired   = "ferun_auth_required"
 )
 
-// SetPublic is PUT /api/v1/environments/{env}/public: the tenant's
+// SetPublic is PUT /api/v1/environments/{env}/public: the project's
 // decision whether the ingress serves the environment at its default host
 // without a route token (ADR 0021), and whom it admits there (ADR 0054).
 // The first publish gives the
 // environment its host label and its ingress group, so that its image
 // services roll once (Rolling); unpublishing keeps both, and publishing
-// again rolls nothing. hostLabel, only with public, is a label the tenant
-// chose (model.ChosenHostLabel, or, for a tenant of Deps.AppsZoneOwners
+// again rolls nothing. hostLabel, only with public, is a label the project
+// chose (model.ChosenHostLabel, or, for a project of Deps.AppsZoneOwners
 // whose hosts are in the apps zone, also model.PlainHostLabel; else 400)
-// in its tenant's zone (ADR 0031): the environment gets it in place
-// of the label it had or would get, which stays the tenant's; one another
-// tenant or environment holds is a 409, and so is a plain label that is
-// the natural label of an existing tenant's environment, unless the
-// tenant holds it already (checkPlainLabel). Publishing is refused with
-// 409 while the platform has no apps zone or does not serve the tenant's
-// zone, and either is while the environment or its tenant is being
+// in its project's zone (ADR 0031): the environment gets it in place
+// of the label it had or would get, which stays the project's; one another
+// project or environment holds is a 409, and so is a plain label that is
+// the natural label of an existing project's environment, unless the
+// project holds it already (checkPlainLabel). Publishing is refused with
+// 409 while the platform has no apps zone or does not serve the project's
+// zone, and either is while the environment or its project is being
 // deleted.
 //
 // The access, only with public true (400 invalid_access otherwise, and for
 // an access other than anyone or visitors, or a provider without
-// visitors), is anyone, or visitors of one of the tenant's providers or of
+// visitors), is anyone, or visitors of one of the project's providers or of
 // the builtin ferun. Without access a publish of an environment that is
 // not public admits visitors of ferun, and one of a public environment
 // keeps its access; visitors without a provider are of ferun. Visitors are
 // refused while no visits service runs (409 visits_need_secret_key,
-// Deps.VisitKinds nil), of a provider the tenant does not have (422
+// Deps.VisitKinds nil), of a provider the project does not have (422
 // unknown_provider), and of a provider whose kind the installation does
 // not serve (409 ferun_auth_required). Unpublishing ends the
 // environment's visits, and so does a change of its access or provider.
 // A call that changes nothing writes nothing and answers the same.
-func (s *Service) SetPublic(ctx context.Context, tenant, env string, req PublicRequest) (PublicAnswer, error) {
+func (s *Service) SetPublic(ctx context.Context, project, env string, req PublicRequest) (PublicAnswer, error) {
 	public, hostLabel := req.Public, req.HostLabel
 	switch {
 	case req.Access != "" && req.Access != model.AccessAnyone && req.Access != model.AccessVisitors:
@@ -103,7 +103,7 @@ func (s *Service) SetPublic(ctx context.Context, tenant, env string, req PublicR
 	if hostLabel != "" && !public {
 		return PublicAnswer{}, apierr.New(http.StatusBadRequest, textHostLabelNotPublic)
 	}
-	zoneOwner := slices.Contains(s.d.AppsZoneOwners, tenant)
+	zoneOwner := slices.Contains(s.d.AppsZoneOwners, project)
 	plain := hostLabel != "" && zoneOwner && model.PlainHostLabel(hostLabel)
 	if hostLabel != "" && !plain && !model.ChosenHostLabel(hostLabel) {
 		if zoneOwner {
@@ -113,14 +113,14 @@ func (s *Service) SetPublic(ctx context.Context, tenant, env string, req PublicR
 	}
 	var before, after store.Environment
 	err := s.st.InTx(ctx, func(tx *store.Store) error {
-		if err := lockTenant(ctx, tx, tenant); err != nil {
+		if err := lockProject(ctx, tx, project); err != nil {
 			return err
 		}
-		if err := s.checkZone(ctx, tx, tenant, public, plain, hostLabel); err != nil {
+		if err := s.checkZone(ctx, tx, project, public, plain, hostLabel); err != nil {
 			return err
 		}
 		var err error
-		if before, err = resolveEnv(ctx, tx, tenant, env, store.ForUpdate); err != nil {
+		if before, err = resolveEnv(ctx, tx, project, env, store.ForUpdate); err != nil {
 			return err
 		}
 		if before.Deleting {
@@ -129,13 +129,13 @@ func (s *Service) SetPublic(ctx context.Context, tenant, env string, req PublicR
 		access, provider := before.Access, before.AccessProvider
 		if public {
 			access, provider = accessAfter(before, req)
-			if err := s.checkAccess(ctx, tx, tenant, access, provider); err != nil {
+			if err := s.checkAccess(ctx, tx, project, access, provider); err != nil {
 				return err
 			}
 		}
 		cur := before
 		if plain {
-			if err := checkPlainLabel(ctx, tx, tenant, hostLabel); err != nil {
+			if err := checkPlainLabel(ctx, tx, project, hostLabel); err != nil {
 				return err
 			}
 		}
@@ -179,7 +179,7 @@ func (s *Service) SetPublic(ctx context.Context, tenant, env string, req PublicR
 	ans.Access, ans.Provider = accessOf(after)
 	if before.Public != public || before.HostLabel != after.HostLabel || before.Access != after.Access ||
 		before.AccessProvider != after.AccessProvider {
-		s.log.Info("environment public", "tenant", tenant, "env", after.Name, "id", after.ID, "public", public,
+		s.log.Info("environment public", "project", project, "env", after.Name, "id", after.ID, "public", public,
 			"hosts", ans.Hosts, "rolling", ans.Rolling, "label_before", before.HostLabel, "access", ans.Access,
 			"provider", ans.Provider)
 	}
@@ -209,10 +209,10 @@ func accessAfter(e store.Environment, req PublicRequest) (access, provider strin
 
 // checkAccess refuses an access of visitors this installation cannot
 // guard: without a visits service (409 visits_need_secret_key), of a
-// provider tenant does not have (422 unknown_provider), and of one whose
+// provider project does not have (422 unknown_provider), and of one whose
 // kind it does not serve (409 ferun_auth_required). provider is "" for
-// ferun. tx holds the tenant's row.
-func (s *Service) checkAccess(ctx context.Context, tx *store.Store, tenant, access, provider string) error {
+// ferun. tx holds the project's row.
+func (s *Service) checkAccess(ctx context.Context, tx *store.Store, project, access, provider string) error {
 	if access != model.AccessVisitors {
 		return nil
 	}
@@ -221,7 +221,7 @@ func (s *Service) checkAccess(ctx context.Context, tx *store.Store, tenant, acce
 	}
 	name, kind := model.ProviderFerun, model.ProviderKindFerun
 	if provider != "" {
-		p, err := tx.GetAccessProvider(ctx, tenant, provider)
+		p, err := tx.GetAccessProvider(ctx, project, provider)
 		if errors.Is(err, store.ErrNoRow) {
 			return apierr.WithCode(http.StatusUnprocessableEntity, CodeUnknownProvider, textUnknownProvider, provider)
 		}
@@ -236,51 +236,51 @@ func (s *Service) checkAccess(ctx context.Context, tx *store.Store, tenant, acce
 	return nil
 }
 
-// checkZone refuses a publish of a tenant whose zone the platform does not
-// serve (409), and a plain label of a tenant whose hosts are not in the
-// apps zone (400): the tenant zone has no owners. tx holds the tenant's
+// checkZone refuses a publish of a project whose zone the platform does not
+// serve (409), and a plain label of a project whose hosts are not in the
+// apps zone (400): the project zone has no owners. tx holds the project's
 // row.
-func (s *Service) checkZone(ctx context.Context, tx *store.Store, tenant string, public, plain bool, label string) error {
-	t, err := tx.GetTenant(ctx, tenant)
+func (s *Service) checkZone(ctx context.Context, tx *store.Store, project string, public, plain bool, label string) error {
+	t, err := tx.GetProject(ctx, project)
 	if err != nil {
-		return fmt.Errorf("tenant %s: %w", tenant, err)
+		return fmt.Errorf("project %s: %w", project, err)
 	}
 	z := s.zones()
 	switch {
 	case public && z.Of(t.Zone) == "":
-		return apierr.New(http.StatusConflict, textZoneOff, t.Zone, tenant)
-	case plain && !z.PlainLabels(tenant, t.Zone):
-		return apierr.New(http.StatusBadRequest, textPlainLabelZone, label, tenant, z.Of(t.Zone))
+		return apierr.New(http.StatusConflict, textZoneOff, t.Zone, project)
+	case plain && !z.PlainLabels(project, t.Zone):
+		return apierr.New(http.StatusBadRequest, textPlainLabelZone, label, project, z.Of(t.Zone))
 	}
 	return nil
 }
 
 // checkPlainLabel refuses with 409 host_label_taken a plain label, in the
-// apps zone, that is the natural label of an existing tenant's
-// environment: split at its first hyphen (model.NaturalPair), the rest names a tenant, the zone's
+// apps zone, that is the natural label of an existing project's
+// environment: split at its first hyphen (model.NaturalPair), the rest names a project, the zone's
 // owner itself included. So a zone owner never takes the host that
-// reads as an existing tenant's; a tenant made later, whose natural label
+// reads as an existing project's; a project made later, whose natural label
 // the owner holds, gets its fallback (store.ClaimHostLabel). A label the
-// tenant holds already (host_labels) stays its own and is not refused, so
-// that choosing it again, after that tenant came, changes nothing.
-func checkPlainLabel(ctx context.Context, tx *store.Store, tenant, label string) error {
+// project holds already (host_labels) stays its own and is not refused, so
+// that choosing it again, after that project came, changes nothing.
+func checkPlainLabel(ctx context.Context, tx *store.Store, project, label string) error {
 	name, other, ok := model.NaturalPair(label)
 	if !ok {
 		return nil
 	}
 	owner, err := tx.HostLabelOwner(ctx, "", label)
-	if err == nil && owner == tenant {
+	if err == nil && owner == project {
 		return nil
 	}
 	if err != nil && !errors.Is(err, store.ErrNoRow) {
 		return err
 	}
-	_, err = tx.GetTenant(ctx, other)
+	_, err = tx.GetProject(ctx, other)
 	if errors.Is(err, store.ErrNoRow) {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("tenant %s: %w", other, err)
+		return fmt.Errorf("project %s: %w", other, err)
 	}
 	return apierr.WithCode(http.StatusConflict, CodeHostLabelTaken, textHostLabelNatural, label, name, other)
 }

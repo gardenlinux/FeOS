@@ -39,7 +39,7 @@ import (
 
 var bg = context.Background()
 
-// fixture is a database with the tenant acme and its public environment
+// fixture is a database with the project acme and its public environment
 // web at deployment 1, a sealer and a recording Refresher.
 type fixture struct {
 	t   *testing.T
@@ -98,7 +98,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	f := &fixture{t: t, d: d, st: store.New(d), sl: sl, ref: &refresher{}}
-	if _, _, err := f.st.CreateTenant(bg, "acme"); err != nil {
+	if _, _, err := f.st.CreateProject(bg, "acme"); err != nil {
 		t.Fatal(err)
 	}
 	f.env = f.mkEnv("web", true)

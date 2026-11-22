@@ -50,18 +50,18 @@ rules of its own.
     trailing data are error findings with their path), the reader of
     YAML (below), and the merge patch of a spec document (RFC 7396),
     with which a caller lays its own values over a spec;
-  - the **answers** of the tenant class: an environment's status, a
+  - the **answers** of the project class: an environment's status, a
     plan with its findings and its diff, deployments, the catalog, the
     quota, and the finding itself, `{severity, path, problem, remedy}`;
-  - a **client** of the tenant class over them: the routes, the header
-    that names a tenant, and the two answers of a refusal (ADR 0031).
+  - a **client** of the project class over them: the routes, the header
+    that names a project, and the two answers of a refusal (ADR 0031).
 - `ferund` uses the same module. There is one definition and no
   published copy of it.
 
 ### Judging stays behind the plan
 
 - Validation, normalisation, reach and the diff are not published. They
-  need the catalog, the environment's secrets, the tenant's limits and
+  need the catalog, the environment's secrets, the project's limits and
   the other environments, and `ferund` is the only judge (ADR 0032): a
   judge compiled into a caller would be an older `ferund` that
   disagrees with the running one.
@@ -97,7 +97,7 @@ rules of its own.
 
 - The addons' types, versions, plans, options and outputs are the
   catalog's answer. The bounds of a spec, the most replicas of a
-  service among them, and the tenant's limits are what the plan's
+  service among them, and the project's limits are what the plan's
   findings say, with the value that is allowed in the remedy.
 - A caller keeps no list of plans and no bound of its own, and gives no
   finding for what the plan judges. A form reads the catalog; a check

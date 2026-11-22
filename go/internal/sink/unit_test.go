@@ -149,11 +149,11 @@ func TestCursor(t *testing.T) {
 	}
 }
 
-func TestTenants(t *testing.T) {
+func TestProjects(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.URL.Path != pathTenant || r.URL.Query().Get("filter") != "environments" {
+		if r.URL.Path != pathProject || r.URL.Query().Get("filter") != "environments" {
 			http.NotFound(w, r)
 			return
 		}
@@ -161,20 +161,30 @@ func TestTenants(t *testing.T) {
 		// A ferund of the release before reads the cookie's old name,
 		// which the sink passes on beside the new one.
 		if c, err := r.Cookie(auth.OldSessionCookie); err == nil {
-			session = c.Value + " " + r.Header.Get("FeRun-Tenant")
+			session = c.Value + " " + r.Header.Get("FeRun-Project")
 		}
 		switch r.Header.Get("Authorization") + session {
 		case "Bearer good":
-			// A ferund of before people answers the tenant alone.
-			_, _ = w.Write([]byte(`{"tenant":"acme"}`))
+			// A ferund of before people answers the project alone.
+			_, _ = w.Write([]byte(`{"project":"acme"}`))
 		case "Bearer reader":
-			_, _ = w.Write([]byte(`{"tenant":"acme","role":"read","environments":[]}`))
+			_, _ = w.Write([]byte(`{"project":"acme","role":"read","environments":[]}`))
 		case "Bearer stage":
-			_, _ = w.Write([]byte(`{"tenant":"acme","role":"","environments":["e1",""]}`))
+			_, _ = w.Write([]byte(`{"project":"acme","role":"","environments":["e1",""]}`))
 		case "s1 acme":
-			_, _ = w.Write([]byte(`{"tenant":"acme","role":"write","environments":["e1"]}`))
+			_, _ = w.Write([]byte(`{"project":"acme","role":"write","environments":["e1"]}`))
 		case "s1 other":
-			http.Error(w, `{"error":"no such tenant"}`, http.StatusNotFound)
+			http.Error(w, `{"error":"no such project"}`, http.StatusNotFound)
+		case "Bearer a.b.c":
+			// An integration: the person it names narrows the answer.
+			switch person, sent := r.Header["Ferun-Person"]; {
+			case !sent && r.Header.Get("FeRun-Project") == "acme":
+				_, _ = w.Write([]byte(`{"project":"acme","role":"write","environments":[]}`))
+			case sent && person[0] == "ada":
+				_, _ = w.Write([]byte(`{"project":"acme","role":"","environments":["e2"]}`))
+			default:
+				http.Error(w, `{"error":"no such project"}`, http.StatusNotFound)
+			}
 		case "Bearer broken":
 			http.Error(w, "boom", http.StatusInternalServerError)
 		default:
@@ -184,13 +194,13 @@ func TestTenants(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	ts := NewTenants(srv.URL, nil, time.Minute)
+	ts := NewProjects(srv.URL, nil, time.Minute)
 	now := time.Now()
 	ts.now = func() time.Time { return now }
 	ctx := context.Background()
 	good := Credential{Authorization: "Bearer good"}
 	for range 3 {
-		if got, err := ts.Resolve(ctx, good); err != nil || !reflect.DeepEqual(got, Access{Tenant: "acme", All: true, Write: true}) {
+		if got, err := ts.Resolve(ctx, good); err != nil || !reflect.DeepEqual(got, Access{Project: "acme", All: true, Write: true}) {
 			t.Fatalf("Resolve = %+v, %v", got, err)
 		}
 	}
@@ -205,25 +215,25 @@ func TestTenants(t *testing.T) {
 		c    Credential
 		want Access
 	}{
-		{Credential{Authorization: "Bearer reader"}, Access{Tenant: "acme", All: true}},
-		{Credential{Authorization: "Bearer stage"}, Access{Tenant: "acme", Envs: []string{"e1"}}},
-		{Credential{Session: "s1", Tenant: "acme"}, Access{Tenant: "acme", All: true, Write: true}},
+		{Credential{Authorization: "Bearer reader"}, Access{Project: "acme", All: true}},
+		{Credential{Authorization: "Bearer stage"}, Access{Project: "acme", Envs: []string{"e1"}}},
+		{Credential{Session: "s1", Project: "acme"}, Access{Project: "acme", All: true, Write: true}},
 	} {
 		if got, err := ts.Resolve(ctx, c.c); err != nil || !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%+v: %+v, %v", c.c, got, err)
 		}
 	}
-	// A session's answer is kept for sessionTTL, per tenant.
+	// A session's answer is kept for sessionTTL, per project.
 	n := calls.Load()
 	var ref *refusal
-	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Tenant: "other"}); !errors.As(err, &ref) || ref.status != 404 {
-		t.Errorf("another tenant: %v", err)
+	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Project: "other"}); !errors.As(err, &ref) || ref.status != 404 {
+		t.Errorf("another project: %v", err)
 	}
-	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Tenant: "acme"}); err != nil || calls.Load() != n+1 {
+	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Project: "acme"}); err != nil || calls.Load() != n+1 {
 		t.Errorf("kept: %v, %d calls", err, calls.Load()-n)
 	}
 	now = now.Add(sessionTTL)
-	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Tenant: "acme"}); err != nil || calls.Load() != n+2 {
+	if _, err := ts.Resolve(ctx, Credential{Session: "s1", Project: "acme"}); err != nil || calls.Load() != n+2 {
 		t.Errorf("after sessionTTL: %v, %d calls", err, calls.Load()-n)
 	}
 	_, err := ts.Resolve(ctx, Credential{Authorization: "Bearer bad"})
@@ -236,6 +246,55 @@ func TestTenants(t *testing.T) {
 	}
 	if _, err := ts.Resolve(ctx, Credential{Authorization: "Bearer broken"}); err == nil || errors.As(err, &ref) {
 		t.Errorf("a failure: %v", err)
+	}
+	// An integration's bearer with the project and the person it names
+	// (ADR 0056): the person goes to ferund and is part of the key.
+	in := Credential{Authorization: "Bearer a.b.c", Project: "acme"}
+	ada := Credential{Authorization: "Bearer a.b.c", Project: "acme", Person: "ada", PersonSent: true}
+	for range 2 {
+		if got, err := ts.Resolve(ctx, in); err != nil || !reflect.DeepEqual(got, Access{Project: "acme", All: true, Write: true}) {
+			t.Fatalf("integration: %+v %v", got, err)
+		}
+		if got, err := ts.Resolve(ctx, ada); err != nil || !reflect.DeepEqual(got, Access{Project: "acme", Envs: []string{"e2"}}) {
+			t.Fatalf("naming ada: %+v %v", got, err)
+		}
+	}
+	if _, err := ts.Resolve(ctx, Credential{Authorization: "Bearer a.b.c", Project: "acme", PersonSent: true}); !errors.As(err, &ref) ||
+		ref.status != 404 {
+		t.Fatalf("naming nobody: %v", err)
+	}
+	// An integration's answers, with a person or without, are kept for
+	// sessionTTL, as a session's: a person loses a grant more often than a
+	// token is revoked.
+	n = calls.Load()
+	now = now.Add(sessionTTL - time.Second)
+	for _, c := range []Credential{in, ada} {
+		if _, err := ts.Resolve(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != n {
+		t.Errorf("an integration's answer was not kept: %d calls", calls.Load()-n)
+	}
+	now = now.Add(time.Second)
+	for _, c := range []Credential{in, ada} {
+		if _, err := ts.Resolve(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls.Load() != n+2 {
+		t.Errorf("after sessionTTL: %d calls, want 2", calls.Load()-n)
+	}
+	r := httptest.NewRequest("GET", "/api/v1/logs", nil)
+	r.Header.Set("Authorization", "Bearer a.b.c")
+	r.Header.Set(auth.ProjectHeader, "acme")
+	r.Header.Set(auth.PersonHeader, "ada")
+	if c, err := credential(r); err != nil || c != ada {
+		t.Fatalf("credential %+v %v", c, err)
+	}
+	r.Header.Add(auth.PersonHeader, "bob")
+	if _, err := credential(r); err == nil {
+		t.Fatal("two persons named")
 	}
 }
 
@@ -253,7 +312,7 @@ func TestParseExport(t *testing.T) {
 		t.Fatalf("%d streams", len(got))
 	}
 	b := got[0]
-	if b.Labels.Node != "node-1" || b.Labels.Replica != 2 || b.Labels.RetentionDays != 90 || b.Labels.Tenant != "acme" ||
+	if b.Labels.Node != "node-1" || b.Labels.Replica != 2 || b.Labels.RetentionDays != 90 || b.Labels.Project != "acme" ||
 		b.Labels.Source != SourceContainer {
 		t.Errorf("labels %+v", b.Labels)
 	}
@@ -265,7 +324,7 @@ func TestParseExport(t *testing.T) {
 	}
 	bad := exportRequest(resourceAttrs("p1", "main", "L1", "", nil), record(0, 1, "", "x"))
 	if _, err := parseExport(bad, ingestPeer{node: "n"}, now); err == nil {
-		t.Error("a resource without a tenant passed")
+		t.Error("a resource without a project passed")
 	}
 	noOff := exportRequest(resourceAttrs("p1", "main", "L1", "acme", nil), &logsv1.LogRecord{Body: str("x")})
 	if _, err := parseExport(noOff, ingestPeer{node: "n"}, now); err == nil {
@@ -435,10 +494,10 @@ func kv(k string, v *commonv1.AnyValue) *commonv1.KeyValue {
 	return &commonv1.KeyValue{Key: k, Value: v}
 }
 
-func resourceAttrs(pod, container, logID, tenant string, more map[string]string) []*commonv1.KeyValue {
+func resourceAttrs(pod, container, logID, project string, more map[string]string) []*commonv1.KeyValue {
 	attrs := []*commonv1.KeyValue{kv(attrPod, str(pod)), kv(attrContainer, str(container)), kv(attrLogID, str(logID))}
-	if tenant != "" {
-		attrs = append(attrs, kv(attrTenant, str(tenant)))
+	if project != "" {
+		attrs = append(attrs, kv(attrProject, str(project)))
 	}
 	for k, v := range more {
 		attrs = append(attrs, kv(k, str(v)))
@@ -459,6 +518,43 @@ func exportRequest(attrs []*commonv1.KeyValue, records ...*logsv1.LogRecord) *ot
 		Resource:  &resourcev1.Resource{Attributes: attrs},
 		ScopeLogs: []*logsv1.ScopeLogs{{LogRecords: records}},
 	}}}
+}
+
+// A stream's and a span's project is ferun.project, else its earlier
+// word, which a pod placed before ADR 0061 keeps for its life; without
+// either a batch is refused.
+func TestProjectLabel(t *testing.T) {
+	for _, c := range []struct {
+		attrs map[string]string
+		want  string
+	}{
+		{map[string]string{attrProject: "acme"}, "acme"},
+		{map[string]string{attrProjectLegacy: "old"}, "old"},
+		{map[string]string{attrProject: "acme", attrProjectLegacy: "acme"}, "acme"},
+		{map[string]string{attrProject: "new", attrProjectLegacy: "old"}, "new"},
+		{map[string]string{}, ""},
+	} {
+		if got := labelsOf(c.attrs, "n1", SourceContainer).Project; got != c.want {
+			t.Errorf("%v: project %q, want %q", c.attrs, got, c.want)
+		}
+	}
+	legacy := []*commonv1.KeyValue{kv(attrPod, str("p1")), kv(attrContainer, str("main")), kv(attrLogID, str("L1")),
+		kv(attrProjectLegacy, str("acme"))}
+	got, err := parseExport(exportRequest(legacy, record(0, 5, "stdout", "hi")), ingestPeer{node: "node-1"}, time.Unix(1000, 0))
+	if err != nil || len(got) != 1 || got[0].Labels.Project != "acme" {
+		t.Fatalf("a stream of before: %+v %v", got, err)
+	}
+	if _, err := parseExport(exportRequest(legacy[:3], record(0, 5, "stdout", "hi")), ingestPeer{node: "node-1"}, time.Unix(1000, 0)); err == nil {
+		t.Fatal("a stream without a project was taken")
+	}
+	attrs := podAttrs("", "env1", "web")
+	delete(attrs, attrProject)
+	attrs[attrProjectLegacy] = "acme"
+	spans, _, err := parseTraceExport(traceRequest(attrs, testSpan("0000000000000000000000000000000a", "000000000000000b", "", "GET /",
+		time.Now().UnixNano(), time.Millisecond)), ingestPeer{node: "node-1"}, time.Now())
+	if err != nil || len(spans) != 1 || spans[0].doc.Project != "acme" {
+		t.Fatalf("a span of before: %+v %v", spans, err)
+	}
 }
 
 // A stream's deployment is ferun.deployment, else its earlier word

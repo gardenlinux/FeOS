@@ -51,7 +51,7 @@ func WorkloadGroupID(envID uuid.UUID, kind, name string) string {
 // "wl-s-<sandbox ID>".
 func SandboxWorkloadGroupID(id string) string { return "wl-s-" + id }
 
-// JobWorkloadGroupID is the membership of a tenant's job's pod:
+// JobWorkloadGroupID is the membership of a project's job's pod:
 // "wl-j-<job ID>".
 func JobWorkloadGroupID(id string) string { return "wl-j-" + id }
 
@@ -166,7 +166,7 @@ type PodTemplate struct {
 // its environment (feos.pod.v1.TlsBinding): the guest listens on Listen
 // and dials Host and Port with TLS 1.3 and the pod's identity, offering
 // ALPN, the upstream pinned to Addon's workload ID, which the pod's spec
-// names in full (its tenant's and environment's, ADR 0036).
+// names in full (its project's and environment's, ADR 0036).
 type TemplateTLSBinding struct {
 	Listen string `json:"listen"`
 	Host   string `json:"host"`

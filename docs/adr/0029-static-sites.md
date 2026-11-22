@@ -65,7 +65,7 @@ graph through the sink's Kafka client; for xz there is nothing.
   files; the application's rules come with the files, in the bundle. A
   site has no pods, no replicas, no readiness and no idle policy; it
   costs what its files cost in the store, and it never sleeps.
-- Its source is a **bundle** the tenant uploaded before, named by its
+- Its source is a **bundle** the project uploaded before, named by its
   digest, or a directory of an **OCI image** or artifact, with image
   credentials as a service has them (ADR 0022).
 - A **route** names a site or a service (`{"path": "/", "site": "web"}`
@@ -76,7 +76,7 @@ graph through the sink's Kafka client; for xz there is nothing.
   prefix back.
 - Apply pins a site as it pins a service: an image to its digest, an
   uploaded bundle to itself, after checking that the bundle exists and
-  is the tenant's. A deployment names the bytes each site serves, and a
+  is the project's. A deployment names the bytes each site serves, and a
   revert serves the same.
 - Sites are served by the ingress, and so only in a public environment
   (ADR 0021); the route door (ADR 0043) serves none, and plan says so
@@ -93,17 +93,17 @@ graph through the sink's Kafka client; for xz there is nothing.
   bytes is the bundle's **digest**: the same files give the same digest,
   so an upload is idempotent by construction, and a digest names the
   same bytes for good.
-- In the store a tenant's blobs and bundles live under a prefix of the
-  tenant's own. The blobs are written first, the manifest last, so that
+- In the store a project's blobs and bundles live under a prefix of the
+  project's own. The blobs are written first, the manifest last, so that
   a manifest that exists names only blobs that exist, as a hibernation
-  writes its head last (ADR 0008). A blob the tenant already has is not
+  writes its head last (ADR 0008). A blob the project already has is not
   written again: a new version stores only the files it changed.
-- Blobs are shared within a tenant, never across tenants. Promotion from
+- Blobs are shared within a project, never across projects. Promotion from
   one environment to the next is a deployment that names the same digest
-  and costs nothing in the store. Across tenants the question "is this
-  blob there already?" would tell one tenant what another holds, and a
-  tenant's deletion would not be its prefix.
-- `ferund` keeps every bundle and the blobs per tenant in its database,
+  and costs nothing in the store. Across projects the question "is this
+  blob there already?" would tell one project what another holds, and a
+  project's deletion would not be its prefix.
+- `ferund` keeps every bundle and the blobs per project in its database,
   for the quota and the sweep; the store holds the bytes. Files, not the
   archive: the ingress reads one file per request, two versions share
   what they share, and nothing is unpacked on the request's path.
@@ -112,14 +112,14 @@ graph through the sink's Kafka client; for xz there is nothing.
 
 - **An upload** takes an archive as its body: zip, tar, and tar
   compressed with gzip, xz or zstd, told apart by their first bytes. It
-  needs `write` on the tenant, or on the environment it names, which the
-  bundle records (ADR 0031); bundles are the tenant's, so that
+  needs `write` on the project, or on the environment it names, which the
+  bundle records (ADR 0031); bundles are the project's, so that
   environments share their blobs. The call answers when the bundle is
   complete, with its digest, its files and bytes and its findings, or
-  with why it failed. A tenant lists its bundles and deletes one that no
+  with why it failed. A project lists its bundles and deletes one that no
   kept deployment names.
 - **`ferund` unpacks in its own process**, streaming, hashing each file
-  as it is read and storing it if the tenant lacks it. The work is
+  as it is read and storing it if the project lacks it. The work is
   bounded: the body, the bytes unpacked, the number of files, a file's
   size and a path's length have limits, and an instance runs a bounded
   number of ingests at a time and answers 429 with `Retry-After` beyond.
@@ -187,7 +187,7 @@ graph through the sink's Kafka client; for xz there is nothing.
 
 ### The ingress serves a site
 
-- The table names a site's bundles by digest and its tenant's prefix;
+- The table names a site's bundles by digest and its project's prefix;
   manifests are not in the table, whose entry per environment is bounded
   (ADR 0021). An instance keeps manifests and blobs on its volume under
   bounds, least recently used first out, each blob checked against its
@@ -202,9 +202,9 @@ graph through the sink's Kafka client; for xz there is nothing.
   and others answer 502 naming the store.
 - A site has no wake, no hold, no activity, no endpoints and no
   admission. Its route's `from` is checked before the site's rules, with
-  403 (ADR 0012). Its requests count towards the shares per tenant and
+  403 (ADR 0012). Its requests count towards the shares per project and
   environment the ingress keeps for every request (ADR 0021), so that
-  one tenant's site takes no more of an instance than its service would.
+  one project's site takes no more of an instance than its service would.
 - **Cache headers.** `ETag` is strong, from the blob's hash: exact, the
   same on every instance, changed by the content alone; no
   `Last-Modified`, since an archive's times say nothing. `Cache-Control`
@@ -213,7 +213,7 @@ graph through the sink's Kafka client; for xz there is nothing.
   changed, and sees a switch at its next request; what may be cached for
   longer, hashed assets above all, a headers rule says. The ingress
   keeps no shared cache of answers: a CDN in front of a domain is a
-  tenant's choice (ADR 0030).
+  project's choice (ADR 0030).
 - **Compression and type are decided at the ingest**, once, not per
   request: `ferund` stores a gzip variant of every compressible file
   that is worth it, and a zstd variant once its dependency is approved;
@@ -312,7 +312,7 @@ copies files unchanged:
   target includes sites as it includes services.
 - **Limits** are the operator's, with defaults near Cloudflare Pages': a
   bundle's files and bytes, a file's size, an upload's body, a path's
-  length, a site's rules, spec and bundle together. A tenant's sites
+  length, a site's rules, spec and bundle together. A project's sites
   take at most a quota of the store, the sum of its distinct blobs; an
   upload or ingest beyond is refused with what the quota is and what is
   in use.
@@ -327,7 +327,7 @@ copies files unchanged:
   bundle names is deleted a day after the last one stopped naming it, so
   that an ingest in flight that reuses it never loses it. A revert to a
   deployment whose bundle was swept is refused at plan with a finding:
-  for bundles, FeRun is the registry. A tenant's deletion removes its
+  for bundles, FeRun is the registry. A project's deletion removes its
   prefix.
 - Sites have a **bucket of their own**, with a key for `ferund`, which
   writes and deletes there, and a read-only key for `ferun-ingress`,
@@ -347,15 +347,15 @@ copies files unchanged:
   and every cost of the Context. It stays possible for whoever wants a
   web server of their own.
 - **A public bucket** behind a CDN: a provider's rules engine for every
-  tenant, a bucket readable by anyone who knows a key, and a provider in
+  project, a bucket readable by anyone who knows a key, and a provider in
   every request's path, which ADR 0021 declined for the ingress.
-- **Cloudflare Pages for the tenants**: the model, not the platform; the
+- **Cloudflare Pages for the projects**: the model, not the platform; the
   same provider dependency, and FeRun's deployments, hosts and records
   apart from the site's.
 - **The archive in the store, read by ranges**: no unpacking, but an
   index per archive, no reading in the middle of a tar compressed with
   xz, and two versions that share nothing.
-- **The ingest in a tenant's job**, a pod that unpacks: a microVM
+- **The ingest in a project's job**, a pod that unpacks: a microVM
   between a hostile archive and the control plane, and every format a
   tool exists for, at the cost of a pod per upload and a way for the job
   to write blobs. The archive readers are memory-safe and the limits
@@ -393,14 +393,14 @@ copies files unchanged:
 - **Canary splits by percentage**: a site has no pods to roll, and a
   share of requests per version mixes versions within one page's load
   unless the split is sticky.
-- **Blobs shared across tenants**: less storage, and an oracle of other
-  tenants' files.
+- **Blobs shared across projects**: less storage, and an oracle of other
+  projects' files.
 - **Compression per request**: CPU on every answer for bytes that never
   change.
 
 ## Consequences
 
-- A tenant uploads a built directory or names an image, and the site is
+- A project uploads a built directory or names an image, and the site is
   live on its routes in one deployment, with no pod, no cold start and
   no web server configuration of its own; a revert serves the bytes it
   served before, and promotion costs nothing in the store.

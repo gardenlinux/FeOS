@@ -35,7 +35,7 @@ func (s *Service) status(ctx context.Context, e store.Environment) (EnvStatus, e
 	access, provider := accessOf(e)
 	st := EnvStatus{ID: e.ID.String(), Name: e.Name, Labels: e.Labels, Deployment: e.Deployment, Deployed: e.Deployed,
 		Deleting: e.Deleting, Public: e.Public, Hosts: hosts, HostLabel: e.HostLabel, Access: access, Provider: provider,
-		Objects: []ObjectStatus{}, Routes: []RouteStatus{}, CreatedAt: rfc3339(e.CreatedAt)}
+		Protected: e.Protected, Objects: []ObjectStatus{}, Routes: []RouteStatus{}, CreatedAt: rfc3339(e.CreatedAt)}
 	if st.Labels == nil {
 		st.Labels = map[string]string{}
 	}
@@ -239,9 +239,9 @@ func (s *Service) hosts(ctx context.Context, e store.Environment) ([]string, err
 
 // Hosts are the hosts the ingress serves environment e at, as
 // EnvStatus.Hosts has them: its served domains in the order they were
-// bound, else its default host under its tenant's zone of zones; none
+// bound, else its default host under its project's zone of zones; none
 // while it is not public or is being deleted. It reads the domains and
-// the tenant on q. The visits service checks a challenge's host with it
+// the project on q. The visits service checks a challenge's host with it
 // (ADR 0054).
 func Hosts(ctx context.Context, q *store.Store, zones model.Zones, e store.Environment) ([]string, error) {
 	if !e.Public || e.Deleting {
@@ -251,9 +251,9 @@ func Hosts(ctx context.Context, q *store.Store, zones model.Zones, e store.Envir
 	if err != nil {
 		return nil, err
 	}
-	t, err := q.GetTenant(ctx, e.Owner)
+	t, err := q.GetProject(ctx, e.Owner)
 	if err != nil {
-		return nil, fmt.Errorf("the zone of tenant %s: %w", e.Owner, err)
+		return nil, fmt.Errorf("the zone of project %s: %w", e.Owner, err)
 	}
 	return hostsOf(e, zones.Of(t.Zone), ds[e.ID]), nil
 }
@@ -271,7 +271,7 @@ func accessOf(e store.Environment) (access, provider string) {
 	return model.AccessVisitors, e.AccessProvider
 }
 
-// summaryOf is an environment as its tenant's listing shows it, with its
+// summaryOf is an environment as its project's listing shows it, with its
 // hosts under zone.
 func summaryOf(r store.EnvSummaryRow, zone string, domains []string) EnvSummary {
 	state := r.DeploymentState
@@ -288,7 +288,7 @@ func summaryOf(r store.EnvSummaryRow, zone string, domains []string) EnvSummary 
 	access, provider := accessOf(r.Environment)
 	return EnvSummary{ID: r.ID.String(), Name: r.Name, Labels: labels, Deployment: r.Deployment, Deployed: r.Deployed,
 		State: state, Public: r.Public, Hosts: hostsOf(r.Environment, zone, domains), HostLabel: r.HostLabel,
-		Access: access, Provider: provider, OpenIncidents: int(r.OpenIncidents), CreatedAt: rfc3339(r.CreatedAt)}
+		Access: access, Provider: provider, Protected: r.Protected, OpenIncidents: int(r.OpenIncidents), CreatedAt: rfc3339(r.CreatedAt)}
 }
 
 // incidentOf is an incident as the answers show it.

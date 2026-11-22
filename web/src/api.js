@@ -5,33 +5,33 @@
 // table has them:
 //
 //   sign-in  /auth/config, /auth/me, /auth/login, /auth/logout: who is
-//            signed in, their tenants with their roles, and how one signs
+//            signed in, their projects with their roles, and how one signs
 //            in (OIDC through the provider, or Basic with --admin-users).
 //   admin    /api/v1/admin/…: an operator's session cookie, or the Basic
-//            credentials of this tab (sessionStorage). Tenants, nodes,
+//            credentials of this tab (sessionStorage). Projects, nodes,
 //            join tokens, instances and the nodes' activity. The UI
 //            calls them for operators only.
-//   tenant   /api/v1/sandboxes, /api/v1/tools, /api/v1/environments,
-//            /api/v1/providers, /api/v1/tenant/…: the person's session,
-//            the tenant named in the header FeRun-Tenant (ADR 0031).
-//            The browser keeps no tenant token: what the person's role
+//   project   /api/v1/sandboxes, /api/v1/tools, /api/v1/environments,
+//            /api/v1/providers, /api/v1/project/…: the person's session,
+//            the project named in the header FeRun-Project (ADR 0031).
+//            The browser keeps no project token: what the person's role
 //            allows, the session does, and ferund decides.
 //
-// The UI never holds a sandbox's token or a tenant's: it shows a new one
+// The UI never holds a sandbox's token or a project's: it shows a new one
 // once and forgets it. Every request carries X-Requested-With: ferun
 // (ferund refuses a cookie-authenticated change without it) and sends
-// cookies to the same origin only. A 401 on an admin or a tenant route
+// cookies to the same origin only. A 401 on an admin or a project route
 // ends the sign-in: the UI returns to the sign-in screen.
 
-import { ADMIN_KEY, TENANTS_KEY, readItem, writeItem } from './storage.js';
+import { ADMIN_KEY, OLD_TOKENS_KEY, readItem, writeItem } from './storage.js';
 
 const V1 = '/api/v1';
 
 export const CSRF_HEADER = 'X-Requested-With';
 export const CSRF_VALUE = 'ferun';
 
-// TENANT_HEADER names the tenant a session acts in.
-export const TENANT_HEADER = 'FeRun-Tenant';
+// PROJECT_HEADER names the project a session acts in.
+export const PROJECT_HEADER = 'FeRun-Project';
 
 // ApiError is a failed request: the server's {"error"} text and the
 // status.
@@ -49,9 +49,9 @@ export class ApiError extends Error {
 // request makes one call and returns the answer's JSON ({} for an empty
 // body). A failure throws an ApiError with the server's "error" text, or
 // "<METHOD> <path>: HTTP <status>" when the body has none.
-export async function request(method, path, { body, authorization, tenant } = {}) {
+export async function request(method, path, { body, authorization, project } = {}) {
   const headers = { [CSRF_HEADER]: CSRF_VALUE };
-  if (tenant) headers[TENANT_HEADER] = tenant;
+  if (project) headers[PROJECT_HEADER] = project;
   if (authorization) headers.Authorization = authorization;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const resp = await fetch(path, {
@@ -84,7 +84,7 @@ export const ROLE_REQUIRED = 'role_required';
 // roleRequiredText says a role_required refusal in the UI's words.
 export function roleRequiredText(body) {
   const role = (body && body.role) || 'a higher role';
-  const scope = body && body.scope === 'environment' ? 'this environment' : 'this tenant';
+  const scope = body && body.scope === 'environment' ? 'this environment' : 'this project';
   return `Your role does not allow this: it needs ${role} on ${scope}.`;
 }
 
@@ -183,19 +183,19 @@ export const auth = {
   },
 };
 
-// ------------------------------------------------------------ the tenant --
+// ------------------------------------------------------------ the project --
 
-// forgetTenantTokens removes the tenant tokens an earlier UI kept in this
-// browser (localStorage ferun-tenants): the session acts now, and a
+// forgetOldTokens removes the project tokens an earlier UI kept in this
+// browser (localStorage OLD_TOKENS_KEY): the session acts now, and a
 // token lying in storage is one an attacker's script could take.
-export function forgetTenantTokens() {
-  if (readItem('localStorage', TENANTS_KEY)) writeItem('localStorage', TENANTS_KEY, '');
+export function forgetOldTokens() {
+  if (readItem('localStorage', OLD_TOKENS_KEY)) writeItem('localStorage', OLD_TOKENS_KEY, '');
 }
 
-// The tenant the current route acts in (set by the router).
-let activeTenant = '';
-export function setActiveTenant(name) {
-  activeTenant = name || '';
+// The project the current route acts in (set by the router).
+let activeProject = '';
+export function setActiveProject(name) {
+  activeProject = name || '';
 }
 
 const enc = encodeURIComponent;
@@ -209,8 +209,8 @@ async function adminCall(method, path, body) {
   }
 }
 
-// sessionCall is a call of the session that names no tenant: making a
-// tenant, an invitation's acceptance.
+// sessionCall is a call of the session that names no project: making a
+// project, an invitation's acceptance.
 async function sessionCall(method, path, body) {
   try {
     return await request(method, V1 + path, { body });
@@ -220,37 +220,37 @@ async function sessionCall(method, path, body) {
   }
 }
 
-// tenantCall is a call in the tenant of the route, with the session.
-async function tenantCall(method, path, body) {
-  const tenant = activeTenant;
-  if (!tenant) throw new ApiError('no tenant chosen', 0);
+// projectCall is a call in the project of the route, with the session.
+async function projectCall(method, path, body) {
+  const project = activeProject;
+  if (!project) throw new ApiError('no project chosen', 0);
   try {
-    return await request(method, V1 + path, { body, tenant });
+    return await request(method, V1 + path, { body, project });
   } catch (e) {
     if (e.status === 401) signedOut();
     throw e;
   }
 }
 
-// otherTenantCall is a call in a tenant the route is not in: the
-// switcher's list of another tenant's environments.
-async function otherTenantCall(tenant, method, path) {
+// otherProjectCall is a call in a project the route is not in: the
+// switcher's list of another project's environments.
+async function otherProjectCall(project, method, path) {
   try {
-    return await request(method, V1 + path, { tenant });
+    return await request(method, V1 + path, { project });
   } catch (e) {
     if (e.status === 401) signedOut();
     throw e;
   }
 }
 
-// tenantStream opens a tenant's streaming answer and returns its body's
+// projectStream opens a project's streaming answer and returns its body's
 // reader: the log store's follow (NDJSON), read for as long as signal
 // lets it.
-async function tenantStream(path, signal) {
-  const tenant = activeTenant;
-  if (!tenant) throw new ApiError('no tenant chosen', 0);
+async function projectStream(path, signal) {
+  const project = activeProject;
+  if (!project) throw new ApiError('no project chosen', 0);
   const resp = await fetch(V1 + path, {
-    headers: { [CSRF_HEADER]: CSRF_VALUE, [TENANT_HEADER]: tenant, Accept: 'application/x-ndjson' },
+    headers: { [CSRF_HEADER]: CSRF_VALUE, [PROJECT_HEADER]: project, Accept: 'application/x-ndjson' },
     credentials: 'same-origin',
     signal,
   });
@@ -284,13 +284,19 @@ export const LOG_LINES = 200;
 export const ACTIVITY_LIMIT = 300;
 
 export const api = {
-  // Admin: every tenant and its tokens (an operator's).
-  listTenants: () => adminCall('GET', '/tenants'),
-  createTenant: (name) => adminCall('POST', '/tenants', { name }),
-  deleteTenant: (name) => adminCall('DELETE', `/tenants/${enc(name)}`),
-  listTenantTokens: (name) => adminCall('GET', `/tenants/${enc(name)}/tokens`),
-  createTenantToken: (name, label) => adminCall('POST', `/tenants/${enc(name)}/tokens`, { label }),
-  revokeTenantToken: (name, hash) => adminCall('DELETE', `/tenants/${enc(name)}/tokens/${enc(hash)}`),
+  // Admin: every project and its tokens (an operator's).
+  // account: the list of one account's projects ('' every project); each
+  // project names its account {name, title} (ADR 0059).
+  listProjects: (account = '') => adminCall('GET', '/projects' + query({ account })),
+  // A project on account ('' or left out: default).
+  createProject: (name, account = '') => adminCall('POST', '/projects', account ? { name, account } : { name }),
+  // A project moved to another account: {project, account, from, movedAt,
+  // moved} (moved false when it is already there).
+  adminMoveProject: (name, account) => adminCall('POST', `/projects/${enc(name)}/move`, { account }),
+  deleteProject: (name) => adminCall('DELETE', `/projects/${enc(name)}`),
+  listProjectTokens: (name) => adminCall('GET', `/projects/${enc(name)}/tokens`),
+  createProjectToken: (name, label) => adminCall('POST', `/projects/${enc(name)}/tokens`, { label }),
+  revokeProjectToken: (name, hash) => adminCall('DELETE', `/projects/${enc(name)}/tokens/${enc(hash)}`),
 
   // Admin: the nodes.
   listNodes: () => adminCall('GET', '/nodes'),
@@ -312,17 +318,17 @@ export const api = {
   revokeJoinToken: (id) => adminCall('DELETE', `/join-tokens/${enc(id)}`),
   listInstances: () => adminCall('GET', '/instances'),
 
-  // In the tenant. A sandbox is of an environment (ADR 0035): the list
+  // In the project. A sandbox is of an environment (ADR 0035): the list
   // of one (its name or ID), or without it every sandbox the session may
   // read.
-  listSandboxes: (environment = '') => tenantCall('GET', '/sandboxes' + query({ environment })),
+  listSandboxes: (environment = '') => projectCall('GET', '/sandboxes' + query({ environment })),
   // One sandbox, with its environment {id, name}.
-  getSandbox: (id) => tenantCall('GET', `/sandboxes/${enc(id)}`),
+  getSandbox: (id) => projectCall('GET', `/sandboxes/${enc(id)}`),
   // A sandbox's activity, ascending; source is '', ferund, feosd, authn
   // or traffic. An operator gets it whole, everyone else without the
   // fleet's part (ADR 0031).
   listActivity: (sandboxId, { beforeTsNs, source } = {}) =>
-    tenantCall('GET', `/sandboxes/${enc(sandboxId)}/activity${query({ limit: ACTIVITY_LIMIT, beforeTsNs, source })}`),
+    projectCall('GET', `/sandboxes/${enc(sandboxId)}/activity${query({ limit: ACTIVITY_LIMIT, beforeTsNs, source })}`),
   // vcpus and memoryMib 0: the platform's default size.
   // ferund mints the new sandbox's ID (ADR 0019): the answer's
   // status.sandboxId.
@@ -335,7 +341,7 @@ export const api = {
   // secrets name the HTTP secrets of its environment its pod gets, each
   // at its latest version (ADR 0055).
   createSandbox: (image, vcpus = 0, memoryMib = 0, { environment, reaches, egress, imageCredentials = null, secrets = [] } = {}) =>
-    tenantCall('POST', '/sandboxes', {
+    projectCall('POST', '/sandboxes', {
       image, vcpus, memoryMib, environment,
       ...(reaches !== undefined && reaches !== null ? { reaches } : {}),
       ...(egress !== undefined && egress !== null ? { egress } : {}),
@@ -346,95 +352,123 @@ export const api = {
   // the list ([] for nothing); in place, no move (ADR 0035, revised).
   // Answers the sandbox's view.
   putSandboxReaches: (sandboxId, reaches) =>
-    tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/reaches`, { reaches }),
-  putImageCredentials: (sandboxId, creds) => tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/image-credentials`, creds),
-  deleteImageCredentials: (sandboxId) => tenantCall('DELETE', `/sandboxes/${enc(sandboxId)}/image-credentials`),
-  deleteSandbox: (sandboxId) => tenantCall('DELETE', `/sandboxes/${enc(sandboxId)}`),
-  pauseSandbox: (sandboxId) => tenantCall('POST', `/sandboxes/${enc(sandboxId)}/pause`),
-  resumeSandbox: (sandboxId) => tenantCall('POST', `/sandboxes/${enc(sandboxId)}/resume`),
-  listTokens: (sandboxId) => tenantCall('GET', `/sandboxes/${enc(sandboxId)}/tokens`),
-  createToken: (sandboxId, label) => tenantCall('POST', `/sandboxes/${enc(sandboxId)}/tokens`, { label }),
+    projectCall('PUT', `/sandboxes/${enc(sandboxId)}/reaches`, { reaches }),
+  putImageCredentials: (sandboxId, creds) => projectCall('PUT', `/sandboxes/${enc(sandboxId)}/image-credentials`, creds),
+  deleteImageCredentials: (sandboxId) => projectCall('DELETE', `/sandboxes/${enc(sandboxId)}/image-credentials`),
+  deleteSandbox: (sandboxId) => projectCall('DELETE', `/sandboxes/${enc(sandboxId)}`),
+  pauseSandbox: (sandboxId) => projectCall('POST', `/sandboxes/${enc(sandboxId)}/pause`),
+  resumeSandbox: (sandboxId) => projectCall('POST', `/sandboxes/${enc(sandboxId)}/resume`),
+  listTokens: (sandboxId) => projectCall('GET', `/sandboxes/${enc(sandboxId)}/tokens`),
+  createToken: (sandboxId, label) => projectCall('POST', `/sandboxes/${enc(sandboxId)}/tokens`, { label }),
   // The hash is scoped to its sandbox in the path: a token is revoked
   // where it was minted.
-  revokeToken: (sandboxId, hash) => tenantCall('DELETE', `/sandboxes/${enc(sandboxId)}/tokens/${enc(hash)}`),
-  listTools: () => tenantCall('GET', '/tools'),
+  revokeToken: (sandboxId, hash) => projectCall('DELETE', `/sandboxes/${enc(sandboxId)}/tokens/${enc(hash)}`),
+  listTools: () => projectCall('GET', '/tools'),
   // The Kubernetes and SSH bindings with their use: fingerprints and
   // public keys, never key material.
-  getAccess: (sandboxId) => tenantCall('GET', `/sandboxes/${enc(sandboxId)}/access`),
+  getAccess: (sandboxId) => projectCall('GET', `/sandboxes/${enc(sandboxId)}/access`),
 
-  // As the tenant: its environments. env is the name or the UUID. The
+  // As the project: its environments. env is the name or the UUID. The
   // UI writes deployments and secrets' values through the builder (ADR
   // 0032); it reads no secret's value, and a route token only as its
   // mint answers it, once.
-  listEnvironments: (labels = []) => tenantCall('GET', '/environments' + labelQuery(labels)),
-  listEnvironmentsOf: (tenant) => otherTenantCall(tenant, 'GET', '/environments'),
-  getEnvironment: (env) => tenantCall('GET', `/environments/${enc(env)}`),
-  listDeployments: (env, limit = 50) => tenantCall('GET', `/environments/${enc(env)}/deployments${query({ limit })}`),
+  listEnvironments: (labels = []) => projectCall('GET', '/environments' + labelQuery(labels)),
+  listEnvironmentsOf: (project) => otherProjectCall(project, 'GET', '/environments'),
+  getEnvironment: (env) => projectCall('GET', `/environments/${enc(env)}`),
+  listDeployments: (env, limit = 50) => projectCall('GET', `/environments/${enc(env)}/deployments${query({ limit })}`),
   // A deployment with its normalised spec and its diff against the one
   // before.
-  getDeployment: (env, n) => tenantCall('GET', `/environments/${enc(env)}/deployments/${enc(n)}`),
+  getDeployment: (env, n) => projectCall('GET', `/environments/${enc(env)}/deployments/${enc(n)}`),
   listIncidents: (env, { open } = {}) =>
-    tenantCall('GET', `/environments/${enc(env)}/incidents${open ? '?open=1' : ''}`),
-  getIncident: (env, id) => tenantCall('GET', `/environments/${enc(env)}/incidents/${enc(id)}`),
+    projectCall('GET', `/environments/${enc(env)}/incidents${open ? '?open=1' : ''}`),
+  getIncident: (env, id) => projectCall('GET', `/environments/${enc(env)}/incidents/${enc(id)}`),
   // The last lines of an object's log: an image pod's container (replica
   // 0 unless given), an attached service's process, a job's last run.
   // 501: the node serves no container logs; 409: the instance is paused
   // (never woken for its logs).
   objectLogs: (env, kind, name, { lines = LOG_LINES, replica = 0 } = {}) =>
-    tenantCall('GET', `/environments/${enc(env)}/objects/${enc(kind)}/${enc(name)}/logs${query({ lines, replica })}`),
+    projectCall('GET', `/environments/${enc(env)}/objects/${enc(kind)}/${enc(name)}/logs${query({ lines, replica })}`),
   // The log store, ferun-sink (ADR 0026, docs/architecture/sink.md,
   // Reading): its routes are served beside ferund's at the same address
-  // and take the same tenant token. params is a URLSearchParams of
+  // and take the same project token. params is a URLSearchParams of
   // GET /api/v1/logs (logs.js, sinkParams). A page's lines are oldest
   // first; followLogs reads new lines as they come.
-  searchLogs: (params) => tenantCall('GET', `/logs?${params}`),
+  searchLogs: (params) => projectCall('GET', `/logs?${params}`),
   // Its traces, in the shape of Jaeger's HTTP query API (ADR 0026 §10):
   // a trace by its ID within an environment (its ID). The console opens a
   // trace from a log line and lists none: a search costs the store a scan.
-  getTrace: (env, trace) => tenantCall('GET', `/jaeger/api/traces/${enc(trace)}${query({ environment: env })}`),
-  followLogs: (params, signal) => tenantStream(`/logs?${params}&follow=1`, signal),
+  getTrace: (env, trace) => projectCall('GET', `/jaeger/api/traces/${enc(trace)}${query({ environment: env })}`),
+  followLogs: (params, signal) => projectStream(`/logs?${params}&follow=1`, signal),
 
-  // People (ADR 0031): a person's tenants, their members, invitations,
+  // People (ADR 0031): a person's projects, their members, invitations,
   // tokens and the quota's use. A ferund without these routes answers
   // 404 "no such route" (notAvailable).
   //
-  // A new tenant, its maker its admin: {tenant, role}.
-  createOwnTenant: (name) => sessionCall('POST', '/tenants', { name }),
-  // The tenant as the session sees it: {tenant, role, environments}.
-  getTenant: () => tenantCall('GET', '/tenant'),
-  // The members: {members: [{person, name, email, role, environments:
-  // [{id, name, role}]}]}, role the tenant grant's ('' with grants on
-  // environments alone).
-  listMembers: () => tenantCall('GET', '/tenant/members'),
-  // A grant of a member on the tenant (environment '') or on one of its
+  // A new project on an account the person may put projects on (ADR
+  // 0059; '' or left out: default), its maker its admin: {name,
+  // createdAt, role, limits, account}.
+  createOwnProject: (name, account = '') => sessionCall('POST', '/projects', account ? { name, account } : { name }),
+  // The project as the session sees it: {project, role, environments}.
+  getProject: () => projectCall('GET', '/project'),
+  // The members and the integrations the project grants (ADR 0056):
+  // {members: [{person, name, email, issuer, subject, disabled?, role,
+  // madeBy, madeByName, environments: [{id, name, role, madeBy,
+  // madeByName}]}], integrations: [{integration, title, url, disabled,
+  // role, madeBy, madeByName, environments}]}, role the project grant's
+  // ('' with grants on environments alone).
+  listMembers: () => projectCall('GET', '/project/members'),
+  // An integration's grant on the project (environment '') or on one of
+  // its environments (ID or name), and its removal (ADR 0056): {integration,
+  // role, environment}.
+  putIntegrationGrant: (integration, { role, environment = '' }) =>
+    projectCall('PUT', `/project/integrations/${enc(integration)}/grants`, environment ? { role, environment } : { role }),
+  deleteIntegrationGrant: (integration, environment = '') =>
+    projectCall('DELETE', `/project/integrations/${enc(integration)}/grants${query({ environment })}`),
+  // A project token's grant on the project or on an environment, its hash
+  // as the token list answers it (ADR 0060: the protect dialog gives one a
+  // grant on the environment): {token, role, environment}.
+  putTokenGrant: (hash, { role, environment = '' }) =>
+    projectCall('PUT', `/project/tokens/${enc(hash)}/grants`, environment ? { role, environment } : { role }),
+  deleteTokenGrant: (hash, environment = '') =>
+    projectCall('DELETE', `/project/tokens/${enc(hash)}/grants${query({ environment })}`),
+  // The project's account, since when, and its moves (ADR 0059): {account:
+  // {name, title}, since, moves: [{project, from, to, at, by}]}; every
+  // member reads it.
+  getProjectAccount: () => projectCall('GET', '/project/account'),
+  // The project to another account, by one of its admins who may put
+  // projects there: {project, account, from, movedAt, moved}.
+  moveProject: (account) => projectCall('POST', '/project/move', { account }),
+  // A grant of a member on the project (environment '') or on one of its
   // environments (its ID); its removal. The last admin stays (ferund).
   putGrant: (person, { role, environment = '' }) =>
-    tenantCall('PUT', `/tenant/members/${enc(person)}/grants`, environment ? { role, environment } : { role }),
+    projectCall('PUT', `/project/members/${enc(person)}/grants`, environment ? { role, environment } : { role }),
   deleteGrant: (person, environment = '') =>
-    tenantCall('DELETE', `/tenant/members/${enc(person)}/grants${query({ environment })}`),
-  // Leaving the tenant: every grant of the session's person in it.
-  leaveTenant: () => tenantCall('POST', '/tenant/leave'),
+    projectCall('DELETE', `/project/members/${enc(person)}/grants${query({ environment })}`),
+  // Leaving the project: every grant of the session's person in it.
+  leaveProject: () => projectCall('POST', '/project/leave'),
   // Invitations: single-use links with a role and a scope, valid 7 days;
   // a new one answers its secret once ({id, token, url?, role,
   // environment, expiresAt}).
-  listInvitations: () => tenantCall('GET', '/tenant/invitations'),
+  listInvitations: () => projectCall('GET', '/project/invitations'),
   createInvitation: ({ role, environment = '' }) =>
-    tenantCall('POST', '/tenant/invitations', environment ? { role, environment } : { role }),
-  revokeInvitation: (id) => tenantCall('DELETE', `/tenant/invitations/${enc(id)}`),
+    projectCall('POST', '/project/invitations', environment ? { role, environment } : { role }),
+  revokeInvitation: (id) => projectCall('DELETE', `/project/invitations/${enc(id)}`),
   // An invitation by its link's secret, for the person who opens it:
-  // what it grants ({tenant, role, environment?, expiresAt}); its
-  // acceptance gives the session's person the grant.
+  // what it grants, a project's ({project, role, environment?,
+  // environmentName?, expiresAt}) or an account's ({account: {name,
+  // title}, role, expiresAt}, ADR 0059); its acceptance gives the
+  // session's person the grant ({project, role} or {account, role}).
   getInvitation: (token) => sessionCall('GET', `/invitations/${enc(token)}`),
   acceptInvitation: (token) => sessionCall('POST', `/invitations/${enc(token)}/accept`),
-  // The tenant's tokens, with a role and an optional environment, never
+  // The project's tokens, with a role and an optional environment, never
   // above the minter's; a new one answers its secret once.
-  listTokensOfTenant: () => tenantCall('GET', '/tenant/tokens'),
-  mintTokenOfTenant: ({ label, role, environment = '' }) =>
-    tenantCall('POST', '/tenant/tokens', environment ? { label, role, environment } : { label, role }),
-  revokeTokenOfTenant: (hash) => tenantCall('DELETE', `/tenant/tokens/${enc(hash)}`),
+  listTokensOfProject: () => projectCall('GET', '/project/tokens'),
+  mintTokenOfProject: ({ label, role, environment = '' }) =>
+    projectCall('POST', '/project/tokens', environment ? { label, role, environment } : { label, role }),
+  revokeTokenOfProject: (hash) => projectCall('DELETE', `/project/tokens/${enc(hash)}`),
   // The quota: {limits, use}, each {sandboxes, environments, runningJobs,
   // vcpus, memoryMib}; a limit left out is none, 0 is a limit.
-  getQuota: () => tenantCall('GET', '/tenant/quota'),
+  getQuota: () => projectCall('GET', '/project/quota'),
 
   // The builder's (ADR 0032). A plan of an environment answers {valid,
   // findings, diff, base, current} and, from a ferund that pins at plan,
@@ -443,11 +477,11 @@ export const api = {
   // invalid_spec with findings, 409 base_mismatch with current (the
   // ApiError's body).
   // A create with the same ID and name again answers 200 with it.
-  createEnvironment: (name, id) => tenantCall('POST', '/environments', id ? { name, id } : { name }),
-  planEnvironment: (env, spec, base) => tenantCall('POST', `/environments/${enc(env)}/plan`, { spec, base }),
-  planSpec: (spec) => tenantCall('POST', '/environments/plan', { spec }),
+  createEnvironment: (name, id) => projectCall('POST', '/environments', id ? { name, id } : { name }),
+  planEnvironment: (env, spec, base) => projectCall('POST', `/environments/${enc(env)}/plan`, { spec, base }),
+  planSpec: (spec) => projectCall('POST', '/environments/plan', { spec }),
   applyDeployment: (env, { spec, base, message }) =>
-    tenantCall('POST', `/environments/${enc(env)}/deployments`, message ? { spec, base, message } : { spec, base }),
+    projectCall('POST', `/environments/${enc(env)}/deployments`, message ? { spec, base, message } : { spec, base }),
   // An environment's secrets (ADR 0055), both kinds in one list sorted by
   // name, never a value: a value secret {name, type: "value", version,
   // createdBy, createdAt}; an HTTP secret also its definition (upstream,
@@ -462,76 +496,84 @@ export const api = {
   // secret's preflight ({ok, addresses, tls, token, probe, error}) of
   // the stored latest version, or with binding of a draft, whose secret
   // fields {"set": true} are the latest version's; nothing is stored.
-  listSecrets: (env) => tenantCall('GET', `/environments/${enc(env)}/secrets`),
-  getSecret: (env, name) => tenantCall('GET', `/environments/${enc(env)}/secrets/${enc(name)}`),
-  putSecret: (env, name, value) => tenantCall('PUT', `/environments/${enc(env)}/secrets/${enc(name)}`, { value }),
+  listSecrets: (env) => projectCall('GET', `/environments/${enc(env)}/secrets`),
+  getSecret: (env, name) => projectCall('GET', `/environments/${enc(env)}/secrets/${enc(name)}`),
+  putSecret: (env, name, value) => projectCall('PUT', `/environments/${enc(env)}/secrets/${enc(name)}`, { value }),
   putHttpSecret: (env, name, def) =>
-    tenantCall('PUT', `/environments/${enc(env)}/secrets/${enc(name)}`, { ...def, type: 'http' }),
+    projectCall('PUT', `/environments/${enc(env)}/secrets/${enc(name)}`, { ...def, type: 'http' }),
   checkSecret: (env, name, { binding = null, probe = null } = {}) =>
-    tenantCall('POST', `/environments/${enc(env)}/secrets/${enc(name)}/check`,
+    projectCall('POST', `/environments/${enc(env)}/secrets/${enc(name)}/check`,
       { ...(binding ? { binding } : {}), ...(probe ? { probe } : {}) }),
   // An environment's operations beside the builder (ADR 0018).
-  deleteEnvironment: (env) => tenantCall('DELETE', `/environments/${enc(env)}`),
-  renameEnvironment: (env, name) => tenantCall('PATCH', `/environments/${enc(env)}`, { name }),
+  deleteEnvironment: (env) => projectCall('DELETE', `/environments/${enc(env)}`),
+  renameEnvironment: (env, name) => projectCall('PATCH', `/environments/${enc(env)}`, { name }),
   // A revert makes a new deployment with deployment n's spec, against
   // base, the latest deployment's number.
   revertDeployment: (env, n, { base, message } = {}) =>
-    tenantCall('POST', `/environments/${enc(env)}/deployments/${enc(n)}/revert`, message ? { base, message } : { base }),
-  listTags: (env) => tenantCall('GET', `/environments/${enc(env)}/tags`),
-  putTag: (env, tag, deployment) => tenantCall('PUT', `/environments/${enc(env)}/tags/${enc(tag)}`, { deployment }),
-  deleteTag: (env, tag) => tenantCall('DELETE', `/environments/${enc(env)}/tags/${enc(tag)}`),
+    projectCall('POST', `/environments/${enc(env)}/deployments/${enc(n)}/revert`, message ? { base, message } : { base }),
+  listTags: (env) => projectCall('GET', `/environments/${enc(env)}/tags`),
+  putTag: (env, tag, deployment) => projectCall('PUT', `/environments/${enc(env)}/tags/${enc(tag)}`, { deployment }),
+  deleteTag: (env, tag) => projectCall('DELETE', `/environments/${enc(env)}/tags/${enc(tag)}`),
   // A clone: {name, deployment?, labels?, secrets: {name: {copy: true} | {value}},
   // credentials: {name: {copy: true}}} — the HTTP secrets go under
   // credentials, their name of before ADR 0055, which ferund keeps.
-  cloneEnvironment: (env, body) => tenantCall('POST', `/environments/${enc(env)}/clone`, body),
-  deleteSecret: (env, name) => tenantCall('DELETE', `/environments/${enc(env)}/secrets/${enc(name)}`),
-  restartService: (env, name) => tenantCall('POST', `/environments/${enc(env)}/services/${enc(name)}/restart`),
-  runJob: (env, name) => tenantCall('POST', `/environments/${enc(env)}/jobs/${enc(name)}/run`),
+  cloneEnvironment: (env, body) => projectCall('POST', `/environments/${enc(env)}/clone`, body),
+  deleteSecret: (env, name) => projectCall('DELETE', `/environments/${enc(env)}/secrets/${enc(name)}`),
+  restartService: (env, name) => projectCall('POST', `/environments/${enc(env)}/services/${enc(name)}/restart`),
+  runJob: (env, name) => projectCall('POST', `/environments/${enc(env)}/jobs/${enc(name)}/run`),
   checkBinding: (env, name, probe) =>
-    tenantCall('POST', `/environments/${enc(env)}/bindings/${enc(name)}/check`, probe ? { probe } : {}),
-  // The route door's token: a mint answers it once ({token}); one delete
-  // revokes every one.
-  mintRouteToken: (env) => tenantCall('POST', `/environments/${enc(env)}/route-tokens`),
-  revokeRouteTokens: (env) => tenantCall('DELETE', `/environments/${enc(env)}/route-tokens`),
+    projectCall('POST', `/environments/${enc(env)}/bindings/${enc(name)}/check`, probe ? { probe } : {}),
+  // Protection (ADR 0060): a protected environment's changes take a grant
+  // on it or admin on the project; a project grant of write reads it.
+  // Answers {id, name, protected, changed}.
+  setProtected: (env, isProtected) => projectCall('PUT', `/environments/${enc(env)}/protected`, { protected: !!isProtected }),
+  // Who changes the environment today, by which grant: {principals: [{kind
+  // person|token|integration, id, label, projectRole, environmentRole,
+  // losesWrite}]}.
+  envPrincipals: (env) => projectCall('GET', `/environments/${enc(env)}/principals`),
+  // The route door's token (write on the environment, ADR 0056): a mint
+  // answers it once ({token}); one delete revokes every one.
+  mintRouteToken: (env) => projectCall('POST', `/environments/${enc(env)}/route-tokens`),
+  revokeRouteTokens: (env) => projectCall('DELETE', `/environments/${enc(env)}/route-tokens`),
   // Publish or unpublish at the ingress (ADR 0054): a publish with an
   // optional host label and who the ingress admits, access "anyone" or
-  // "visitors" of a provider ("ferun" or one of the tenant's); an
+  // "visitors" of a provider ("ferun" or one of the project's); an
   // unpublish is {public: false} alone. The console says the access on
   // every publish: ferund keeps a public environment's access when a
   // publish says none, and admits visitors of ferun on the first one.
   // Answers {public, hosts, rolling, access, provider}; an older ferund
   // answers no access, and serves the environment to anyone.
   setPublic: (env, isPublic, { hostLabel = '', access = '', provider = '' } = {}) => {
-    if (!isPublic) return tenantCall('PUT', `/environments/${enc(env)}/public`, { public: false });
+    if (!isPublic) return projectCall('PUT', `/environments/${enc(env)}/public`, { public: false });
     const body = { public: true };
     if (hostLabel) body.hostLabel = hostLabel;
     if (access) body.access = access;
     if (access === 'visitors' && provider) body.provider = provider;
-    return tenantCall('PUT', `/environments/${enc(env)}/public`, body);
+    return projectCall('PUT', `/environments/${enc(env)}/public`, body);
   },
   // The ingress's records of an environment, newest first, and its
   // traffic per service over window (1h or 24h).
   accessLogs: (env, { limit = 200, beforeTsNs, traceId } = {}) =>
-    tenantCall('GET', `/environments/${enc(env)}/access-logs${query({ limit, beforeTsNs, traceId })}`),
-  traffic: (env, window = '1h') => tenantCall('GET', `/environments/${enc(env)}/traffic${query({ window })}`),
+    projectCall('GET', `/environments/${enc(env)}/access-logs${query({ limit, beforeTsNs, traceId })}`),
+  traffic: (env, window = '1h') => projectCall('GET', `/environments/${enc(env)}/traffic${query({ window })}`),
   // What the environment's pods sent through each HTTP binding over
   // window (24h or 1h) and who sent it, as the sink counts it ({window,
   // unavailable?, truncated, bindings}); and who its workloads are to
   // the platform: each one's SPIFFE ID and the certificates its pods
   // hold ({trustDomain, workloads}, ADR 0036).
   bindingUsage: (env, window = '24h') =>
-    tenantCall('GET', `/environments/${enc(env)}/bindings/usage${query({ window })}`),
-  identities: (env) => tenantCall('GET', `/environments/${enc(env)}/identities`),
+    projectCall('GET', `/environments/${enc(env)}/bindings/usage${query({ window })}`),
+  identities: (env) => projectCall('GET', `/environments/${enc(env)}/identities`),
 
-  // The tenant's domains (ADR 0021): a claim answers the records to set;
+  // The project's domains (ADR 0021): a claim answers the records to set;
   // a domain is bound to one environment, or none.
-  listDomains: (params = {}) => tenantCall('GET', '/domains' + query(params)),
-  getDomain: (id) => tenantCall('GET', `/domains/${enc(id)}`),
-  claimDomain: (name) => tenantCall('POST', '/domains', { name }),
-  deleteDomain: (id) => tenantCall('DELETE', `/domains/${enc(id)}`),
-  checkDomain: (id) => tenantCall('POST', `/domains/${enc(id)}/check`),
-  bindDomain: (id, environment) => tenantCall('PUT', `/domains/${enc(id)}/environment`, { environment }),
-  unbindDomain: (id) => tenantCall('DELETE', `/domains/${enc(id)}/environment`),
+  listDomains: (params = {}) => projectCall('GET', '/domains' + query(params)),
+  getDomain: (id) => projectCall('GET', `/domains/${enc(id)}`),
+  claimDomain: (name) => projectCall('POST', '/domains', { name }),
+  deleteDomain: (id) => projectCall('DELETE', `/domains/${enc(id)}`),
+  checkDomain: (id) => projectCall('POST', `/domains/${enc(id)}/check`),
+  bindDomain: (id, environment) => projectCall('PUT', `/domains/${enc(id)}/environment`, { environment }),
+  unbindDomain: (id) => projectCall('DELETE', `/domains/${enc(id)}/environment`),
 
   // The jobs made by a call (POST /api/v1/jobs, ADR 0041): runs to
   // completion, each in an environment (ADR 0035). The list of one
@@ -539,7 +581,7 @@ export const api = {
   // list them all.
   listJobs: async (labels = [], environment = '') => {
     const q = labelQuery(labels);
-    const res = await tenantCall('GET', '/jobs' + q + (environment ? `${q ? '&' : '?'}environment=${enc(environment)}` : ''));
+    const res = await projectCall('GET', '/jobs' + q + (environment ? `${q ? '&' : '?'}environment=${enc(environment)}` : ''));
     if (!environment) return res;
     const jobs = (res.jobs || []).filter((j) => {
       const e = j && j.environment;
@@ -547,42 +589,80 @@ export const api = {
     });
     return { ...res, jobs };
   },
-  getJob: (id) => tenantCall('GET', `/jobs/${enc(id)}`),
-  createJob: (body) => tenantCall('POST', '/jobs', body),
-  jobLogs: (id) => tenantCall('GET', `/jobs/${enc(id)}/logs`),
-  cancelJob: (id) => tenantCall('POST', `/jobs/${enc(id)}/cancel`),
-  deleteJob: (id) => tenantCall('DELETE', `/jobs/${enc(id)}`),
+  getJob: (id) => projectCall('GET', `/jobs/${enc(id)}`),
+  createJob: (body) => projectCall('POST', '/jobs', body),
+  jobLogs: (id) => projectCall('GET', `/jobs/${enc(id)}/logs`),
+  cancelJob: (id) => projectCall('POST', `/jobs/${enc(id)}/cancel`),
+  deleteJob: (id) => projectCall('DELETE', `/jobs/${enc(id)}`),
 
-  // Admin: the ingresses, the people, a tenant's limits and zone.
+  // The integrations registered here, for a person who grants one (ADR
+  // 0056): {integrations: [{name, title, url}]}, the enabled ones.
+  listIntegrations: () => sessionCall('GET', '/integrations'),
+  // Admin: the integrations, each {name, title, url, issuer, subject,
+  // disabled, disabledAt?, createdAt, updatedAt, lastSeen?, madeBy,
+  // projects}; a put registers or changes one (issuer '' : the
+  // installation's provider).
+  adminListIntegrations: () => adminCall('GET', '/integrations'),
+  adminPutIntegration: (name, { title = '', url = '', issuer = '', subject = '' }) =>
+    adminCall('PUT', `/integrations/${enc(name)}`, { title, url, ...(issuer ? { issuer } : {}), subject }),
+  adminDisableIntegration: (name) => adminCall('POST', `/integrations/${enc(name)}/disable`),
+  adminEnableIntegration: (name) => adminCall('POST', `/integrations/${enc(name)}/enable`),
+  adminDeleteIntegration: (name) => adminCall('DELETE', `/integrations/${enc(name)}`),
+
+  // Accounts (ADR 0059), for a person: theirs ({accounts} as /auth/me),
+  // one's page ({name, title, reference, closed, role, members, projects,
+  // moves}), its members' roles, and its invitations ({role}, a new one's
+  // token and url shown once).
+  listAccounts: () => sessionCall('GET', '/accounts'),
+  getAccount: (a) => sessionCall('GET', `/accounts/${enc(a)}`),
+  putAccountMember: (a, person, role) => sessionCall('PUT', `/accounts/${enc(a)}/members/${enc(person)}`, { role }),
+  deleteAccountMember: (a, person) => sessionCall('DELETE', `/accounts/${enc(a)}/members/${enc(person)}`),
+  listAccountInvitations: (a) => sessionCall('GET', `/accounts/${enc(a)}/invitations`),
+  createAccountInvitation: (a, { role }) => sessionCall('POST', `/accounts/${enc(a)}/invitations`, { role }),
+  revokeAccountInvitation: (a, id) => sessionCall('DELETE', `/accounts/${enc(a)}/invitations/${enc(id)}`),
+  // Admin: every account ({name, title, reference, createdAt, madeBy,
+  // closed, closedAt?, projects, members}), a new one, one's page, a
+  // change (title, reference, closed), a deletion (one that never held a
+  // project), and its members.
+  adminListAccounts: () => adminCall('GET', '/accounts'),
+  adminCreateAccount: ({ name, title = '', reference = '' }) =>
+    adminCall('POST', '/accounts', { name, ...(title ? { title } : {}), ...(reference ? { reference } : {}) }),
+  adminGetAccount: (a) => adminCall('GET', `/accounts/${enc(a)}`),
+  adminPatchAccount: (a, patch) => adminCall('PATCH', `/accounts/${enc(a)}`, patch),
+  adminDeleteAccount: (a) => adminCall('DELETE', `/accounts/${enc(a)}`),
+  adminPutAccountMember: (a, person, role) => adminCall('PUT', `/accounts/${enc(a)}/members/${enc(person)}`, { role }),
+  adminDeleteAccountMember: (a, person) => adminCall('DELETE', `/accounts/${enc(a)}/members/${enc(person)}`),
+
+  // Admin: the ingresses, the people, a project's limits and zone.
   listIngresses: () => adminCall('GET', '/ingresses'),
   removeIngress: (name) => adminCall('DELETE', `/ingresses/${enc(name)}`),
   listPeople: () => adminCall('GET', '/people'),
   disablePerson: (person) => adminCall('POST', `/people/${enc(person)}/disable`),
   enablePerson: (person) => adminCall('POST', `/people/${enc(person)}/enable`),
-  setTenantLimits: (name, limits) => adminCall('PUT', `/tenants/${enc(name)}/limits`, limits),
-  setTenantZone: (name, zone) => adminCall('PUT', `/tenants/${enc(name)}/zone`, { zone }),
+  setProjectLimits: (name, limits) => adminCall('PUT', `/projects/${enc(name)}/limits`, limits),
+  setProjectZone: (name, zone) => adminCall('PUT', `/projects/${enc(name)}/zone`, { zone }),
 
   // The addons' catalog; null from a ferund that has none (404).
   addonCatalog: async () => {
     try {
-      return await tenantCall('GET', '/addons');
+      return await projectCall('GET', '/addons');
     } catch (e) {
       if (e.status === 404 || e.status === 405) return null;
       throw e;
     }
   },
 
-  // Platform: an operator mints a tenant's token with a role (ferund's
-  // default: admin), on the tenant or on one environment (name or ID).
-  mintTenantToken: (name, { label = '', role = '', environment = '' } = {}) =>
-    adminCall('POST', `/tenants/${enc(name)}/tokens`,
+  // Platform: an operator mints a project's token with a role (ferund's
+  // default: admin), on the project or on one environment (name or ID).
+  mintProjectToken: (name, { label = '', role = '', environment = '' } = {}) =>
+    adminCall('POST', `/projects/${enc(name)}/tokens`,
       { label, ...(role ? { role } : {}), ...(environment ? { environment } : {}) }),
 
-  // The tenant's access providers (ADR 0054), who vouch for the visitors
-  // of an environment that admits visitors: kind tenant {url}, the
-  // tenant's own service; kind oidc {issuer, clientId, clientSecret,
+  // The project's access providers (ADR 0054), who vouch for the visitors
+  // of an environment that admits visitors: kind project {url}, the
+  // project's own service; kind oidc {issuer, clientId, clientSecret,
   // rule}, an issuer ferun-auth signs in with; ferun, built in, every
-  // tenant's without being made. The list answers {providers (ferun
+  // project's without being made. The list answers {providers (ferun
   // first), kinds (those this installation serves)}; a provider of kind
   // oidc names the redirect URI and back-channel URI its issuer
   // registers, its own (none without ferun-auth). A read answers
@@ -591,15 +671,15 @@ export const api = {
   // unchanged); a delete of one an environment names is 409
   // provider_in_use. A ferund without them (an older one, or one without
   // --secret-key-file) answers 404 "no such route" (notAvailable).
-  listProviders: () => tenantCall('GET', '/providers'),
-  getProvider: (name) => tenantCall('GET', `/providers/${enc(name)}`),
-  putProvider: (name, provider) => tenantCall('PUT', `/providers/${enc(name)}`, provider),
-  deleteProvider: (name) => tenantCall('DELETE', `/providers/${enc(name)}`),
+  listProviders: () => projectCall('GET', '/providers'),
+  getProvider: (name) => projectCall('GET', `/providers/${enc(name)}`),
+  putProvider: (name, provider) => projectCall('PUT', `/providers/${enc(name)}`, provider),
+  deleteProvider: (name) => projectCall('DELETE', `/providers/${enc(name)}`),
   // The HTTP secrets a sandbox names, of its environment (ADR 0055); the
   // whole list on a put, which reaches its running pod at once.
-  getSandboxSecrets: (sandboxId) => tenantCall('GET', `/sandboxes/${enc(sandboxId)}/secrets`),
+  getSandboxSecrets: (sandboxId) => projectCall('GET', `/sandboxes/${enc(sandboxId)}/secrets`),
   putSandboxSecrets: (sandboxId, names) =>
-    tenantCall('PUT', `/sandboxes/${enc(sandboxId)}/secrets`, { secrets: names }),
+    projectCall('PUT', `/sandboxes/${enc(sandboxId)}/secrets`, { secrets: names }),
 };
 
 // mcpURL is the MCP door of this origin, which the UI shows to connect

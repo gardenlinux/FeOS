@@ -24,7 +24,7 @@ import (
 // makes them a job's run's.
 func instanceLogLabels(owner string, id podid.ID, envID uuid.UUID, kind, object string, replica, deployment, attempt int) map[string]string {
 	l := map[string]string{
-		model.LogTenant: owner, model.LogInstance: id.String(), model.LogEnvironment: envID.String(),
+		model.LogProject: owner, model.LogInstance: id.String(), model.LogEnvironment: envID.String(),
 		model.LogKind: kind, model.LogObject: object, model.LogReplica: strconv.Itoa(replica),
 		model.LogDeployment: strconv.Itoa(deployment),
 	}
@@ -34,11 +34,11 @@ func instanceLogLabels(owner string, id podid.ID, envID uuid.UUID, kind, object 
 	return l
 }
 
-// tenantJobLogLabels are those of a tenant's job's pod in envID, its one
+// projectJobLogLabels are those of a project's job's pod in envID, its one
 // attempt; days > 0 is the retention the job asked.
-func tenantJobLogLabels(owner string, id podid.ID, envID uuid.UUID, days int) map[string]string {
+func projectJobLogLabels(owner string, id podid.ID, envID uuid.UUID, days int) map[string]string {
 	l := map[string]string{
-		model.LogTenant: owner, model.LogInstance: id.String(), model.LogEnvironment: envID.String(),
+		model.LogProject: owner, model.LogInstance: id.String(), model.LogEnvironment: envID.String(),
 		model.LogJob: id.String(), model.LogAttempt: "1",
 	}
 	if days > 0 {
@@ -51,7 +51,7 @@ func tenantJobLogLabels(owner string, id podid.ID, envID uuid.UUID, days int) ma
 // environment's, of the kind sandbox, the object its ID.
 func SandboxLogLabels(owner string, id podid.ID, envID uuid.UUID) map[string]string {
 	return map[string]string{
-		model.LogTenant: owner, model.LogInstance: id.String(), model.LogEnvironment: envID.String(),
+		model.LogProject: owner, model.LogInstance: id.String(), model.LogEnvironment: envID.String(),
 		model.LogKind: model.LogKindSandbox, model.LogObject: id.String(),
 	}
 }
@@ -61,20 +61,20 @@ func SandboxLogLabels(owner string, id podid.ID, envID uuid.UUID) map[string]str
 // (CreatePodRequest.log_redact), computed at every create and stored
 // nowhere: those a stored tail of the row is redacted of, each with its
 // userinfo escaping (redactValues). An environment's row: envSecretValues
-// (its addons' credentials, its tenant secrets, those its template
-// names); a tenant's job's: its secrets and image credentials. An error
+// (its addons' credentials, its project secrets, those its template
+// names); a project's job's: its secrets and image credentials. An error
 // fails the create, so that no pod ships what it could not be told to
 // redact.
 func (c *Controller) LogRedact(ctx context.Context, row store.Sandbox) ([]string, error) {
 	var vals []string
 	switch {
-	case row.TenantJob:
-		sealed, err := c.st.TenantJobSealed(ctx, row.ID)
+	case row.ProjectJob:
+		sealed, err := c.st.ProjectJobSealed(ctx, row.ID)
 		if err != nil {
 			return nil, fmt.Errorf("job %s: %w", row.ID, err)
 		}
 		if sealed != nil {
-			secrets, err := c.tenantJobSecrets(ctx, row.ID)
+			secrets, err := c.projectJobSecrets(ctx, row.ID)
 			if err != nil {
 				return nil, err
 			}

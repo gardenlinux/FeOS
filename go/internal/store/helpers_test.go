@@ -43,9 +43,9 @@ func exec(t *testing.T, s *store.Store, sql string, args ...any) {
 	}
 }
 
-func mkTenant(t *testing.T, s *store.Store, name string) {
+func mkProject(t *testing.T, s *store.Store, name string) {
 	t.Helper()
-	if _, _, err := s.CreateTenant(bg, name); err != nil {
+	if _, _, err := s.CreateProject(bg, name); err != nil {
 		t.Fatal(err)
 	}
 }

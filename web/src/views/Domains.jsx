@@ -13,7 +13,7 @@ import { callout, certValid, dnsNow, domainDot, domainSteps, isServed, mayBind, 
 import { admitsShort, admitsWords } from './envs.js';
 import '../styles/domains.css';
 
-// The tenant's domains (ADR 0021): the list of its claims with their
+// The project's domains (ADR 0021): the list of its claims with their
 // states, and a domain's page (the concept's Fig. 7): the way it goes,
 // the current problem with its deadline, the records to set and what DNS
 // says now, its environment and its certificate. The pieces are exported
@@ -21,7 +21,7 @@ import '../styles/domains.css';
 
 const POLL_MS = 10000;
 
-const NEEDS_ADMIN = 'needs admin on this tenant';
+const NEEDS_ADMIN = 'needs admin on this project';
 
 // envOf is the environment a domain is bound to, from the summary's
 // list; null unbound or not readable.
@@ -38,8 +38,8 @@ function envLabel(d, envs) {
 }
 
 // domainPath is a domain's page.
-export function domainPath(tenant, d) {
-  const base = `/tenants/${encodeURIComponent(tenant)}/domains`;
+export function domainPath(project, d) {
+  const base = `/projects/${encodeURIComponent(project)}/domains`;
   return d ? `${base}/${encodeURIComponent(d.id || d.name)}` : base;
 }
 
@@ -160,16 +160,16 @@ export function CertificateCard({ d }) {
   );
 }
 
-export function Domains({ tenant, sel, navigate }) {
+export function Domains({ project, sel, navigate }) {
   return sel
-    ? <DomainPage key={sel} tenant={tenant} sel={sel} navigate={navigate} />
-    : <DomainList tenant={tenant} navigate={navigate} />;
+    ? <DomainPage key={sel} project={project} sel={sel} navigate={navigate} />
+    : <DomainList project={project} navigate={navigate} />;
 }
 
 // ------------------------------------------------------------------ list --
 
-function DomainList({ tenant, navigate }) {
-  const access = useAccess(tenant);
+function DomainList({ project, navigate }) {
+  const access = useAccess(project);
   const c = access.can;
   const sum = useSummary();
   useNow(10000);
@@ -199,7 +199,7 @@ function DomainList({ tenant, navigate }) {
           <span className="kind">Connect</span>
           <h1>Domains</h1>
           <span className="pagehead-actions">
-            <button className="primary" disabled={!c.adminTenant} title={c.adminTenant ? 'claim a name of your own' : NEEDS_ADMIN}
+            <button className="primary" disabled={!c.adminProject} title={c.adminProject ? 'claim a name of your own' : NEEDS_ADMIN}
               onClick={() => setClaiming((v) => !v)}>
               <Icon name="plus" size={14} /> Claim domain</button>
           </span>
@@ -211,14 +211,14 @@ function DomainList({ tenant, navigate }) {
           </div>)}
       </header>
 
-      {claiming && c.adminTenant && (
-        <ClaimForm onCancel={() => setClaiming(false)} onDone={(d) => { sum.refresh(); navigate(domainPath(tenant, d)); }} />)}
+      {claiming && c.adminProject && (
+        <ClaimForm onCancel={() => setClaiming(false)} onDone={(d) => { sum.refresh(); navigate(domainPath(project, d)); }} />)}
 
       <ErrBox error={err} />
 
       <section className="pane">
         {!list && !err && <p className="empty">Looking…</p>}
-        {list && domains.length === 0 && <DomainsEmpty admin={c.adminTenant} onClaim={() => setClaiming(true)} />}
+        {list && domains.length === 0 && <DomainsEmpty admin={c.adminProject} onClaim={() => setClaiming(true)} />}
         {domains.length > 0 && (
           <div className="tblwrap"><table className="tbl dom-list">
             <thead><tr><th>domain</th><th>state</th><th>environment</th><th>certificate</th><th>checked</th></tr></thead>
@@ -226,14 +226,14 @@ function DomainList({ tenant, navigate }) {
               {domains.map((d) => {
                 const env = envOf(d, sum.environments);
                 return (
-                  <tr key={d.id} className="clickable" onClick={() => navigate(domainPath(tenant, d))}>
+                  <tr key={d.id} className="clickable" onClick={() => navigate(domainPath(project, d))}>
                     <td><span className="cell-state"><DomainDot state={d.state} />
-                      <a className="mono strong" href={domainPath(tenant, d)} onClick={link(domainPath(tenant, d))}>{d.name}</a></span></td>
+                      <a className="mono strong" href={domainPath(project, d)} onClick={link(domainPath(project, d))}>{d.name}</a></span></td>
                     <td><span className="dom-stateline">
                       <span className={'mono small dom-' + domainDot(d.state)}>{d.state}</span>
                       {stateLine(d) && <span className="muted small">{stateLine(d)}</span>}</span></td>
                     <td>{env
-                      ? <a className="mono" href={envPath(tenant, env.name)} onClick={link(envPath(tenant, env.name))}>{env.name}</a>
+                      ? <a className="mono" href={envPath(project, env.name)} onClick={link(envPath(project, env.name))}>{env.name}</a>
                       : d.environment ? <span className="mono muted">{envLabel(d, sum.environments)}</span> : <span className="muted">—</span>}</td>
                     <td className="small">{d.certificate && isServed(d)
                       ? <span title={fmtDateTime(d.certificate.notAfter)}>until {fmtDate(d.certificate.notAfter)}</span>
@@ -262,7 +262,7 @@ export function DomainsEmpty({ admin, onClaim }) {
         <li>FeRun orders its <b>certificate</b> and <b>serves</b> the environment at it, renewing the certificate itself.</li>
       </ol>
       {admin ? <button className="primary" onClick={onClaim}><Icon name="plus" size={14} /> Claim domain</button>
-        : <p className="muted small">Claiming a domain needs admin on this tenant.</p>}
+        : <p className="muted small">Claiming a domain needs admin on this project.</p>}
     </div>
   );
 }
@@ -301,8 +301,8 @@ export function ClaimForm({ onDone, onCancel }) {
 
 // ------------------------------------------------------------------ page --
 
-function DomainPage({ tenant, sel, navigate }) {
-  const access = useAccess(tenant);
+function DomainPage({ project, sel, navigate }) {
+  const access = useAccess(project);
   const c = access.can;
   const sum = useSummary();
   useNow(10000);
@@ -345,7 +345,7 @@ function DomainPage({ tenant, sel, navigate }) {
     }
   };
 
-  const listLink = domainPath(tenant);
+  const listLink = domainPath(project);
   const link = (to) => (e) => { e.preventDefault(); navigate(to); };
 
   if (missing) {
@@ -377,7 +377,7 @@ function DomainPage({ tenant, sel, navigate }) {
           <h1 className="mono">{d.name}</h1>
           <DomainStateLabel state={d.state} />
           <span className="pagehead-actions">
-            <button disabled={!c.adminTenant || !!busy} title={c.adminTenant ? 'look up its records now' : NEEDS_ADMIN}
+            <button disabled={!c.adminProject || !!busy} title={c.adminProject ? 'look up its records now' : NEEDS_ADMIN}
               onClick={() => act('check', () => api.checkDomain(d.id))}>
               <Icon name="refresh" size={14} /> {busy === 'check' ? 'Checking…' : 'Check now'}</button>
             {d.state !== 'superseded' && (
@@ -390,7 +390,7 @@ function DomainPage({ tenant, sel, navigate }) {
           <span>claimed <b>{fmtAgo(d.createdAt)}</b></span>
           <span>verified <b>{d.verifiedAt ? fmtAgo(d.verifiedAt) : 'not yet'}</b></span>
           <span>bound to {env
-            ? <a className="mono strong" href={envPath(tenant, env.name)} onClick={link(envPath(tenant, env.name))}>{env.name}</a>
+            ? <a className="mono strong" href={envPath(project, env.name)} onClick={link(envPath(project, env.name))}>{env.name}</a>
             : envName ? <b className="mono">{envName}</b> : <b>no environment</b>}</span>
           <span>checked <b>{d.checkedAt ? fmtAgo(d.checkedAt) : 'not yet'}</b></span>
           {!Number.isNaN(next) && d.state !== 'superseded' && <span>next check <b>{fmtAgo(d.nextCheckAt)}</b></span>}
@@ -409,7 +409,7 @@ function DomainPage({ tenant, sel, navigate }) {
 
       <div className="dom-grid">
         <div ref={bindRef}>
-          <BindingCard tenant={tenant} d={d} env={env} envName={envName} access={access} busy={busy} act={act} navigate={navigate} />
+          <BindingCard project={project} d={d} env={env} envName={envName} access={access} busy={busy} act={act} navigate={navigate} />
         </div>
         <CertificateCard d={d} />
       </div>
@@ -420,7 +420,7 @@ function DomainPage({ tenant, sel, navigate }) {
           at its default host again at once</> : ''}. The TXT record at your DNS provider stays until you remove it.</p>
         <div className="actionrow">
           <ArmButton armKey="delete" armed={armed} arm={arm} disarm={disarm} icon="trash"
-            disabled={!c.adminTenant || !!busy} title={c.adminTenant ? '' : NEEDS_ADMIN}
+            disabled={!c.adminProject || !!busy} title={c.adminProject ? '' : NEEDS_ADMIN}
             confirmLabel="really delete?"
             onConfirm={async () => {
               if (await act('delete', () => api.deleteDomain(d.id))) navigate(listLink);
@@ -433,7 +433,7 @@ function DomainPage({ tenant, sel, navigate }) {
 
 // BindingCard binds the domain to an environment, moves or unbinds it:
 // admin on the environments it leaves and joins.
-export function BindingCard({ tenant, d, env, envName, access, busy, act, navigate }) {
+export function BindingCard({ project, d, env, envName, access, busy, act, navigate }) {
   const sum = useSummary();
   const envs = sum.environments || [];
   const [to, setTo] = useState('');
@@ -446,7 +446,7 @@ export function BindingCard({ tenant, d, env, envName, access, busy, act, naviga
       <div className="pane-toolbar"><h2><Icon name="layers" size={14} /> Environment</h2></div>
       <p className="small">
         {d.environment
-          ? <>Bound to {env ? <a className="mono" href={envPath(tenant, env.name)} onClick={link(envPath(tenant, env.name))}>{env.name}</a>
+          ? <>Bound to {env ? <a className="mono" href={envPath(project, env.name)} onClick={link(envPath(project, env.name))}>{env.name}</a>
             : <span className="mono">{envName}</span>}{env && !env.public && <span className="warn"> · not public</span>}
             {env && env.public && <span className="muted"> · {admitsWords(env)}</span>}
             {d.boundAt && <span className="muted"> · since {fmtDate(d.boundAt)}</span>}</>

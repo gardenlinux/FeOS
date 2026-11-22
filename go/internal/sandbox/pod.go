@@ -19,7 +19,7 @@ import (
 // by LabelIncarnation.
 const (
 	LabelSandbox     = "ferun.sandbox"
-	LabelTenant      = "ferun.tenant"
+	LabelProject     = "ferun.project"
 	LabelIncarnation = "ferun.incarnation"
 )
 

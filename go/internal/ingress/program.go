@@ -81,8 +81,8 @@ type Program struct {
 	agent *agent.Agent
 	proxy *proxy.Proxy
 	certs *proxy.Certs
-	// tenantCerts is the tenant zone's wildcard; nil: none.
-	tenantCerts *proxy.Certs
+	// projectCerts is the project zone's wildcard; nil: none.
+	projectCerts *proxy.Certs
 
 	lisHTTP, lisHTTPS, lisHealth net.Listener
 	httpSrv, httpsSrv, healthSrv *http.Server
@@ -122,9 +122,9 @@ func New(cfg Config, deps Deps) (*Program, error) {
 		return nil, fmt.Errorf("ferun-ingress: %w", err)
 	}
 	p := &Program{cfg: cfg, log: log, now: time.Now, certs: certs}
-	if cfg.TenantZoneTLSCert != "" {
-		if p.tenantCerts, err = proxy.LoadPair(cfg.TenantZoneTLSCert, cfg.TenantZoneTLSKey, log); err != nil {
-			return nil, fmt.Errorf("ferun-ingress: the tenant zone's certificate: %w", err)
+	if cfg.ProjectZoneTLSCert != "" {
+		if p.projectCerts, err = proxy.LoadPair(cfg.ProjectZoneTLSCert, cfg.ProjectZoneTLSKey, log); err != nil {
+			return nil, fmt.Errorf("ferun-ingress: the project zone's certificate: %w", err)
 		}
 	}
 	a, err := agent.New(agent.Config{
@@ -153,25 +153,25 @@ func New(cfg Config, deps Deps) (*Program, error) {
 	}
 	p.agent = a
 	p.proxy = proxy.New(proxy.Config{
-		WakeHold:             cfg.WakeHold,
-		PendingHold:          cfg.PendingHold,
-		MaxHeld:              cfg.MaxHeld,
-		MaxHeldPerTenant:     cfg.MaxHeldPerTenant,
-		MaxHeldPerEnv:        cfg.MaxHeldPerEnv,
-		MaxInflight:          cfg.MaxInflight,
-		MaxInflightPerTenant: cfg.MaxInflightPerTenant,
-		MaxInflightPerEnv:    cfg.MaxInflightPerEnv,
-		DialTimeout:          cfg.UpstreamDialTimeout,
-		IdleTimeout:          cfg.UpstreamIdleTimeout,
-		ConnWaitTimeout:      cfg.UpstreamWaitTimeout,
-		MaxBody:              cfg.MaxRequestBody,
-		MaxConnsPerEndpoint:  cfg.MaxConnsPerEndpoint,
+		WakeHold:              cfg.WakeHold,
+		PendingHold:           cfg.PendingHold,
+		MaxHeld:               cfg.MaxHeld,
+		MaxHeldPerProject:     cfg.MaxHeldPerProject,
+		MaxHeldPerEnv:         cfg.MaxHeldPerEnv,
+		MaxInflight:           cfg.MaxInflight,
+		MaxInflightPerProject: cfg.MaxInflightPerProject,
+		MaxInflightPerEnv:     cfg.MaxInflightPerEnv,
+		DialTimeout:           cfg.UpstreamDialTimeout,
+		IdleTimeout:           cfg.UpstreamIdleTimeout,
+		ConnWaitTimeout:       cfg.UpstreamWaitTimeout,
+		MaxBody:               cfg.MaxRequestBody,
+		MaxConnsPerEndpoint:   cfg.MaxConnsPerEndpoint,
 	}, proxy.Deps{Waker: a, Holder: a, Visits: a, AccessLog: a, Dial: deps.Dial, Log: log})
 
 	if err := p.listen(); err != nil {
 		return nil, err
 	}
-	p.httpsSrv = p.proxy.HTTPSServer(certs, p.tenantCerts)
+	p.httpsSrv = p.proxy.HTTPSServer(certs, p.projectCerts)
 	p.httpSrv = p.proxy.HTTPServer()
 	p.healthSrv = &http.Server{
 		Handler:           p.healthHandler(),
@@ -287,8 +287,8 @@ func (p *Program) Run(ctx context.Context) error {
 	var loops sync.WaitGroup
 	loops.Go(func() { p.proxy.Run(loopCtx) })
 	loops.Go(func() { p.certs.Run(loopCtx) })
-	if p.tenantCerts != nil {
-		loops.Go(func() { p.tenantCerts.Run(loopCtx) })
+	if p.projectCerts != nil {
+		loops.Go(func() { p.projectCerts.Run(loopCtx) })
 	}
 
 	failed := make(chan error, 3)

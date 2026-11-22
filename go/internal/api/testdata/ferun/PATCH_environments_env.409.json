@@ -10,5 +10,5 @@
     "error": "an environment named expensa-stage exists",
     "code": "name_taken"
   },
-  "note": "another environment of the tenant has the name; 400 for a name that is no DNS label or a UUID, 404 for an environment the tenant does not have, 409 while it is being deleted"
+  "note": "another environment of the project has the name; 400 for a name that is no DNS label or a UUID, 404 for an environment the project does not have, 409 while it is being deleted"
 }

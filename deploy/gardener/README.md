@@ -13,7 +13,7 @@ what FeOS needs (ublk, tun, vhost-vsock, WireGuard, nftables).
 |---|---|---|
 | [`feos/`](feos/) | namespace `feos`, the DaemonSet `feos-node` on every worker of the pool `WORKER_POOL`, and `feos-k8s` | diskd and feosd in a pod per worker, whose microVMs live in it (ADR 0020); feos-k8s joins new workers and drains cordoned ones in FeRun |
 | [`ferun/`](ferun/) | namespace `ferun` | ferund, three instances, one on each worker, and its PostgreSQL `ferun-db`, a CloudNativePG cluster of three instances, one on each worker ([`ferun/postgres.yaml`](ferun/postgres.yaml)); the k3s manifests of ferund ([`../k3s/ferun`](../k3s/ferun)) with the nodes' port at a shoot address; `https://run.<DOMAIN>` by the HTTPRoute [`ferun/route.yaml`](ferun/route.yaml) in place of k3s's Ingress |
-| [`ferun-sink/`](ferun-sink/) | namespace `ferun` | ferun-sink, two instances over the database `sink` of `ferun-db` and Quickwit (`quickwit/`): the nodes ship logs to its ingest's instances, tenants read at `https://run.<DOMAIN>/api/v1/logs` ([The sink](#the-sink)) |
+| [`ferun-sink/`](ferun-sink/) | namespace `ferun` | ferun-sink, two instances over the database `sink` of `ferun-db` and Quickwit (`quickwit/`): the nodes ship logs to its ingest's instances, projects read at `https://run.<DOMAIN>/api/v1/logs` ([The sink](#the-sink)) |
 | [`ferun-auth/`](ferun-auth/) | namespace `ferun` | ferun-auth, two instances, the access provider of the kinds `ferun` and `oidc`: guarded environments' visitors sign in at `https://<AUTH_HOST>` ([Visitors](#visitors)) |
 | [`ferun-ingress/`](ferun-ingress/) | namespace `ferun-ingress` | ferun-ingress, an instance on every worker, behind a LoadBalancer of their own with `externalTrafficPolicy: Local`: `https://<label>.<APPS_ZONE>`, public environments' hosts, straight to their pods over the mesh ([The ingress](#the-ingress)) |
 | [`../k3s/fechat`](../k3s/fechat), [`fechat/`](fechat/) | namespace `fechat` | FeChat, unchanged but for its route: `https://chat.<DOMAIN>` by the HTTPRoute [`fechat/route.yaml`](fechat/route.yaml) in place of k3s's Ingress |
@@ -89,21 +89,21 @@ on make's command line wins over the file.
 |---|---|
 | `DOMAIN` | the DNS zone: ferund at `run.<DOMAIN>`, FeChat at `chat.<DOMAIN>`, the registry at `oci.<DOMAIN>`; `run.<DOMAIN>` is FeRun's trust domain too |
 | `PLATFORM_REGISTRY` | where the platform's images are pushed and pulled; default `ghcr.io/gardenlinux/feos` |
-| `OIDC_ISSUER` | the OpenID Connect provider, exactly as its discovery document states it |
+| `OIDC_ISSUER` | the OpenID Connect provider, exactly as its discovery document states it: people's sign-in, and the issuer of the integrations' access tokens (ADR 0056), whose audience is ferund's `--api-audience`, `https://run.<DOMAIN>` |
 | `WORKER_POOL` | the worker pool that runs FeOS, its label `worker.gardener.cloud/pool` |
 | `NODE_NAME_PREFIX` | the beginning of the pool's node names, on IronCore `shoot--<project>--<shoot>-<pool>-`; feos-k8s removes from FeRun only nodes with it, by force, so no other shoot's nodes may match ([`config.env.example`](config.env.example)) |
 | `FERUN_NODES_IP` | the ClusterIP of the service `ferund-nodes`, which feosd and ferun-ingress dial: a free address of the shoot's service network (`spec.networking.services`) |
 | `FERUN_ROLLOUT_GRACE` | how long a call waits for a node that announced it stops, ferund's `--rollout-grace`: default `8m`, for the feos-node pods, which suspend their microVMs and resume them; `30s` where feosd runs on the host without `--suspend-on-stop` ([`config.env.example`](config.env.example)) |
-| `EDGE_NAME`, `EDGE_ADDRESSES`, `DOMAIN_CHALLENGE_LABEL` | tenants' domains (ADR 0021): the name a domain's CNAME points at (default `edge.<DOMAIN>`; empty: domains off), the balancer's addresses for apex A records, and the TXT label that proves a claim (default `_ferun-challenge`); names under `DOMAIN` are reserved ([`config.env.example`](config.env.example)) |
+| `EDGE_NAME`, `EDGE_ADDRESSES`, `DOMAIN_CHALLENGE_LABEL` | projects' domains (ADR 0021): the name a domain's CNAME points at (default `edge.<DOMAIN>`; empty: domains off), the balancer's addresses for apex A records, and the TXT label that proves a claim (default `_ferun-challenge`); names under `DOMAIN` are reserved ([`config.env.example`](config.env.example)) |
 | `ACME_DIRECTORY`, `ACME_PROFILE`, `ACME_EMAIL` | the domains' certificates (ADR 0021), which ferund orders over HTTP-01 through ferun-ingress's port 80: the CA's directory (empty: none is ordered, domains stay `issuing`), the profile (default `shortlived`, six days, renewed after three), the account's contact (optional) ([`config.env.example`](config.env.example)) |
 | `ACME_ZONE`, `ACME_ZONE_ROUTE53_ID` | wildcard domains (ADR 0045): the ACME zone in Route 53, where ferund answers their DNS-01, and its hosted zone; its key in the Secret `ferund` (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`); empty: no wildcard can be claimed ([`config.env.example`](config.env.example)) |
 | `APPS_ZONE` | the zone of public environments' default hosts, `<label>.<APPS_ZONE>`, which ferun-ingress serves: default `apps.<DOMAIN>`; empty, no environment is served or can be made public, and make refuses ferun-ingress's manifests (`manifests` stops there) ([`config.env.example`](config.env.example)) |
-| `APPS_ZONE_OWNERS` | the tenants that own the apps zone's plain names, ferund's `--apps-zone-owners`: each may choose a host label without `--`, `<project>.<APPS_ZONE>`; default none; FeCode's installation `fecode` ([`config.env.example`](config.env.example)) |
-| `TENANT_ZONE` | the zone of the default hosts of the tenants people make (ADR 0031), ferund's `--tenant-zone`, beside `APPS_ZONE`, where the tenants operators make keep theirs: default empty, none; with it, make renders [`ferun-ingress/tenant-zone.yaml`](ferun-ingress/tenant-zone.yaml), its wildcard certificate, which the instances mount and serve ([The ingress](#the-ingress)); neither zone may be or lie under the other ([`config.env.example`](config.env.example)) |
+| `APPS_ZONE_OWNERS` | the projects that own the apps zone's plain names, ferund's `--apps-zone-owners`: each may choose a host label without `--`, `<label>.<APPS_ZONE>`, as FeCode does for one of its projects' production; default none; FeCode's installation `fecode` ([`config.env.example`](config.env.example)) |
+| `PROJECT_ZONE` | the zone of the default hosts of the projects people make (ADR 0031), ferund's `--project-zone`, beside `APPS_ZONE`, where the projects operators make keep theirs: default empty, none; with it, make renders [`ferun-ingress/project-zone.yaml`](ferun-ingress/project-zone.yaml), its wildcard certificate, which the instances mount and serve ([The ingress](#the-ingress)); neither zone may be or lie under the other ([`config.env.example`](config.env.example)) |
 | `NODE_CIDR` | the workers' network (`spec.networking.nodes`), the only source let through to ferun-ingress's health port and mesh, and the only network its mesh may send to: default `10.250.0.0/16` |
 | `DENY_PREFIXES` | what the pods may not reach, feosd's `--deny-prefix`, and, beside its built-in set, what ferund's preflights, bindings and image resolver may not (its `--deny-prefix`): every network of the shoot, its nodes', pods' and services' (the ConfigMap `kube-system/shoot-info` states them), and the private ranges; no default, since a network left out is open to the microVMs, and `apply-feos` stops on one ([`config.env.example`](config.env.example)) |
 | `AUTH_HOST`, `AUTH_ALLOW_PREFIXES`, `GATEWAY_PODS_NAMESPACE` | ferun-auth (ADR 0054): its host (default `auth.<DOMAIN>`), the private blocks an issuer may be reached in despite the deny set (default none), and the namespace of the Gateway's Envoy pods (default `envoy-gateway-system`) ([Visitors](#visitors)) |
-| `VISITOR_AUTH_URL` | ferund's `--visitor-auth-url`, `https://<AUTH_HOST>` once ferun-auth runs; empty, the default, ferund serves providers of kind `tenant` alone ([Visitors](#visitors)) |
+| `VISITOR_AUTH_URL` | ferund's `--visitor-auth-url`, `https://<AUTH_HOST>` once ferun-auth runs; empty, the default, ferund serves providers of kind `project` alone ([Visitors](#visitors)) |
 | `FECHAT_MODEL` | FeChat's model at the LLM gateway |
 
 The manifests say `${NAME}` where a parameter goes. The Makefile's
@@ -225,10 +225,32 @@ images:
     make -C deploy/gardener apply-fechat
     REGISTRY=ghcr.io/gardenlinux/feos fechat/deploy.sh <tag>
 
-Every other client of FeRun gets a tenant of its own: `POST
-/api/v1/admin/tenants` with `{"name":"<tenant>"}`, which answers with a
-first token, and more with `POST /api/v1/admin/tenants/<tenant>/tokens`,
-with an admin user's Basic credentials and `X-Requested-With: ferun`.
+A client of FeRun that serves one project gets a project of its own:
+`POST /api/v1/admin/projects` with `{"name":"<project>", "account":"<account>"}`
+(no account: `default`), which answers with a first token, and more
+with `POST /api/v1/admin/projects/<project>/tokens`, with an admin user's
+Basic credentials and `X-Requested-With: ferun`. People make projects
+themselves (`POST /api/v1/projects`) on the accounts they may use:
+ferund's `--project-creation` (`FERUN_PROJECT_CREATION`) is `people` by
+default, which opens the account `default` to every signed-in person;
+`operators` keeps it to the people an operator puts on it. The manifests
+do not set it.
+
+A platform that works in many projects, as FeCode does, is an
+**integration** (ADR 0056): it signs in with its own access token of
+`OIDC_ISSUER`, a client of the client credentials grant there whose
+audience includes FeRun's API audience. That audience is ferund's
+`--api-audience` (`FERUN_API_AUDIENCE`), by default its public URL,
+`https://run.<DOMAIN>`, which the manifests do not change. An operator
+registers it once by its client's subject,
+
+    PUT /api/v1/admin/integrations/<name>    {"title":"FeCode","url":"https://fecode.dev","subject":"<client id>"}
+
+and each project's admin grants it a role (the People page of the
+console, or `PUT /api/v1/project/integrations/<name>/grants`). Without
+`OIDC_ISSUER` no integration signs in. The accounts, integrations and
+the effective roles are in
+[control-plane.md](../../docs/architecture/control-plane.md#who-acts-in-a-project).
 
 ferun-ingress, once ferund runs with the apps zone: [The
 ingress](#the-ingress).
@@ -245,7 +267,7 @@ ferund streams the table to it over the nodes' port, and it reaches the
 pods as a peer on the mesh. Its program ships in ferund's image
 (`/ferun-ingress`).
 
-Nothing is served until a tenant publishes an environment, with a token
+Nothing is served until a project publishes an environment, with a token
 of its own:
 
     PUT /api/v1/environments/<env>/public    {"public":true}
@@ -291,23 +313,23 @@ of the repository.
        kubectl -n ferun-ingress wait certificate/apps-wildcard --for=condition=Ready --timeout=15m
        kubectl -n ferun-ingress rollout status statefulset/ferun-ingress --timeout=10m
 
-   With `TENANT_ZONE` (ADR 0031) the manifests hold a second
-   certificate, `tenant-wildcard`, `*.<TENANT_ZONE>` into
-   `tenant-wildcard-tls`, which the instances mount (optionally, so
-   that a platform without a tenant zone needs none) and read as
-   `--tenant-zone-tls-cert` and `--tenant-zone-tls-key`; an instance
+   With `PROJECT_ZONE` (ADR 0031) the manifests hold a second
+   certificate, `project-wildcard`, `*.<PROJECT_ZONE>` into
+   `project-wildcard-tls`, which the instances mount (optionally, so
+   that a platform without a project zone needs none) and read as
+   `--project-zone-tls-cert` and `--project-zone-tls-key`; an instance
    refuses to start while the files are missing, and restarts until
    cert-manager has issued them:
 
-       kubectl -n ferun-ingress wait certificate/tenant-wildcard --for=condition=Ready --timeout=15m
+       kubectl -n ferun-ingress wait certificate/project-wildcard --for=condition=Ready --timeout=15m
 
-   Then give ferund the zone (`apply-ferun` with the same `TENANT_ZONE`),
-   after the ingress: an ingress without the tenant zone's certificate
+   Then give ferund the zone (`apply-ferun` with the same `PROJECT_ZONE`),
+   after the ingress: an ingress without the project zone's certificate
    would serve its hosts with the apps zone's wildcard.
 
 4. DNS, DNS only (not proxied), at the balancer's address (`kubectl -n
    ferun-ingress get svc ferun-ingress`): `*.<APPS_ZONE>` A `<address>`,
-   with a tenant zone `*.<TENANT_ZONE>` A `<address>` too,
+   with a project zone `*.<PROJECT_ZONE>` A `<address>` too,
    and `edge.<DOMAIN>` A `<address>`, reserved for domains later.
 5. Each instance, from inside its pod:
 
@@ -393,7 +415,7 @@ streams, positions and quota), Kafka and Quickwit. The nodes ship to
 its ingest, port 4317, over mTLS
 with their node certificates, each at the address of an instance that
 ferund gives it: the hosts reach no ClusterIP, so the Service
-`ferun-sink-ingest` is headless and ferund resolves it; tenants
+`ferun-sink-ingest` is headless and ferund resolves it; projects
 read at `https://run.<DOMAIN>/api/v1/logs` and `/api/v1/log-streams`
 with their FeRun tokens, through the HTTPRoute `ferun-sink`. Its image
 is a platform image of its own on GHCR,
@@ -402,7 +424,7 @@ is a platform image of its own on GHCR,
 
 Setting it up, with ferund on a version that issues service
 certificates (`POST /api/v1/service-certificates`) and answers `GET
-/api/v1/tenant`:
+/api/v1/project`:
 
 1. The role `sink` of `ferun-db`: its password in a Secret, from which
    CloudNativePG makes the role (`managed.roles` in
@@ -466,7 +488,7 @@ certificates (`POST /api/v1/service-certificates`) and answers `GET
 A new image: `make -C deploy/gardener deploy-ferun-sink TAG=<tag>`
 pushes it and rolls the instances. Lines are kept 30 days
 (`FERUN_SINK_LOG_RETENTION`, the index and topic `ferun-logs-v5-30d`), a
-tenant's job asks for up to 400 (`FERUN_SINK_LOG_RETENTION_MAX`,
+project's job asks for up to 400 (`FERUN_SINK_LOG_RETENTION_MAX`,
 `ferun-logs-v5-400d`).
 The chunks the sink wrote before Quickwit all moved into the index on
 2026-10-31.
@@ -474,12 +496,12 @@ The chunks the sink wrote before Quickwit all moved into the index on
 ## Visitors
 
 A public environment admits `anyone` or the `visitors` of one of its
-tenant's providers (ADR 0054): ferun-ingress sends a navigation without
+project's providers (ADR 0054): ferun-ingress sends a navigation without
 a visit to the provider with a challenge, the provider answers it at
 ferund, and the ingress keeps the visit in a cookie on the host. A
-provider of kind `tenant` is the tenant's own service and needs nothing
+provider of kind `project` is the project's own service and needs nothing
 here. The kinds `ferun` (the installation's issuer, `OIDC_ISSUER`, and a
-grant on the environment) and `oidc` (an issuer a tenant names) sign in
+grant on the environment) and `oidc` (an issuer a project names) sign in
 at ferun-auth: the Deployment `ferun-auth` of
 [`ferun-auth/`](ferun-auth/ferun-auth.yaml), two instances in the
 namespace `ferun` that hold no state, at `https://<AUTH_HOST>`, a host
@@ -529,11 +551,11 @@ version that knows visitors, and `VISITOR_AUTH_URL` still empty:
 
 5. ferund told where ferun-auth is: `VISITOR_AUTH_URL=https://<AUTH_HOST>`
    in `config.env`, then `apply-ferun`. Once that rollout has finished,
-   `GET /api/v1/providers` answers the kinds `tenant`, `ferun` and
-   `oidc`, and a provider of kind `oidc` names the URIs its tenant
+   `GET /api/v1/providers` answers the kinds `project`, `ferun` and
+   `oidc`, and a provider of kind `oidc` names the URIs its project
    registers at its own issuer: the redirect URI
-   `https://<AUTH_HOST>/callback/<tenant>/<provider>` and the back-channel
-   URI `https://<AUTH_HOST>/backchannel/<tenant>/<provider>`.
+   `https://<AUTH_HOST>/callback/<project>/<provider>` and the back-channel
+   URI `https://<AUTH_HOST>/backchannel/<project>/<provider>`.
 
 A new image: `make -C deploy/gardener deploy-ferun-auth TAG=<tag>`
 pushes ferund's image and rolls ferun-auth. Without ferun-auth, sign-ins

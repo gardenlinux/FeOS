@@ -4,7 +4,7 @@
   "query": {},
   "status": 200,
   "request": null,
-  "note": "the addon types' blueprints, the same for every tenant; env's TestAddonCatalog holds this file to the registered blueprints",
+  "note": "the addon types' blueprints, the same for every project; env's TestAddonCatalog holds this file to the registered blueprints",
   "response": {
     "addons": [
       {

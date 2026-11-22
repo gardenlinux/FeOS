@@ -36,7 +36,8 @@ FeRun, the control plane (ADR 0015), is Go in `go/` (`ferund`,
 
 - **Fixed dependencies.** The standard library, pgx/v5, grpc, protobuf, the
   MCP go-sdk, google/uuid, x/crypto, x/sync and franz-go (the sink's Kafka
-  client, ADR 0026 §11); for the UI React, Vite and
+  client, ADR 0026 §11), and go.yaml.in/yaml/v3, in the published module
+  go/ferun alone (ADR 0057); for the UI React, Vite and
   Vitest. Never `go get`, `go mod tidy`, or edit `go.mod`, `go.sum` or
   `go/internal/deps`, and add no npm package, without asking.
 - **Static.** `ferund` builds with `CGO_ENABLED=0`; check it with `file`.
@@ -51,6 +52,8 @@ FeRun, the control plane (ADR 0015), is Go in `go/` (`ferund`,
 - Every Go file starts with the SPDX header; gofmt and `go vet` are clean.
 
 When you change `go/`: `make go-lint go-test` (a throwaway PostgreSQL 17 in
-docker), or, for one package, `go test -race ./internal/<pkg>/...` in `go/`
-with `FERUN_TEST_DATABASE_URL` set. When you change `web/`: `cd web && npm
-test`, and `make web` to build it into `go/internal/ui/dist`.
+docker; it covers the published module `go/ferun` too), or, for one package,
+`go test -race ./internal/<pkg>/...` in `go/` with `FERUN_TEST_DATABASE_URL`
+set, and `go vet ./... && go test -race ./...` in `go/ferun` when you change
+it. When you change `web/`: `cd web && npm test`, and `make web` to build
+it into `go/internal/ui/dist`.

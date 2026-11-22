@@ -10,20 +10,20 @@
 // ferund (POST /api/v1/challenges/open, with its service token of kind
 // auth), which says the environment, the host and the provider: kind
 // ferun, the installation's issuer (--issuer, exactly ferund's
-// --oidc-issuer), or kind oidc, a tenant's issuer, client and rule. The
+// --oidc-issuer), or kind oidc, a project's issuer, client and rule. The
 // browser goes to the issuer with state, nonce and a PKCE challenge; the
 // sign-in in flight lives in a sealed cookie of its own on ferun-auth's
 // host (__Host-ferun_auth_<k>, k from the state), so instances share
 // nothing but --key-file and several tabs sign in at once. Every
 // provider has a redirect URI of its own, GET /callback/ferun and GET
-// /callback/<tenant>/<provider>, and a flow is finished only at its own,
+// /callback/<project>/<provider>, and a flow is finished only at its own,
 // with the issuer and client it began with. There the code is exchanged,
 // the ID token verified, and the
 // challenge accepted (kind ferun: ferund decides by the person's grant;
 // kind oidc: when the provider's rule admits the visitor) or rejected; the
 // browser goes on to ferund's redirect, the host's /.ferun/auth. The
 // issuers' back-channel logouts at POST /backchannel/ferun and
-// /backchannel/<tenant>/<provider> end the visits of a session.
+// /backchannel/<project>/<provider> end the visits of a session.
 //
 // Every issuer URL is fetched through the ruled client of package egress:
 // https only, IPv4, never into --deny-prefix's blocks unless

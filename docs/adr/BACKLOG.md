@@ -21,7 +21,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 ## ADR 0010
 
 - ADR 0010: Changing a pod's metadata while it runs: the spec is fixed at the pod's creation, and Firecracker's store takes changes at any time.
-- ADR 0010: Fixed IPv4 addresses for leaving, per tenant: an address of the node's per tenant to masquerade to.
+- ADR 0010: Fixed IPv4 addresses for leaving, per project: an address of the node's per project to masquerade to.
 - ADR 0010: Rotating the mesh's keys, with the node's certificate or on their own; a node that changes its key is taken as a new peer, nothing rotates one.
 - ADR 0010: Clusters with both kinds of node: a node with a routed prefix as a peer of the mesh, its prefix allowed for it, and a route to it in the meshed nodes' pods; the two exclude each other.
 - ADR 0010: Nodes that cannot reach each other's endpoints, both behind NAT: a relay.
@@ -32,7 +32,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0011: where diskd keeps its state on a node whose operating system is FeOS, whose `/var/lib/feos` is a tmpfs without an object store.
 - ADR 0011: how long a pod's I/O may wait for a recovering diskd before the pod is given up.
 - ADR 0011: whether the host's page cache stays in front of the ublk devices, or what was served is dropped.
-- ADR 0011: whether the chunk pool stays global, which is deduplication across tenants.
+- ADR 0011: whether the chunk pool stays global, which is deduplication across projects.
 - ADR 0011: the control plane runs diskd's sweep with every live head and baked layer; nothing sweeps yet.
 
 ## ADR 0012
@@ -40,7 +40,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0012: An environment-wide egress default that its services narrow; a service's own field is the first step.
 - ADR 0012: References for UDP and other protocols; a reference names a TCP port, and a service's port has no protocol in the spec.
 - ADR 0012: References across environments (stage reaching a shared service), how another environment's workload is named and whose deployment admits it.
-- ADR 0012: A tenant's private networks over a VPN or peering, which need a route as well as a block and an exception to the denied prefixes for that tenant.
+- ADR 0012: A project's private networks over a VPN or peering, which need a route as well as a block and an exception to the denied prefixes for that project.
 - ADR 0012: An addon's egress once addons back up to the object store or replicate to another region; it is the internet now.
 - ADR 0012: Refusing server names the egress did not allow, from the copies feosd takes for its records, to close the CDN limit of address-based FQDN egress.
 - ADR 0012: Whether a secret may name the workload its URL points at, so that a service whose peer's address is sealed derives an edge.
@@ -70,7 +70,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0014: ECDSA P-256 as a key of its own, for peers without Ed25519.
 - ADR 0014: a default scope in FeID's servers and inbound bindings that terminate mutual TLS for a server without FeID and hand it its caller's ID, for a call whose address names no workload.
 - ADR 0014: a second certificate of the pod, with the same ID and a key of its own, should the network key traffic per pair of workloads.
-- ADR 0014: issuers per tenant, for a tenant's own verifiers that check only the chain.
+- ADR 0014: issuers per project, for a project's own verifiers that check only the chain.
 - ADR 0014: TLS bindings for a sandbox, whose spec is fixed at its create, so that an attached service reaches an addon without FeID.
 - ADR 0014: `feosctl` sealing a pod's bindings to its process on a node without a control plane.
 
@@ -93,10 +93,10 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0018: whether revert takes annotations of the caller's; it copies the reverted deployment's and adds `ferun.revertOf`.
 - ADR 0018: whether a service's rollout budget starts when the service may move rather than at the deployment's start.
 - ADR 0018: volumes for services and their mounts; data lives in addons until then.
-- ADR 0018: an admin's listing of every tenant's environments.
+- ADR 0018: an admin's listing of every project's environments.
 - ADR 0018: a CLI for the environments' API.
 - ADR 0018: a `ferund` instance that stops waits for the stops it runs (an image service's pod, up to 660 s) until `--shutdown-grace`, although the leader takes them over at once: a rolling deploy of `ferund` during a service's rollout lingers for up to 11 minutes. Its runner could leave a stop to the takeover instead of waiting for it.
-- ADR 0018: a tenant's deletion (`Engine.DeleteTenant`) deletes its environments' instance rows at once, so their pods' stop grace runs in their tombstones' `DeletePod` without a row, a group or a booking, as every pod's did before the stop op; and so does a sandbox's or a tenant's job's delete for the node's 10 s.
+- ADR 0018: a project's deletion (`Engine.DeleteProject`) deletes its environments' instance rows at once, so their pods' stop grace runs in their tombstones' `DeletePod` without a row, a group or a booking, as every pod's did before the stop op; and so does a sandbox's or a project's job's delete for the node's 10 s.
 - ADR 0018: a feos-node that stops (`--suspend-on-stop`, 300 s) ends a pod in its stop grace with its microVM, so a node's rollout cuts a service's drain; suspending it for the next `feosd` would resume the drain, but its delete holds its lock.
 - ADR 0018: a rollout over two nodes stops its old replicas from the highest, so a first new replica that went beside the old one that stays leaves both ready replicas on one node until the next new one is ready; stopping the old one on the node with the most of the service's instances first would close that.
 - ADR 0018: moving a service's replicas apart once room returns (a node that was full, draining or down, a node that joins): placement spreads them only when it places; and spreading them over failure domains larger than a node (zones), from a label of the node's.
@@ -110,7 +110,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0021: L4 routes, TCP and UDP services, and TLS passed through by SNI to a service that terminates it itself.
 - ADR 0021: h2c to upstreams for gRPC services; the ingress speaks HTTP/1.1 to every service.
 - ADR 0021: a workbench's previews at the ingress, admitted as an environment's visitors are (ADR 0054), so that FeCode's previews could leave its forwarder.
-- ADR 0021: rate limits, body limits and timeouts per domain or tenant, and a cap per client address, which the client's address behind `externalTrafficPolicy: Local` makes possible.
+- ADR 0021: rate limits, body limits and timeouts per domain or project, and a cap per client address, which the client's address behind `externalTrafficPolicy: Local` makes possible.
 - ADR 0021: the proxy apart from the mesh's privileges: the agent root with `NET_ADMIN` and the proxy nonroot as two containers, or the device's calls alone behind a socket in a small privileged container.
 - ADR 0021: health checks at the balancer (`healthCheckNodePort`, ironcore#1584) and its node set honoured (cloud-provider-ironcore#618), so that fewer instances than workers suffice and no share waits while one restarts.
 - ADR 0021: where the ingress runs at scale: a pool of its own, anycast addresses.
@@ -131,7 +131,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 ## ADR 0026
 
 - ADR 0026: sampling of traces, and whether the ingress's spans of every request are kept once the volume asks.
-- ADR 0026: audit records in the sink: never dropped, kept a year, not deletable by a tenant; which of `ferund`'s calls write one, and whether they are signed or chained.
+- ADR 0026: audit records in the sink: never dropped, kept a year, not deletable by a project; which of `ferund`'s calls write one, and whether they are signed or chained.
 - ADR 0026: whether an attached service's process log becomes a stream; a workspace's logs are not shipped.
 
 ## ADR 0027
@@ -147,38 +147,38 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0028: upstreams that answer br or zstd whatever they are asked: unpacked as gzip is, or a binding option that trusts such an upstream.
 - ADR 0028: a bundle mounted over a system bundle's path cannot be replaced (a rename onto a mount fails with `EBUSY`), so `update-ca-certificates` and a package manager that updates `ca-certificates` fail in a container created with CAs; whether such a container should get its bundle in the shared directory alone, as a container older than the CA does.
 - ADR 0028: Kubernetes and TLS bindings at the node address and by names, as HTTP bindings are, instead of loopback ports in the guest (ADR 0014).
-- ADR 0028: quotas per tenant across pods, beyond the rate limit per binding and pod.
+- ADR 0028: quotas per project across pods, beyond the rate limit per binding and pod.
 
 ## ADR 0029
 
 - ADR 0029: skew after a switch: serving blue's files that green lacks for a while (Vercel's skew protection), opt-in per site and for how long; it would also serve a file a version removed on purpose.
 - ADR 0029: the rules on a laptop: a small command around the ingress's site package (`ferun-ingress serve-site ./dist`) to try a `_ferun.json` before the upload; the manual switch tries it on the real ingress, but only after.
-- ADR 0029: an upload by hashes, as Cloudflare's protocol: the manifest first, then only the blobs the tenant lacks, so that a large site from a CI sends what changed.
+- ADR 0029: an upload by hashes, as Cloudflare's protocol: the manifest first, then only the blobs the project lacks, so that a large site from a CI sends what changed.
 - ADR 0029: brotli variants at the ingest, which need a dependency; precompressed siblings alone until then.
 - ADR 0029: canary and sticky splits between blue and green; a share of requests per version mixes versions within one page's load unless the split is sticky.
 - ADR 0029: redirects by host (`www` to the apex), a domain's matter (ADR 0045) rather than a site's.
 - ADR 0029: sites in environments that are not public, served by the route door (ADR 0043), for FeCode's previews of a built site.
 - ADR 0029: Early Hints (103) from a document's `<link rel="preload">`.
 - ADR 0029: files larger than a bundle's file limit (videos), read by ranges from the store without the cache.
-- ADR 0029: traffic as a cost: the store's reads and the ingress's bytes per tenant, and whether a tenant gets a quota on them.
+- ADR 0029: traffic as a cost: the store's reads and the ingress's bytes per project, and whether a project gets a quota on them.
 
 ## ADR 0030
 
 - ADR 0030: a CDN of the operator's in front of the whole edge: the same secret per installation, and the default hosts behind it.
 - ADR 0030: a rate limit per client address behind a CDN, which the CDN's header makes possible there (the limit itself is ADR 0021's line).
 - ADR 0030: more providers (Fastly, Akamai, Bunny): presets, recipes and purges.
-- ADR 0030: a second proof beside the secret: authenticated origin pulls with the tenant's own certificate, where its CDN offers them.
+- ADR 0030: a second proof beside the secret: authenticated origin pulls with the project's own certificate, where its CDN offers them.
 
 ## ADR 0031
 
-- ADR 0031: a general MCP door for a person's agents (`/mcp/tenants`: an OAuth 2.1 resource server taking the shared provider's audience-bound access tokens and tenant tokens, one tool per operation of the tenant class, tokens, secrets' values and image credentials left out, a `secret_generate` tool), once the provider's login app grants audiences (FeCode's ADR 0020).
-- ADR 0031: a tenant's admin deletes the tenant themselves (an operator does, through the admin API).
+- ADR 0031: a general MCP door for a person's agents (`/mcp/projects`: an OAuth 2.1 resource server taking the shared provider's audience-bound access tokens and project tokens, one tool per operation of the project class, tokens, secrets' values and image credentials left out, a `secret_generate` tool), once the provider's login app grants audiences (FeCode's ADR 0020).
+- ADR 0031: a project's admin deletes the project themselves (an operator does, through the admin API).
 - ADR 0031: a CLI with a person's tokens, and a terminal into a sandbox (needs interactive exec, ADR 0004).
-- ADR 0031: a registrable domain of its own as the tenant zone, keeping cookies, reputation and blocklists apart from the platform's (a subdomain of the platform's domain serves it).
+- ADR 0031: a registrable domain of its own as the project zone, keeping cookies, reputation and blocklists apart from the platform's (a subdomain of the platform's domain serves it).
 - ADR 0031: a person removed at the provider without a sign-out keeps their session until its TTL (back-channel logout covers a sign-out; FeCode's requirement A9 asks the same).
 - ADR 0031: inviting a person who has no account yet, by a registration ticket from the provider (FeCode's ADR 0020), a decision about cost.
-- ADR 0031: whether internet egress of the tenants people make waits for an operator's allowance, against abuse (a service's egress is declared per ADR 0034; a sandbox's default is out to the internet).
-- ADR 0031: a tenant's display name beside its name, which is part of its hosts.
+- ADR 0031: whether internet egress of the projects people make waits for an operator's allowance, against abuse (a service's egress is declared per ADR 0034; a sandbox's default is out to the internet).
+- ADR 0031: a project's display name beside its name, which is part of its hosts.
 
 ## ADR 0032
 
@@ -190,9 +190,9 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0035
 
-- ADR 0035: An environment's secrets by name in a sandbox's or a tenant's job's create, pinned at the create as an apply pins; both carry literals.
+- ADR 0035: An environment's secrets by name in a sandbox's or a project's job's create, pinned at the create as an apply pins; both carry literals.
 - ADR 0035: Routes to a sandbox's port other than through an attached service.
-- ADR 0035: Quotas per environment, now that everything an environment runs is counted in it; they are per tenant.
+- ADR 0035: Quotas per environment, now that everything an environment runs is counted in it; they are per project.
 
 ## ADR 0038
 
@@ -214,9 +214,9 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0041
 
-- ADR 0041: `follow` on a tenant's job's log.
-- ADR 0041: whether an environment job's run becomes a record like a tenant's job, so that a manual run answers an ID whose status and log can be read, and takes an environment per run.
-- ADR 0041: whether the 7 days a tenant's job's record stays are a flag, and whether a list shows jobs of every age or only the kept ones.
+- ADR 0041: `follow` on a project's job's log.
+- ADR 0041: whether an environment job's run becomes a record like a project's job, so that a manual run answers an ID whose status and log can be read, and takes an environment per run.
+- ADR 0041: whether the 7 days a project's job's record stays are a flag, and whether a list shows jobs of every age or only the kept ones.
 
 ## ADR 0042
 
@@ -229,14 +229,14 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0045
 
-- ADR 0045: zones of a tenant's own, and a zone a tenant verified with one record that lets it claim every name below it.
+- ADR 0045: zones of a project's own, and a zone a project verified with one record that lets it claim every name below it.
 - ADR 0045: `ferund` as the DNS-01 client for the zones' wildcards too, through the ACME zone's delegation; the operator's issuer provides them.
 - ADR 0045: a certificate before the cutover or behind a proxy that answers HTTP itself: ADR 0030 proposes the wildcards' delegated DNS-01 for a name too.
 - ADR 0045: a wildcard's certificate before its name points here, which DNS-01 allows, so that a wildcard moves without a gap.
-- ADR 0045: certificates a tenant brings, for a domain whose CA is not Let's Encrypt.
-- ADR 0045: whether the cap on unverified claims and certificates only for routed domains shield the ACME account enough, or a tenant wants a cap on its certificates.
+- ADR 0045: certificates a project brings, for a domain whose CA is not Let's Encrypt.
+- ADR 0045: whether the cap on unverified claims and certificates only for routed domains shield the ACME account enough, or a project wants a cap on its certificates.
 - ADR 0045: a Public Suffix List entry for the apps zone, an operator's action, so that a page's script cannot set a cookie for the zone.
-- ADR 0045: a tenant takes its own name as the label of one of its environments, in the zone it is in (FeCode's ADR 0037 waits for it with a project's address).
+- ADR 0045: a project takes its own name as the label of one of its environments, in the zone it is in (FeCode's ADR 0037 waits for it with a project's address).
 
 ## ADR 0048
 
@@ -264,7 +264,6 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0055
 
-- ADR 0055: migration 0035 left `tenant_credentials` in place for the rolling update (empty, which it checked; read by no instance since, and its trigger refuses every write); a later migration drops it, repeating 0035's refusal while the table holds a row, and its trigger function with it.
 - ADR 0055: the `…/credentials` routes and a sandbox's `credentials` field answer as the HTTP secrets' for a release; then they go, and the table `env_credentials` may take the HTTP secrets' name.
 - ADR 0055: a sandbox's own HTTP set takes no write; once no sandbox holds one, its storage and its delete go.
 - ADR 0055: a narrower use: a sandbox or a variable that takes an HTTP secret with fewer paths or a lower rate than its definition.
@@ -276,8 +275,8 @@ names; a line that is given up is deleted. Nothing here is a decision.
 ## ADR 0056
 
 - ADR 0056: proof that the person an integration names asked, for the changes that need one: the person's own token passed on, or exchanged for one bound to the call.
-- ADR 0056: an integration that admits visitors of its own, people who hold no role in the tenant, as an access provider by its registration (ADR 0054).
-- ADR 0056: a grant asked for from the integration's side: a link into the console that names the integration and a role, and a tenant made and granted in one step.
+- ADR 0056: an integration that admits visitors of its own, people who hold no role in the project, as an access provider by its registration (ADR 0054).
+- ADR 0056: a grant asked for from the integration's side: a link into the console that names the integration and a role, and a project made and granted in one step.
 
 ## ADR 0057
 
@@ -293,11 +292,11 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0059
 
-- ADR 0059: a meter of what a tenant uses over time, prices, and a report per account's reference that the operator's accounting takes.
-- ADR 0059: an account's limits, its number of tenants and a budget, beside or in place of the number per person, checked when a tenant is made on it and when one moves to it.
-- ADR 0059: a move offered by a tenant's admin and taken by one of the receiving account's people, for an admin who is no member there.
+- ADR 0059: a meter of what a project uses over time, prices, and a report per account's reference that the operator's accounting takes.
+- ADR 0059: an account's limits, its number of projects and a budget, beside or in place of the number per person, checked when a project is made on it and when one moves to it.
+- ADR 0059: a move offered by a project's admin and taken by one of the receiving account's people, for an admin who is no member there.
 - ADR 0059: accounts people make themselves, with a means of payment, for an installation that serves the public.
-- ADR 0059: an account's admin suspends or deletes a tenant on it.
+- ADR 0059: an account's admin suspends or deletes a project on it.
 - ADR 0059: an account's members filled from the provider's claims, a group or a cost centre.
 
 ## ADR 0060

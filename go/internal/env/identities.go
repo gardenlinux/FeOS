@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/ferun/api"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/pki"
@@ -19,49 +20,13 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// Identities is GET /api/v1/environments/{env}/identities: who the
-// environment's workloads are to the platform (ADR 0036), the SPIFFE ID
-// their pods' certificates carry under the trust domain, and what the
-// certificate each pod holds names. No key and no certificate is in it.
-// The trust domain is "" on an instance without an issuer, and with it
-// the issuer and every SPIFFE ID, OU and subject. Issuer is the issuing
-// CA's subject (RFC 2253), which signs every pod's certificate.
-type Identities struct {
-	TrustDomain string             `json:"trustDomain"`
-	Issuer      string             `json:"issuer"`
-	Workloads   []WorkloadIdentity `json:"workloads"`
-}
-
-// WorkloadIdentity is a workload: an object of the latest deployment
-// (kind service, job or addon, by its name), a sandbox of the environment
-// (kind sandbox, by its ID), or an object only an earlier deployment has
-// whose pods are still there; its SPIFFE ID (the certificates' one URI
-// name), the OU of its pods' subjects (the ID its set carries on the
-// nodes, on which a postgres addon maps a role), and its pods ([] for
-// none). An attached service runs in its sandbox's pod: its ID, its OU
-// and its pod are the sandbox's.
-type WorkloadIdentity struct {
-	Kind     string        `json:"kind"`
-	Name     string        `json:"name"`
-	SPIFFEID string        `json:"spiffeId"`
-	OU       string        `json:"ou"`
-	Pods     []PodIdentity `json:"pods"`
-}
-
-// PodIdentity is a pod of a workload: its ID (an instance's, as the
-// status shows it, or the sandbox's), the subject its certificates carry
-// (pki.PodSubject, RFC 2253: CN=<trust domain>/<pod>,OU=<workload>), and
-// of the newest certificate issued to it its serial, when it was issued
-// and its end ("" before its first), and the node it was issued on (the
-// pod's node before its first).
-type PodIdentity struct {
-	Pod      string `json:"pod"`
-	Subject  string `json:"subject"`
-	Serial   string `json:"serial"`
-	IssuedAt string `json:"issuedAt"`
-	NotAfter string `json:"notAfter"`
-	Node     string `json:"node"`
-}
+// Identities, WorkloadIdentity and PodIdentity are the published
+// module's answers (ADR 0057).
+type (
+	Identities       = api.Identities
+	WorkloadIdentity = api.WorkloadIdentity
+	PodIdentity      = api.PodIdentity
+)
 
 // issuerName is the subject of the CA an issuer signs with, "" for one
 // that does not say (pki.Issuer does).
@@ -77,8 +42,8 @@ func issuerName(iss any) string {
 // name, then the environment's sandboxes by ID, then the workloads of
 // pods that are of no object of it; each pod with the newest certificate
 // issued_certs keeps of it.
-func (s *Service) Identities(ctx context.Context, tenant, env string) (Identities, error) {
-	e, err := resolveEnv(ctx, s.st, tenant, env, store.NoLock)
+func (s *Service) Identities(ctx context.Context, project, env string) (Identities, error) {
+	e, err := resolveEnv(ctx, s.st, project, env, store.NoLock)
 	if err != nil {
 		return Identities{}, err
 	}

@@ -64,7 +64,7 @@ func TestConvertBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.Pool.Exec(ctx, "INSERT INTO tenants (id) VALUES ('acme')"); err != nil {
+	if _, err := d.Pool.Exec(ctx, "INSERT INTO projects (id) VALUES ('acme')"); err != nil {
 		t.Fatal(err)
 	}
 	put := func(env, spec string, secrets map[string][]string) {

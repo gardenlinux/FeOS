@@ -11,12 +11,12 @@ import { ProviderDefinition, ProviderForm, ProviderListView, ProviderView, Provi
 
 // The access providers' pages (ADR 0054), as ferund answers them: the
 // list with ferun first, a provider's page, the form; reads for every
-// member, writes for the tenant's admin.
+// member, writes for the project's admin.
 
 const T = 'acme';
 const nav = () => {};
 const ME = (role, environments = []) => ({
-  me: { person: 'p', method: 'oidc', admin: false, tenants: [{ tenant: T, role, environments }] }, reload: async () => {},
+  me: { person: 'p', method: 'oidc', admin: false, projects: [{ project: T, role, environments }] }, reload: async () => {},
 });
 const render = (me, el) => renderToStaticMarkup(<MeContext.Provider value={me}>{el}</MeContext.Provider>);
 const text = (s) => s.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<')
@@ -25,63 +25,63 @@ const text = (s) => s.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/
 const LIST = {
   providers: [
     { name: 'ferun', kind: 'ferun', builtIn: true, environments: [{ id: 'e1', name: 'stage' }] },
-    { name: 'fecode', kind: 'tenant', builtIn: false, url: 'https://fecode.dev/api/v1/visit',
+    { name: 'fecode', kind: 'project', builtIn: false, url: 'https://fecode.dev/api/v1/visit',
       environments: [{ id: 'e2', name: 'kino--stage' }], createdAt: '2026-11-12T20:00:00Z', updatedAt: '2026-11-12T20:00:00Z' },
     { name: 'sso', kind: 'oidc', builtIn: false, issuer: 'https://login.example.com/', clientId: 'abc', clientSecret: { set: true },
       rule: { domains: ['example.com'] }, redirectUri: 'https://auth.fecore.dev/callback/acme/sso',
       backchannelUri: 'https://auth.fecore.dev/backchannel/acme/sso', environments: [],
       createdAt: '2026-11-12T20:00:00Z', updatedAt: '2026-11-12T21:00:00Z' },
   ],
-  kinds: ['tenant', 'ferun', 'oidc'],
+  kinds: ['project', 'ferun', 'oidc'],
 };
 const [FERUN_P, FECODE, SSO] = LIST.providers;
 
 describe('the providers list', () => {
-  it('lists ferun first, built in, then the tenant\'s with kind, where, rule and use', () => {
-    const out = render(ME('admin'), <ProviderListView tenant={T} list={LIST} err={null} navigate={nav} />);
+  it('lists ferun first, built in, then the project\'s with kind, where, rule and use', () => {
+    const out = render(ME('admin'), <ProviderListView project={T} list={LIST} err={null} navigate={nav} />);
     expect(out).toContain('<h1 class="">Access providers</h1>');
     expect(out.indexOf('>ferun</a>')).toBeLessThan(out.indexOf('>fecode</a>'));
     expect(out.indexOf('>fecode</a>')).toBeLessThan(out.indexOf('>sso</a>'));
     expect(out).toContain('<span class="badge prov-badge">built in</span>');
-    expect(out).toContain('href="/tenants/acme/providers/fecode"');
+    expect(out).toContain('href="/projects/acme/providers/fecode"');
     const all = text(out);
     expect(all).toContain('ferun built in FeRun sign-in this installation people with a grant on the environment 1 environment');
     expect(all).toContain('fecode your own service https://fecode.dev/api/v1/visit whom the service says 1 environment');
     expect(all).toContain('sso OpenID Connect https://login.example.com/ verified addresses at example.com no environment');
     expect(out).toContain('title="your own service, or an OpenID Connect issuer"');
     expect(out).not.toContain('not served by this installation');
-    expect(out).not.toContain('No provider of the tenant');
+    expect(out).not.toContain('No provider of the project');
   });
 
-  it('greys the kinds this installation does not serve, and says when the tenant has made none', () => {
-    const out = render(ME('admin'), <ProviderListView tenant={T} list={{ ...LIST, providers: [FERUN_P], kinds: ['tenant'] }} err={null} navigate={nav} />);
+  it('greys the kinds this installation does not serve, and says when the project has made none', () => {
+    const out = render(ME('admin'), <ProviderListView project={T} list={{ ...LIST, providers: [FERUN_P], kinds: ['project'] }} err={null} navigate={nav} />);
     expect(out).toContain('class="clickable prov-off"');
     expect(out).toContain('not served by this installation');
-    expect(text(out)).toContain('No provider of the tenant\'s own yet.');
+    expect(text(out)).toContain('No provider of the project\'s own yet.');
   });
 
-  it('offers New provider to the tenant\'s admin only', () => {
-    const read = render(ME('read'), <ProviderListView tenant={T} list={LIST} err={null} navigate={nav} />);
+  it('offers New provider to the project\'s admin only', () => {
+    const read = render(ME('read'), <ProviderListView project={T} list={LIST} err={null} navigate={nav} />);
     expect(read).toContain('class="button primary disabled"');
-    expect(read).toContain('title="needs admin on this tenant"');
+    expect(read).toContain('title="needs admin on this project"');
     // An environment's admin alone reads them too: it chooses among them.
     const envAdmin = render(ME('', [{ id: 'e1', name: 'stage', role: 'admin' }]),
-      <ProviderListView tenant={T} list={LIST} err={null} navigate={nav} />);
+      <ProviderListView project={T} list={LIST} err={null} navigate={nav} />);
     expect(envAdmin).toContain('>fecode</a>');
-    expect(envAdmin).toContain('title="needs admin on this tenant"');
+    expect(envAdmin).toContain('title="needs admin on this project"');
   });
 
   it('says a ferund without them has no route for them', () => {
     const e = new ApiError('no such route: GET /api/v1/providers', 404);
-    const out = text(render(ME('admin'), <ProviderListView tenant={T} list={null} err={e} navigate={nav} />));
+    const out = text(render(ME('admin'), <ProviderListView project={T} list={null} err={e} navigate={nav} />));
     expect(out).toContain('Access providers are not available on this ferund: it has no route for them yet.');
-    const other = text(render(ME('admin'), <ProviderListView tenant={T} list={null} err={new ApiError('boom', 500)} navigate={nav} />));
+    const other = text(render(ME('admin'), <ProviderListView project={T} list={null} err={new ApiError('boom', 500)} navigate={nav} />));
     expect(other).toContain('boom');
   });
 });
 
 describe("a provider's page", () => {
-  const page = (p, extra = {}, me = ME('admin')) => render(me, <ProviderView tenant={T} name={p ? p.name : 'nope'} p={p} err={null}
+  const page = (p, extra = {}, me = ME('admin')) => render(me, <ProviderView project={T} name={p ? p.name : 'nope'} p={p} err={null}
     note={null} kinds={LIST.kinds} navigate={nav} onDeleted={nav} {...extra} />);
 
   it("shows ferun as built in: its rule, the environments that name it, nothing to edit or delete", () => {
@@ -89,19 +89,19 @@ describe("a provider's page", () => {
     expect(out).toContain('<span class="badge acc">built in</span>');
     expect(out).not.toContain('Edit');
     expect(out).not.toContain('Delete provider');
-    expect(out).toContain('href="/tenants/acme/environments/stage/access"');
-    expect(text(out)).toContain('rule a grant of at least read on the environment or the tenant, asked at every renewal');
+    expect(out).toContain('href="/projects/acme/environments/stage/access"');
+    expect(text(out)).toContain('rule a grant of at least read on the environment or the project, asked at every renewal');
   });
 
-  it("shows a service's address and how it is asked, Edit and Delete for the tenant's admin", () => {
+  it("shows a service's address and how it is asked, Edit and Delete for the project's admin", () => {
     const out = page(FECODE);
     expect(text(out)).toContain('address https://fecode.dev/api/v1/visit');
     expect(text(out)).toContain('a POST of the visit\'s ID, signed by ferund (its key at /api/v1/visit-keys)');
-    expect(out).toContain('href="/tenants/acme/providers/fecode/edit"');
+    expect(out).toContain('href="/projects/acme/providers/fecode/edit"');
     expect(out).toContain('Delete provider');
     const read = page(FECODE, {}, ME('read'));
     expect(read).toContain('class="button primary disabled"');
-    expect(read).toMatch(/<button class=" danger" disabled="" title="needs admin on this tenant">/);
+    expect(read).toMatch(/<button class=" danger" disabled="" title="needs admin on this project">/);
   });
 
   it("shows an issuer's client, its secret only as set, and the URIs ferund names to register", () => {
@@ -114,11 +114,11 @@ describe("a provider's page", () => {
     expect(all).toContain('back-channel logout https://auth.fecore.dev/backchannel/acme/sso');
     expect(all).toContain('No environment admits its visitors.');
     // Without ferun-auth its kind is not served.
-    expect(text(page(SSO, { kinds: ['tenant'] }))).toContain('Its kind is not served by this installation');
+    expect(text(page(SSO, { kinds: ['project'] }))).toContain('Its kind is not served by this installation');
   });
 
-  it('says a provider the tenant does not have, and a ferund without the routes', () => {
-    expect(text(page(null, { name: 'nope', err: new ApiError('no such provider', 404) }))).toContain('No provider nope in this tenant.');
+  it('says a provider the project does not have, and a ferund without the routes', () => {
+    expect(text(page(null, { name: 'nope', err: new ApiError('no such provider', 404) }))).toContain('No provider nope in this project.');
     expect(text(page(null, { err: new ApiError('no such route: GET /api/v1/providers/x', 404) })))
       .toContain('Access providers are not available on this ferund');
   });
@@ -131,10 +131,10 @@ describe("a provider's page", () => {
 });
 
 describe('the form', () => {
-  const form = (p, kinds = LIST.kinds, me = ME('admin')) => render(me, <ProviderForm tenant={T} p={p} kinds={kinds}
+  const form = (p, kinds = LIST.kinds, me = ME('admin')) => render(me, <ProviderForm project={T} p={p} kinds={kinds}
     navigate={nav} />);
 
-  it('makes a new one, a service of the tenant first, its address explained', () => {
+  it('makes a new one, a service of the project first, its address explained', () => {
     const out = form(null);
     expect(out).toContain('New access provider');
     expect(out).toContain('placeholder="members"');
@@ -147,7 +147,7 @@ describe('the form', () => {
   });
 
   it('disables OpenID Connect where ferun-auth does not run', () => {
-    const out = form(null, ['tenant']);
+    const out = form(null, ['project']);
     expect(out).toContain('disabled="" title="not served by this installation">OpenID Connect — not served by this installation</button>');
   });
 
@@ -166,12 +166,12 @@ describe('the form', () => {
     expect(all).toContain('A change of the issuer, the client ID or the rule ends the visits it admitted');
   });
 
-  it("disables Save below the tenant's admin", () => {
-    expect(form(FECODE, LIST.kinds, ME('write'))).toMatch(/<button type="submit" class="primary" disabled="" title="needs admin on this tenant">/);
+  it("disables Save below the project's admin", () => {
+    expect(form(FECODE, LIST.kinds, ME('write'))).toMatch(/<button type="submit" class="primary" disabled="" title="needs admin on this project">/);
   });
 
   it('shows ferun\'s page, never its form', () => {
-    const out = render(ME('admin'), <Providers tenant={T} sel="ferun" edit navigate={nav} />);
+    const out = render(ME('admin'), <Providers project={T} sel="ferun" edit navigate={nav} />);
     expect(out).not.toContain('Edit access provider');
   });
 });

@@ -20,7 +20,7 @@ import (
 )
 
 // The pods of rows with a pod template (ADR 0018 §2.3): an environment's
-// instances, the tenants' jobs' pods and the sandboxes. Their spec is built from the
+// instances, the projects' jobs' pods and the sandboxes. Their spec is built from the
 // template at the create, with the template's secrets unsealed by the
 // SecretResolver; the database holds no secret value.
 
@@ -58,7 +58,7 @@ func (e *Engine) podSpec(ctx context.Context, sb store.Sandbox) (*podv1.PodSpec,
 func buildPodSpec(ctx context.Context, sb store.Sandbox, resolve SecretResolver, registryEgress map[string][]string) (*podv1.PodSpec, error) {
 	labels := map[string]string{
 		LabelSandbox:     sb.ID.String(),
-		LabelTenant:      sb.Owner,
+		LabelProject:     sb.Owner,
 		LabelIncarnation: sb.Incarnation.String(),
 	}
 	spec := &podv1.PodSpec{
@@ -106,7 +106,7 @@ func buildPodSpec(ctx context.Context, sb store.Sandbox, resolve SecretResolver,
 		spec.Network.EgressDomains = egressDomains(t.EgressDomains, sb.ImageRef, registryEgress)
 	}
 	// The sandbox labels win: a template cannot make its pod another
-	// sandbox's, tenant's or incarnation's.
+	// sandbox's, project's or incarnation's.
 	for k, v := range t.Labels {
 		if _, ok := labels[k]; !ok {
 			labels[k] = v
@@ -187,7 +187,7 @@ func (r *envResolver) secret(name string, version int, escape string) (string, e
 			return "", fmt.Errorf("secret %s version %d: %w", name, version, errNoResolver)
 		}
 		if r.row.IsOwn() {
-			return "", fmt.Errorf("secret %s version %d: the sandbox is no environment's or tenant job's", name, version)
+			return "", fmt.Errorf("secret %s version %d: the sandbox is no environment's or project job's", name, version)
 		}
 		var err error
 		if s, err = r.resolve(r.ctx, r.row, name, version); err != nil {
@@ -206,7 +206,7 @@ func (r *envResolver) secret(name string, version int, escape string) (string, e
 
 // secretOwner names what a row's secrets belong to in an error.
 func secretOwner(row store.Sandbox) string {
-	if row.TenantJob {
+	if row.ProjectJob {
 		return "job " + row.ID.String()
 	}
 	return "environment " + row.EnvironmentID.String()

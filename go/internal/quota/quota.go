@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package quota is a tenant's quotas (ADR 0031, "Quotas per tenant"):
-// limits on what it asks for, checked when it asks. A tenant's use is the
-// number of its sandboxes, of its environments and of its tenants' jobs
+// Package quota is a project's quotas (ADR 0031, "Quotas per project"):
+// limits on what it asks for, checked when it asks. A project's use is the
+// number of its sandboxes, of its environments and of its projects' jobs
 // running, and the sums of vCPUs and of memory over its sandboxes, the
 // replicas of its environments' services (runtime image, by their
 // current deployments), its addons' plans and its running jobs. A create
@@ -11,7 +11,7 @@
 // bring a sum past one has an error finding.
 //
 // Concurrent creates must not pass a limit together: Lock takes the
-// tenant's row FOR NO KEY UPDATE when the tenant has limits, so that the
+// project's row FOR NO KEY UPDATE when the project has limits, so that the
 // counting and the insert of one create run before the next one counts.
 package quota
 
@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/gardenlinux/feos/go/ferun/api"
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/env/addons"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
@@ -30,43 +31,38 @@ import (
 
 // The resources, as answers and limits name them.
 const (
-	Sandboxes    = "sandboxes"
-	Environments = "environments"
-	RunningJobs  = "runningJobs"
-	VCPUs        = "vcpus"
-	MemoryMiB    = "memoryMib"
+	Sandboxes    = api.ResourceSandboxes
+	Environments = api.ResourceEnvironments
+	RunningJobs  = api.ResourceRunningJobs
+	VCPUs        = api.ResourceVCPUs
+	MemoryMiB    = api.ResourceMemoryMiB
 )
 
-// Use is a tenant's use, or what a request asks for.
-type Use struct {
-	Sandboxes    int64 `json:"sandboxes"`
-	Environments int64 `json:"environments"`
-	RunningJobs  int64 `json:"runningJobs"`
-	VCPUs        int64 `json:"vcpus"`
-	MemoryMiB    int64 `json:"memoryMib"`
-}
+// Use is a project's use, or what a request asks for: the published
+// module's answer (ADR 0057).
+type Use = api.QuotaUse
 
-// Lock reads a tenant in tx and locks its row: FOR NO KEY UPDATE when it
+// Lock reads a project in tx and locks its row: FOR NO KEY UPDATE when it
 // has limits, which serialises the creates that count against them, else
 // FOR SHARE as before. store.ErrNoRow when there is none.
-func Lock(ctx context.Context, tx *store.Store, tenant string) (store.Tenant, error) {
-	t, err := tx.GetTenant(ctx, tenant)
+func Lock(ctx context.Context, tx *store.Store, project string) (store.Project, error) {
+	t, err := tx.GetProject(ctx, project)
 	if err != nil {
-		return store.Tenant{}, err
+		return store.Project{}, err
 	}
 	lock := store.ForShare
 	if t.Limits.Any() {
 		lock = store.ForNoKeyUpdate
 	}
-	return tx.LockTenant(ctx, tenant, lock)
+	return tx.LockProject(ctx, project, lock)
 }
 
-// Of is a tenant's use; exclude (uuid.Nil: none) is an environment whose
+// Of is a project's use; exclude (uuid.Nil: none) is an environment whose
 // current deployment is left out, the one a plan replaces.
-func Of(ctx context.Context, st *store.Store, tenant string, exclude uuid.UUID) (Use, error) {
-	rows, err := st.TenantUse(ctx, tenant, exclude)
+func Of(ctx context.Context, st *store.Store, project string, exclude uuid.UUID) (Use, error) {
+	rows, err := st.ProjectUse(ctx, project, exclude)
 	if err != nil {
-		return Use{}, fmt.Errorf("the use of tenant %s: %w", tenant, err)
+		return Use{}, fmt.Errorf("the use of project %s: %w", project, err)
 	}
 	u := Use{Sandboxes: rows.Sandboxes, Environments: rows.Environments, RunningJobs: rows.RunningJobs,
 		VCPUs: rows.SandboxVCPUs + rows.JobVCPUs, MemoryMiB: rows.SandboxMemoryMiB + rows.JobMemoryMiB}
@@ -127,7 +123,7 @@ func SpecUse(sp *spec.Spec) (vcpus, memoryMiB int64) {
 // Check refuses what ask asks for when use and it would pass one of the
 // limits: 422 quota_exceeded with the first such resource. A resource
 // ask does not ask for passes, however far its use is past the limit.
-func Check(l store.TenantLimits, use, ask Use) error {
+func Check(l store.ProjectLimits, use, ask Use) error {
 	for _, c := range []struct {
 		name     string
 		limit    *int64
@@ -146,15 +142,15 @@ func Check(l store.TenantLimits, use, ask Use) error {
 	return nil
 }
 
-// LockAndCheck locks the tenant as Lock does and, when it has limits,
+// LockAndCheck locks the project as Lock does and, when it has limits,
 // checks ask against its use (exclude as Of has it). It returns the
-// tenant.
-func LockAndCheck(ctx context.Context, tx *store.Store, tenant string, ask Use) (store.Tenant, error) {
-	t, err := Lock(ctx, tx, tenant)
+// project.
+func LockAndCheck(ctx context.Context, tx *store.Store, project string, ask Use) (store.Project, error) {
+	t, err := Lock(ctx, tx, project)
 	if err != nil || !t.Limits.Any() || t.Deleting() {
 		return t, err
 	}
-	use, err := Of(ctx, tx, tenant, uuid.Nil)
+	use, err := Of(ctx, tx, project, uuid.Nil)
 	if err != nil {
 		return t, err
 	}
@@ -162,11 +158,11 @@ func LockAndCheck(ctx context.Context, tx *store.Store, tenant string, ask Use) 
 }
 
 // SpecFindings are the error findings of a deployment of next in place
-// of current (nil: none) when the tenant's sums would pass its limits:
-// others is the tenant's use without the environment's current
+// of current (nil: none) when the project's sums would pass its limits:
+// others is the project's use without the environment's current
 // deployment. A deployment that asks for no more than the current one
 // passes, whatever the limits.
-func SpecFindings(l store.TenantLimits, others Use, current, next *spec.Spec) []spec.Finding {
+func SpecFindings(l store.ProjectLimits, others Use, current, next *spec.Spec) []spec.Finding {
 	cv, cm := SpecUse(current)
 	nv, nm := SpecUse(next)
 	var fs []spec.Finding
@@ -184,7 +180,7 @@ func SpecFindings(l store.TenantLimits, others Use, current, next *spec.Spec) []
 			continue
 		}
 		fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: "",
-			Problem: fmt.Sprintf("the deployment asks for %d %s, which brings the tenant to %d of its limit %d "+
+			Problem: fmt.Sprintf("the deployment asks for %d %s, which brings the project to %d of its limit %d "+
 				"(%d elsewhere)", c.next, c.what, total, *c.limit, c.others),
 			Remedy: "use fewer replicas, smaller resources or plans, or ask an operator for a higher limit"})
 	}

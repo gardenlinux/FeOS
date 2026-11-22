@@ -33,7 +33,7 @@ import (
 //	GET    /api/v1/sandboxes/{id}/ssh              sandbox  the set without secret material
 //	DELETE /api/v1/sandboxes/{id}/ssh              sandbox  no bindings
 //	POST   /api/v1/sandboxes/{id}/ssh/{name}/check sandbox  a stored binding: does it work now
-//	POST   /api/v1/ssh/preflight                   tenant   one binding, no sandbox
+//	POST   /api/v1/ssh/preflight                   project   one binding, no sandbox
 //
 // What differs from Kubernetes is that an SSH key has a public half meant
 // to be shown: GET answers every binding's public key line, ready for

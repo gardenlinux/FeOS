@@ -39,12 +39,12 @@ func routingEnvs(rows []store.IngressRoutingRow) []uuid.UUID {
 // IngressRouting returns public environments with their service instances
 // that are not stopping, environments without one as a single row, and
 // leaves out what the ingress does not serve: environments not public,
-// deleting, without a deployment, of a deleting tenant or without a host
+// deleting, without a deployment, of a deleting project or without a host
 // label; jobs and stopping instances.
 func TestIngressRouting(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
-	mkTenant(t, s, "gone")
+	mkProject(t, s, "acme")
+	mkProject(t, s, "gone")
 	mkNode(t, s, "n1")
 	if _, err := s.SetNodeIngressGroupVersion(bg, "n1", 7); err != nil {
 		t.Fatal(err)
@@ -83,7 +83,7 @@ func TestIngressRouting(t *testing.T) {
 	// Public, without instances: one row.
 	bare := routedEnv(t, s, "acme", "bare")
 	// Left out: never published (no label), unpublished, deleting, no
-	// deployment, a deleting tenant's.
+	// deployment, a deleting project's.
 	mkEnv(t, s, "acme", "private")
 	unpublished := routedEnv(t, s, "acme", "unpublished")
 	publish(t, s, unpublished.ID, false)
@@ -97,7 +97,7 @@ func TestIngressRouting(t *testing.T) {
 	}
 	nodeployment := publish(t, s, mkEnv(t, s, "acme", "nodeployment").ID, true)
 	routedEnv(t, s, "gone", "web")
-	if _, err := s.MarkTenantDeleting(bg, "gone"); err != nil {
+	if _, err := s.MarkProjectDeleting(bg, "gone"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -151,17 +151,17 @@ func TestIngressRouting(t *testing.T) {
 	}
 }
 
-// ingProvider makes a provider of tenant by raw SQL (the store's own
-// functions for providers are another package's): kind tenant at url, or
+// ingProvider makes a provider of project by raw SQL (the store's own
+// functions for providers are another package's): kind project at url, or
 // kind oidc with a sealed secret when url is "".
-func ingProvider(t *testing.T, s *store.Store, tenant, name, url string) {
+func ingProvider(t *testing.T, s *store.Store, project, name, url string) {
 	t.Helper()
 	if url != "" {
-		exec(t, s, "INSERT INTO access_providers (tenant, name, kind, url) VALUES ($1, $2, 'tenant', $3)", tenant, name, url)
+		exec(t, s, "INSERT INTO access_providers (project, name, kind, url) VALUES ($1, $2, 'project', $3)", project, name, url)
 		return
 	}
-	exec(t, s, `INSERT INTO access_providers (tenant, name, kind, issuer, client_id, client_secret_sealed, rule)
-		VALUES ($1, $2, 'oidc', 'https://login.example.com/', 'abc', '\x01'::bytea, '{"anyone":true}')`, tenant, name)
+	exec(t, s, `INSERT INTO access_providers (project, name, kind, issuer, client_id, client_secret_sealed, rule)
+		VALUES ($1, $2, 'oidc', 'https://login.example.com/', 'abc', '\x01'::bytea, '{"anyone":true}')`, project, name)
 }
 
 // ingAccess sets who an environment admits by raw SQL: provider "" with
@@ -172,19 +172,19 @@ func ingAccess(t *testing.T, s *store.Store, env uuid.UUID, access, provider str
 }
 
 // IngressRouting reads who each environment admits (ADR 0054): anyone,
-// visitors of ferun (no provider row), of a provider of kind tenant with
+// visitors of ferun (no provider row), of a provider of kind project with
 // its URL, and of one of kind oidc; a provider name without a row reads
 // no kind and no URL.
 func TestIngressRoutingAccess(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	ingProvider(t, s, "acme", "fecode", "https://fecode.example/api/v1/visit")
 	ingProvider(t, s, "acme", "sso", "")
 	open := routedEnv(t, s, "acme", "open")
 	ferun := routedEnv(t, s, "acme", "ferun")
 	ingAccess(t, s, ferun.ID, model.AccessVisitors, "")
-	tenant := routedEnv(t, s, "acme", "tenant")
-	ingAccess(t, s, tenant.ID, model.AccessVisitors, "fecode")
+	project := routedEnv(t, s, "acme", "project")
+	ingAccess(t, s, project.ID, model.AccessVisitors, "fecode")
 	oidc := routedEnv(t, s, "acme", "oidc")
 	ingAccess(t, s, oidc.ID, model.AccessVisitors, "sso")
 
@@ -201,10 +201,10 @@ func TestIngressRoutingAccess(t *testing.T) {
 	}
 	got := read()
 	want := map[uuid.UUID]access{
-		open.ID:   {model.AccessAnyone, "", "", ""},
-		ferun.ID:  {model.AccessVisitors, "", "", ""},
-		tenant.ID: {model.AccessVisitors, "fecode", model.ProviderKindTenant, "https://fecode.example/api/v1/visit"},
-		oidc.ID:   {model.AccessVisitors, "sso", model.ProviderKindOIDC, ""},
+		open.ID:    {model.AccessAnyone, "", "", ""},
+		ferun.ID:   {model.AccessVisitors, "", "", ""},
+		project.ID: {model.AccessVisitors, "fecode", model.ProviderKindProject, "https://fecode.example/api/v1/visit"},
+		oidc.ID:    {model.AccessVisitors, "sso", model.ProviderKindOIDC, ""},
 	}
 	for id, w := range want {
 		if got[id] != w {
@@ -216,8 +216,8 @@ func TestIngressRoutingAccess(t *testing.T) {
 	// row is gone reads no kind and no URL (the table then signs no one
 	// in), and the environment stays guarded.
 	exec(t, s, "ALTER TABLE environments DROP CONSTRAINT environments_access_provider_fkey")
-	exec(t, s, "DELETE FROM access_providers WHERE tenant = 'acme' AND name = 'fecode'")
-	if a := read()[tenant.ID]; a != (access{model.AccessVisitors, "fecode", "", ""}) {
+	exec(t, s, "DELETE FROM access_providers WHERE project = 'acme' AND name = 'fecode'")
+	if a := read()[project.ID]; a != (access{model.AccessVisitors, "fecode", "", ""}) {
 		t.Fatalf("a missing provider row: %+v", a)
 	}
 }

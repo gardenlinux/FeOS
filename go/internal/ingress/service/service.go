@@ -40,9 +40,9 @@ type Config struct {
 	// AppsZone is the zone of public environments' default hosts
 	// (--apps-zone); "" serves no host.
 	AppsZone string
-	// TenantZone is the zone of the default hosts of the tenants people
-	// make (--tenant-zone, ADR 0031); "": none.
-	TenantZone string
+	// ProjectZone is the zone of the default hosts of the projects people
+	// make (--project-zone, ADR 0031); "": none.
+	ProjectZone string
 	// CertTTL is the lifetime of an ingress's certificates
 	// (--node-cert-ttl); renewed at half of it.
 	CertTTL time.Duration
@@ -201,7 +201,7 @@ func New(cfg Config, deps Deps) *Service {
 	}
 	tbl := deps.Builder
 	if tbl == nil {
-		tbl = table.NewBuilder(deps.DB, st, model.Zones{Apps: cfg.AppsZone, Tenant: cfg.TenantZone}, cfg.Log)
+		tbl = table.NewBuilder(deps.DB, st, model.Zones{Apps: cfg.AppsZone, Project: cfg.ProjectZone}, cfg.Log)
 	}
 	s := &Service{
 		cfg: cfg, d: deps.DB, st: st, iss: deps.Issuer, links: deps.Links, engine: deps.Engine, tbl: tbl, visits: deps.Visits,

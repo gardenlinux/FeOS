@@ -41,7 +41,7 @@ func TestBuildEnvAccess(t *testing.T) {
 	anyone := before
 	anyone.Access = model.AccessAnyone
 	// Fields of an open environment's provider are ignored.
-	anyone.Provider, anyone.ProviderKind, anyone.ProviderURL, anyone.SignIn = "fecode", "tenant", "https://x.example/", "https://x.example/"
+	anyone.Provider, anyone.ProviderKind, anyone.ProviderURL, anyone.SignIn = "fecode", "project", "https://x.example/", "https://x.example/"
 	open, _ := build(t, "apps.example", anyone, specs)
 	ob, err := wire.Codec{}.Marshal(old)
 	if err != nil {
@@ -63,7 +63,7 @@ func TestBuildEnvAccess(t *testing.T) {
 		e                        EnvRows
 		access, provider, signIn string
 	}{
-		{"kind tenant", guarded("fecode", model.ProviderKindTenant, "https://fecode.example/api/v1/visit", "https://fecode.example/api/v1/visit"),
+		{"kind project", guarded("fecode", model.ProviderKindProject, "https://fecode.example/api/v1/visit", "https://fecode.example/api/v1/visit"),
 			wire.AccessVisitors, "fecode", "https://fecode.example/api/v1/visit"},
 		{"ferun with ferun-auth", guarded("", "", "", "https://auth.example/visit"), wire.AccessVisitors, model.ProviderFerun,
 			"https://auth.example/visit"},
@@ -93,7 +93,7 @@ func TestBuildEnvAccess(t *testing.T) {
 // A guarded environment keeps its access with its domains, also when one
 // of them does not fit and is left out.
 func TestBuildEnvAccessDomains(t *testing.T) {
-	e := guarded("fecode", model.ProviderKindTenant, "https://fecode.example/v", "https://fecode.example/v")
+	e := guarded("fecode", model.ProviderKindProject, "https://fecode.example/v", "https://fecode.example/v")
 	e.Domains = []wire.Domain{domain("big.example", MaxDomainBytes, 1), domain("shop.example", 1024, 2)}
 	got, _ := build(t, "apps.example", e, specsOf(map[int]*spec.Spec{1: deployment1()}))
 	if got.Access != wire.AccessVisitors || got.Provider != "fecode" || got.SignIn != "https://fecode.example/v" ||
@@ -102,7 +102,7 @@ func TestBuildEnvAccessDomains(t *testing.T) {
 	}
 }
 
-// SignIn: kind tenant signs in at its URL; ferun and kind oidc at
+// SignIn: kind project signs in at its URL; ferun and kind oidc at
 // ferun-auth's /visit, and nowhere without ferun-auth; a provider whose
 // row is missing nowhere; an open environment nowhere.
 func TestSignIn(t *testing.T) {
@@ -113,9 +113,9 @@ func TestSignIn(t *testing.T) {
 		authURL string
 		want    string
 	}{
-		{"tenant", guarded("fecode", model.ProviderKindTenant, "https://fecode.example/api/v1/visit", ""), auth,
+		{"project", guarded("fecode", model.ProviderKindProject, "https://fecode.example/api/v1/visit", ""), auth,
 			"https://fecode.example/api/v1/visit"},
-		{"tenant without ferun-auth", guarded("fecode", model.ProviderKindTenant, "https://fecode.example/api/v1/visit", ""), "",
+		{"project without ferun-auth", guarded("fecode", model.ProviderKindProject, "https://fecode.example/api/v1/visit", ""), "",
 			"https://fecode.example/api/v1/visit"},
 		{"ferun", guarded("", "", "", ""), auth, auth + "/visit"},
 		{"ferun by name", guarded(model.ProviderFerun, "", "", ""), auth, auth + "/visit"},
@@ -135,9 +135,9 @@ func TestSignIn(t *testing.T) {
 func TestGroupAccess(t *testing.T) {
 	id := uuid.New()
 	rows := []store.IngressRoutingRow{{EnvID: id, Owner: "acme", Name: "a", HostLabel: "a-acme", Deployment: 1,
-		Access: model.AccessVisitors, AccessProvider: "fecode", ProviderKind: model.ProviderKindTenant, ProviderURL: "https://f.example/v"}}
-	want := []EnvRows{{ID: id, Tenant: "acme", Name: "a", HostLabel: "a-acme", Deployment: 1,
-		Access: model.AccessVisitors, Provider: "fecode", ProviderKind: model.ProviderKindTenant, ProviderURL: "https://f.example/v"}}
+		Access: model.AccessVisitors, AccessProvider: "fecode", ProviderKind: model.ProviderKindProject, ProviderURL: "https://f.example/v"}}
+	want := []EnvRows{{ID: id, Project: "acme", Name: "a", HostLabel: "a-acme", Deployment: 1,
+		Access: model.AccessVisitors, Provider: "fecode", ProviderKind: model.ProviderKindProject, ProviderURL: "https://f.example/v"}}
 	if got := Group(rows); !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v\nwant %+v", got, want)
 	}
@@ -154,7 +154,7 @@ func testKeys(t *testing.T) *visit.Keys {
 }
 
 // The builder: a guarded environment's entry signs in where its provider
-// says (kind tenant: its URL; ferun: AuthURL's /visit); the keys of visits
+// says (kind project: its URL; ferun: AuthURL's /visit); the keys of visits
 // are left out while VisitKeys fails, come with the next full read once it
 // succeeds, and are kept from then on, VisitKeys not called again.
 func TestBuilderVisits(t *testing.T) {
@@ -165,7 +165,7 @@ func TestBuilderVisits(t *testing.T) {
 			t.Fatalf("%s: %v", sql, err)
 		}
 	}
-	exec("INSERT INTO access_providers (tenant, name, kind, url) VALUES ('acme', 'fecode', 'tenant', 'https://fecode.example/api/v1/visit')")
+	exec("INSERT INTO access_providers (project, name, kind, url) VALUES ('acme', 'fecode', 'project', 'https://fecode.example/api/v1/visit')")
 	exec("UPDATE environments SET access = 'visitors', access_provider = 'fecode' WHERE id = $1", f.env.ID)
 	ferun := f.mkEnv(t, "ferun", webSpec)
 	exec("UPDATE environments SET access = 'visitors' WHERE id = $1", ferun.ID)
@@ -191,7 +191,7 @@ func TestBuilderVisits(t *testing.T) {
 	}
 	if e := envOf(s, f.env.ID); e.Access != wire.AccessVisitors || e.Provider != "fecode" ||
 		e.SignIn != "https://fecode.example/api/v1/visit" {
-		t.Fatalf("kind tenant: %+v", e)
+		t.Fatalf("kind project: %+v", e)
 	}
 	if e := envOf(s, ferun.ID); e.Access != wire.AccessVisitors || e.Provider != model.ProviderFerun ||
 		e.SignIn != "https://auth.example/visit" {

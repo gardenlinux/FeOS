@@ -1,0 +1,24 @@
+{
+  "method": "GET",
+  "path": "/api/v1/admin/integrations",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "response": {
+    "integrations": [
+      {
+        "name": "fecode",
+        "title": "FeCode",
+        "url": "https://fecode.dev",
+        "issuer": "https://id.fecore.dev/",
+        "subject": "client-fecode",
+        "disabled": false,
+        "createdAt": "2026-11-21T10:00:00Z",
+        "updatedAt": "2026-11-21T10:00:00Z",
+        "lastSeen": "2026-11-21T10:00:00Z",
+        "madeBy": "basic:admin",
+        "projects": 1
+      }
+    ]
+  }
+}

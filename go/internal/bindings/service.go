@@ -78,7 +78,7 @@ type Service struct {
 	credUsers CredentialUsers
 
 	// preflights are the HTTP preflights and environment binding checks
-	// in flight on this instance, by tenant (maxTenantPreflights).
+	// in flight on this instance, by project (maxProjectPreflights).
 	preflightMu sync.Mutex
 	preflights  map[string]int
 }

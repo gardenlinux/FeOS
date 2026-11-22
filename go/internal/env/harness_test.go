@@ -29,10 +29,10 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// The tests' tenants.
+// The tests' projects.
 const (
-	tenantA = "acme"
-	tenantB = "other"
+	projectA = "acme"
+	projectB = "other"
 )
 
 // stageSpec is a spec the real blueprints accept: two image services
@@ -182,8 +182,8 @@ type harnessOptions struct {
 	appsZone string
 	// appsZoneOwners is Deps.AppsZoneOwners.
 	appsZoneOwners []string
-	// tenantZone is Deps.TenantZone.
-	tenantZone string
+	// projectZone is Deps.ProjectZone.
+	projectZone string
 	// bindings is Deps.Bindings.
 	bindings HTTPBindings
 	// visitKinds is Deps.VisitKinds; nil: every kind; noVisits: nil.
@@ -197,10 +197,10 @@ func newHarness(t *testing.T, o harnessOptions) *harness {
 	st := store.New(d)
 	h := &harness{t: t, d: d, st: st, eng: &fakeEngine{bad: map[string]string{}}, ports: &fakePorts{}}
 	deps := Deps{InstanceID: "i1", DB: d, Store: st, Engine: h.eng, AppsZone: o.appsZone,
-		AppsZoneOwners: o.appsZoneOwners, TenantZone: o.tenantZone, Bindings: o.bindings, Log: dbtest.Logger(t),
+		AppsZoneOwners: o.appsZoneOwners, ProjectZone: o.projectZone, Bindings: o.bindings, Log: dbtest.Logger(t),
 		VisitKinds: o.visitKinds}
 	if deps.VisitKinds == nil && !o.noVisits {
-		deps.VisitKinds = []string{model.ProviderKindTenant, model.ProviderKindFerun, model.ProviderKindOIDC}
+		deps.VisitKinds = []string{model.ProviderKindProject, model.ProviderKindFerun, model.ProviderKindOIDC}
 	}
 	if !o.noSealer {
 		sl, err := seal.New(make([]byte, 32))
@@ -217,8 +217,8 @@ func newHarness(t *testing.T, o harnessOptions) *harness {
 		t.Fatal(err)
 	}
 	h.svc = svc
-	for _, tn := range []string{tenantA, tenantB} {
-		if _, _, err := st.CreateTenant(t.Context(), tn); err != nil {
+	for _, tn := range []string{projectA, projectB} {
+		if _, _, err := st.CreateProject(t.Context(), tn); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -232,42 +232,43 @@ func newHarness(t *testing.T, o harnessOptions) *harness {
 
 func (h *harness) ctx() context.Context { return h.t.Context() }
 
-// create creates an environment of tenantA.
+// create creates an environment of projectA.
 func (h *harness) create(name string, labels map[string]string) EnvStatus {
 	h.t.Helper()
-	st, created, err := h.svc.CreateEnv(h.ctx(), tenantA, CreateEnvRequest{Name: name, Labels: labels})
+	st, created, err := h.svc.CreateEnv(h.ctx(), projectA, CreateEnvRequest{Name: name, Labels: labels})
 	if err != nil || !created {
 		h.t.Fatalf("create %s: %v %v", name, created, err)
 	}
 	return st
 }
 
-// putSecret sets a secret of tenantA's environment.
+// putSecret sets a secret of projectA's environment.
 func (h *harness) putSecret(env, name, value string) int {
 	h.t.Helper()
-	v, err := h.svc.PutSecret(h.ctx(), tenantA, env, name, PutSecretRequest{Value: value, Author: "tester"})
+	v, err := h.svc.PutSecret(h.ctx(), projectA, env, name, PutSecretRequest{Value: value, Author: "tester"})
 	if err != nil {
 		h.t.Fatalf("put secret %s: %v", name, err)
 	}
 	return v.Version
 }
 
-// apply applies a spec to tenantA's environment and wants a deployment.
+// apply applies a spec to projectA's environment and wants a deployment.
 func (h *harness) apply(env, raw string, base int) ApplyAnswer {
 	h.t.Helper()
-	a, err := h.svc.Apply(h.ctx(), tenantA, env, ApplyRequest{Spec: json.RawMessage(raw), Base: base, Author: "tester"})
+	a, err := h.svc.Apply(h.ctx(), projectA, env, ApplyRequest{Spec: json.RawMessage(raw), Base: base, Author: "tester"},
+		spec.FormatJSON)
 	if err != nil {
 		h.t.Fatalf("apply on %d: %v", base, describe(err))
 	}
 	return a
 }
 
-// applyStored applies a spec to tenantA's environment as a deployment
+// applyStored applies a spec to projectA's environment as a deployment
 // stored before plans refused bindings stated in a spec (ADR 0055): by
 // the path a revert takes, which accepts them as they ran.
 func (h *harness) applyStored(env, raw string, base int) ApplyAnswer {
 	h.t.Helper()
-	a, err := h.svc.apply(h.ctx(), tenantA, env, applyArgs{raw: []byte(raw), base: base, author: "tester",
+	a, err := h.svc.apply(h.ctx(), projectA, env, applyArgs{raw: []byte(raw), base: base, author: "tester",
 		origin: model.OriginRevert, originRef: "0"})
 	if err != nil {
 		h.t.Fatalf("apply stored on %d: %v", base, describe(err))
@@ -292,10 +293,10 @@ func describe(err error) string {
 	return err.Error()
 }
 
-// env reads an environment row of tenantA.
+// env reads an environment row of projectA.
 func (h *harness) env(ref string) store.Environment {
 	h.t.Helper()
-	e, err := resolveEnv(h.ctx(), h.st, tenantA, ref, store.NoLock)
+	e, err := resolveEnv(h.ctx(), h.st, projectA, ref, store.NoLock)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -316,7 +317,7 @@ func (h *harness) instance(envID uuid.UUID, kind, object string, replica, deploy
 	h.t.Helper()
 	id := podid.Mint()
 	zero := 0
-	if _, _, err := h.st.CreateSandbox(h.ctx(), store.NewSandbox{ID: id, Owner: tenantA, Image: "img", VCPUs: 1, MemoryMiB: 512,
+	if _, _, err := h.st.CreateSandbox(h.ctx(), store.NewSandbox{ID: id, Owner: projectA, Image: "img", VCPUs: 1, MemoryMiB: 512,
 		ImageRef: "registry.test/img@sha256:" + strings.Repeat("0", 64), EnvironmentID: envID, Instance: true, PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.EnvGroupID(envID)}},
 		IdleAfterS: &zero}); err != nil {
 		h.t.Fatal(err)
@@ -333,27 +334,27 @@ func (h *harness) instance(envID uuid.UUID, kind, object string, replica, deploy
 	return id
 }
 
-// sandbox inserts a sandbox of tenant in its environment env (made when
+// sandbox inserts a sandbox of project in its environment env (made when
 // it has none, ADR 0035) under a short ID; every sandbox can run its
 // environment's attached services.
-func (h *harness) sandbox(tenant, env string) podid.ID {
+func (h *harness) sandbox(project, env string) podid.ID {
 	h.t.Helper()
-	return h.sandboxWithID(tenant, env, podid.Mint())
+	return h.sandboxWithID(project, env, podid.Mint())
 }
 
 // legacySandbox inserts a sandbox as sandbox does under a UUID: one made
 // before ADR 0019.
-func (h *harness) legacySandbox(tenant, env string) podid.ID {
+func (h *harness) legacySandbox(project, env string) podid.ID {
 	h.t.Helper()
-	return h.sandboxWithID(tenant, env, podid.ID(uuid.NewString()))
+	return h.sandboxWithID(project, env, podid.ID(uuid.NewString()))
 }
 
-// envOf is tenant's environment name, inserted when it has none.
-func (h *harness) envOf(tenant, name string) uuid.UUID {
+// envOf is project's environment name, inserted when it has none.
+func (h *harness) envOf(project, name string) uuid.UUID {
 	h.t.Helper()
-	e, err := h.st.LockEnvironmentByName(h.ctx(), tenant, name, store.NoLock)
+	e, err := h.st.LockEnvironmentByName(h.ctx(), project, name, store.NoLock)
 	if errors.Is(err, store.ErrNoRow) {
-		e, err = h.st.InsertEnvironment(h.ctx(), store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: name})
+		e, err = h.st.InsertEnvironment(h.ctx(), store.NewEnvironment{ID: uuid.New(), Owner: project, Name: name})
 	}
 	if err != nil {
 		h.t.Fatal(err)
@@ -361,10 +362,10 @@ func (h *harness) envOf(tenant, name string) uuid.UUID {
 	return e.ID
 }
 
-func (h *harness) sandboxWithID(tenant, env string, id podid.ID) podid.ID {
+func (h *harness) sandboxWithID(project, env string, id podid.ID) podid.ID {
 	h.t.Helper()
-	n := store.NewSandbox{ID: id, Owner: tenant, Image: "img", VCPUs: 1, MemoryMiB: 512, EnvironmentID: h.envOf(tenant, env),
-		PodTemplate: model.SandboxTemplate(h.envOf(tenant, env), id.String(), false, nil)}
+	n := store.NewSandbox{ID: id, Owner: project, Image: "img", VCPUs: 1, MemoryMiB: 512, EnvironmentID: h.envOf(project, env),
+		PodTemplate: model.SandboxTemplate(h.envOf(project, env), id.String(), false, nil)}
 	if _, _, err := h.st.CreateSandbox(h.ctx(), n); err != nil {
 		h.t.Fatal(err)
 	}

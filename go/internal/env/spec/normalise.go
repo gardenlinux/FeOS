@@ -115,7 +115,13 @@ func Normalise(s Spec, p Pins) (Spec, []Finding) {
 			// Validate refused the reference; nothing to pin.
 			continue
 		}
-		pin(name, SecretRef{Version: v})
+		// A written expectation of a value stays (ADR 0058); none is
+		// added, so that stored deployments do not change.
+		ref := SecretRef{Version: v}
+		if s.Secrets[name].Type == SecretTypeValue {
+			ref.Type = SecretTypeValue
+		}
+		pin(name, ref)
 	}
 	for _, name := range http {
 		info := p.Credentials[name]
@@ -126,11 +132,17 @@ func Normalise(s Spec, p Pins) (Spec, []Finding) {
 		t, ok := info.Versions[v]
 		switch in := s.Secrets[name]; {
 		case ok:
-			pin(name, SecretRef{Version: v, Type: SecretTypeHTTP, Upstream: t.Upstream, Mode: t.Mode})
+			// The version's upstream and mode; the forwarded host as the
+			// spec expects it, left out when it says nothing (ADR 0058:
+			// a normalised spec keeps the expectation, and stored
+			// deployments do not change).
+			pin(name, SecretRef{Version: v, Type: SecretTypeHTTP, Upstream: t.Upstream, Mode: t.Mode,
+				ForwardedHost: in.ForwardedHost})
 		case v > 0 && in.Upstream != "":
 			// A normalised pin, normalised without the secrets: as it is.
 			up, mode := BindingTemplate(Binding{Upstream: in.Upstream, Mode: in.Mode})
-			pin(name, SecretRef{Version: v, Type: SecretTypeHTTP, Upstream: up, Mode: mode})
+			pin(name, SecretRef{Version: v, Type: SecretTypeHTTP, Upstream: up, Mode: mode,
+				ForwardedHost: in.ForwardedHost})
 		}
 		// Else Validate refused the reference or the pin; nothing to pin.
 	}
@@ -263,7 +275,12 @@ func normService(svc Service, p Pins) Service {
 	}
 	out.Replicas = &replicas
 	out.Resources = normResources(svc.Resources)
-	if svc.Idle != "" {
+	switch svc.Idle {
+	case "", IdleNever:
+		// never says what leaving idle out says (ADR 0057): one
+		// deployment either way.
+		out.Idle = ""
+	default:
 		out.Idle = normDuration(svc.Idle, "")
 	}
 	timeout := ""
@@ -297,4 +314,32 @@ func Hash(s Spec) string {
 	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+// EqualNormalised reports whether two normalised specs are the same
+// deployment: their canonical JSON (map keys sorted by the encoder) is
+// equal, a deploy job's on in either word. Specs that are not normalised
+// may differ only in form.
+func EqualNormalised(a, b Spec) bool {
+	ja, errA := json.Marshal(oneJobWord(a))
+	jb, errB := json.Marshal(oneJobWord(b))
+	return errA == nil && errB == nil && string(ja) == string(jb)
+}
+
+// oneJobWord is s with each deploy job's On JobOnDeploy, whichever word
+// it was stored in (JobOnStored), so that two versions in a rolling
+// deploy, which store different words, see the same spec.
+func oneJobWord(s Spec) Spec {
+	if len(s.Jobs) == 0 {
+		return s
+	}
+	jobs := make(map[string]Job, len(s.Jobs))
+	for name, j := range s.Jobs {
+		if IsJobOnDeploy(j.On) {
+			j.On = JobOnDeploy
+		}
+		jobs[name] = j
+	}
+	s.Jobs = jobs
+	return s
 }

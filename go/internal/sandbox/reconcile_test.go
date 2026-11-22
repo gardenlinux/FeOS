@@ -21,7 +21,7 @@ import (
 
 // labelled is a pod spec of ferund's for id of incarnation inc.
 func labelled(id podid.ID, inc uuid.UUID) *podv1.PodSpec {
-	return podSpec(store.Sandbox{ID: id, Owner: testTenant, Incarnation: inc, VCPUs: 1, MemoryMiB: 256, ImageRef: testImage})
+	return podSpec(store.Sandbox{ID: id, Owner: testProject, Incarnation: inc, VCPUs: 1, MemoryMiB: 256, ImageRef: testImage})
 }
 
 func TestReconcileOrphansAndIgnored(t *testing.T) {

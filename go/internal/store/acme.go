@@ -61,7 +61,7 @@ func ACMEAccountAAD(directory string) []byte { return []byte("acme-account:" + d
 
 // IngressDomains returns the domains the ingress serves (ADR 0021): state
 // served or dns-moved, verified, bound to a public environment of its
-// tenant that is not deleting, with a certificate whose not_after is
+// project that is not deleting, with a certificate whose not_after is
 // ahead; envIDs limits them to those environments (nil: every one;
 // empty: none). They are ordered by environment, then by when they were
 // bound and by name, so that an environment whose entry cannot take all
@@ -221,7 +221,7 @@ func (s *Store) SetACMEAccount(ctx context.Context, directory, uri, email string
 }
 
 // ACMEOrder is a domain an order is for: its ID, name, token (a
-// wildcard's DNS-01 target is <token>.<ACME zone>), tenant and
+// wildcard's DNS-01 target is <token>.<ACME zone>), project and
 // environment, and whether it has a certificate still valid (a renewal).
 type ACMEOrder struct {
 	DomainID uuid.UUID
@@ -239,7 +239,7 @@ type ACMEOrder struct {
 // leader.
 //
 // A domain is due when it is verified, bound to a public environment that
-// is not deleting, of a tenant that is not deleting, routed, its TXT
+// is not deleting, of a project that is not deleting, routed, its TXT
 // record not missing (record_missing_since), its next_issue_at passed or
 // unset, and either issuing or failed without a valid certificate, or
 // with a certificate whose renew_after has passed. New domains come
@@ -250,7 +250,7 @@ func (s *Store) ClaimACMEOrder(ctx context.Context, hold time.Duration) (ACMEOrd
 	err := s.q.QueryRow(ctx, `SELECT d.id, d.name, d.token, d.owner, d.env_id, coalesce(c.not_after > now(), false)
 		FROM domains d
 		JOIN environments e ON e.id = d.env_id AND e.public AND NOT e.deleting
-		JOIN tenants t ON t.id = d.owner AND t.deleting_at IS NULL
+		JOIN projects t ON t.id = d.owner AND t.deleting_at IS NULL
 		LEFT JOIN domain_certs c ON c.domain_id = d.id
 		WHERE d.verification = 'verified' AND d.env_id IS NOT NULL AND d.routed AND d.record_missing_since IS NULL
 			AND (d.next_issue_at IS NULL OR d.next_issue_at <= now())

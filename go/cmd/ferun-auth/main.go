@@ -3,7 +3,7 @@
 
 // Command ferun-auth is the access provider of the kinds ferun and oidc
 // (ADR 0054): it signs a guarded environment's visitors in at the
-// installation's issuer or at a tenant's, and answers their challenges at
+// installation's issuer or at a project's, and answers their challenges at
 // ferund.
 //
 //	ferun-auth [serve] [flags]   run it (the default)
@@ -28,6 +28,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/gardenlinux/feos/go/internal/config/oldnames"
 	"github.com/gardenlinux/feos/go/internal/ferunauth"
 )
 
@@ -36,6 +37,10 @@ import (
 var version = ""
 
 func main() {
+	if err := oldnames.Refuse(os.Environ()); err != nil {
+		fmt.Fprintf(os.Stderr, "ferun-auth: %v\n", err)
+		os.Exit(2)
+	}
 	os.Exit(run(os.Args[1:], os.Getenv, os.Stdout, os.Stderr))
 }
 

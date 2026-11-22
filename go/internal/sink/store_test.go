@@ -21,9 +21,9 @@ import (
 	"github.com/gardenlinux/feos/go/internal/sink/quickwit"
 )
 
-// quickwitQuery selects a tenant's environment, as many as the tests hold.
-func quickwitQuery(tenant, env string) quickwit.Query {
-	return quickwit.Query{Tenant: tenant, Environment: env, Max: 100000}
+// quickwitQuery selects a project's environment, as many as the tests hold.
+func quickwitQuery(project, env string) quickwit.Query {
+	return quickwit.Query{Project: project, Environment: env, Max: 100000}
 }
 
 func testConfig() Config {
@@ -65,9 +65,9 @@ func newTestStore(t *testing.T, cfg Config) (*Store, *memIndex, *memLog) {
 // base is the tests' time of the first line.
 var base = time.Now().Add(-5 * time.Minute).UnixNano()
 
-func envLabels(tenant, env string, replica int) Labels {
-	return Labels{Tenant: tenant, Node: "node-1", Instance: "inst" + fmt.Sprint(replica), Environment: env, Kind: "service",
-		Object: "api", Replica: replica, Deployment: 3, Attrs: map[string]string{attrTenant: tenant}}
+func envLabels(project, env string, replica int) Labels {
+	return Labels{Project: project, Node: "node-1", Instance: "inst" + fmt.Sprint(replica), Environment: env, Kind: "service",
+		Object: "api", Replica: replica, Deployment: 3, Attrs: map[string]string{attrProject: project}}
 }
 
 // lines makes n lines from offset off on, 10 bytes apart, a millisecond
@@ -86,13 +86,13 @@ func batch(key StreamKey, l Labels, ls []Line) []StreamBatch {
 	return []StreamBatch{{Key: key, Labels: l, Lines: ls, Next: -1}}
 }
 
-func mustRead(t *testing.T, s *Store, tenant string, v url.Values) scanResult {
+func mustRead(t *testing.T, s *Store, project string, v url.Values) scanResult {
 	t.Helper()
 	q, err := parseQuery(v, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := s.Read(context.Background(), tenant, q)
+	r, err := s.Read(context.Background(), project, q)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestIngestIdempotent(t *testing.T) {
 		t.Errorf("lines %d, bytes %d, next %d, last %d, env %q", lineCount, bytes, next, lastOff, env)
 	}
 	// A record per (stream, offset), in the stream's partition, keyed by
-	// its tenant, environment and object, its document of the first
+	// its project, environment and object, its document of the first
 	// write's labels.
 	sid := streamSID(t, s, key)
 	recs := lg.records(logTopic)
@@ -214,7 +214,7 @@ func TestIngestIdempotent(t *testing.T) {
 		if err := json.Unmarshal(r.Value, &d); err != nil {
 			t.Fatal(err)
 		}
-		if string(r.Key) != "acme/env1/service/api" || r.Partition != part || d.Stream != sid || d.Tenant != "acme" ||
+		if string(r.Key) != "acme/env1/service/api" || r.Partition != part || d.Stream != sid || d.Project != "acme" ||
 			d.Environment != "env1" || d.Replica != 0 || d.Deployment != 3 || d.Source != SourceContainer || d.IOStream != "stdout" {
 			t.Errorf("record %q in %d: %+v", r.Key, r.Partition, d)
 		}
@@ -224,12 +224,12 @@ func TestIngestIdempotent(t *testing.T) {
 		t.Errorf("offsets in the topic %v", offs)
 	}
 	// A run of an environment's job lies in its object's partition, a
-	// tenant's job (no environment) in its job's.
-	job := Labels{Tenant: "acme", Environment: "env1", Kind: "job", Object: "migrate", Attempt: 1, Attrs: map[string]string{}}
+	// project's job (no environment) in its job's.
+	job := Labels{Project: "acme", Environment: "env1", Kind: "job", Object: "migrate", Attempt: 1, Attrs: map[string]string{}}
 	if err := s.Ingest(ctx, batch(StreamKey{"pod2", "main", "L1"}, job, lines(0, base, 1, func(int) string { return "j" }))); err != nil {
 		t.Fatal(err)
 	}
-	tjob := Labels{Tenant: "acme", Job: "build-2", Attrs: map[string]string{}}
+	tjob := Labels{Project: "acme", Job: "build-2", Attrs: map[string]string{}}
 	if err := s.Ingest(ctx, batch(StreamKey{"pod3", "main", "L1"}, tjob, lines(0, base, 1, func(int) string { return "t" }))); err != nil {
 		t.Fatal(err)
 	}
@@ -242,12 +242,12 @@ func TestIngestIdempotent(t *testing.T) {
 		case "acme//build-2":
 			jobs++
 			if r.Partition != kafka.Partition("acme//build-2", int32(testConfig().KafkaPartitions)) {
-				t.Errorf("the tenant's job's record in %d", r.Partition)
+				t.Errorf("the project's job's record in %d", r.Partition)
 			}
 		}
 	}
 	if len(recs) != 9 || inEnv != 8 || jobs != 1 {
-		t.Errorf("%d records, %d of the environment, %d of the tenant's job", len(recs), inEnv, jobs)
+		t.Errorf("%d records, %d of the environment, %d of the project's job", len(recs), inEnv, jobs)
 	}
 
 	pos, err := s.Positions(ctx, []StreamKey{{"nope", "x", "y"}, key})
@@ -283,8 +283,8 @@ func TestIngestIdempotent(t *testing.T) {
 				t.Errorf("%s: stream not ended", when)
 			}
 		}
-		if r := mustRead(t, s, "other-tenant", url.Values{"environment": {"env1"}}); len(r.lines) != 0 {
-			t.Errorf("%s: another tenant reads the stream", when)
+		if r := mustRead(t, s, "other-project", url.Values{"environment": {"env1"}}); len(r.lines) != 0 {
+			t.Errorf("%s: another project reads the stream", when)
 		}
 	}
 }
@@ -307,11 +307,11 @@ func TestQuota(t *testing.T) {
 	}
 	per := map[string]int{}
 	for _, d := range docsIn(t, lg, logTopic) {
-		per[d.Tenant]++
+		per[d.Project]++
 	}
 	var smallLast, smallUsed, bigUsed int64
-	if err := s.db.Pool.QueryRow(ctx, `SELECT (SELECT last_off FROM log_streams WHERE tenant = 'small'),
-		(SELECT bytes FROM log_usage WHERE tenant = 'small'), (SELECT bytes FROM log_usage WHERE tenant = 'big')`).
+	if err := s.db.Pool.QueryRow(ctx, `SELECT (SELECT last_off FROM log_streams WHERE project = 'small'),
+		(SELECT bytes FROM log_usage WHERE project = 'small'), (SELECT bytes FROM log_usage WHERE project = 'big')`).
 		Scan(&smallLast, &smallUsed, &bigUsed); err != nil {
 		t.Fatal(err)
 	}
@@ -786,14 +786,14 @@ func TestRetentionAndDelete(t *testing.T) {
 	if err := s.Ingest(ctx, batch(StreamKey{"p", "c", "new"}, short, lines(0, base, 2, text))); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Ingest(ctx, batch(StreamKey{"p", "c", "job"}, Labels{Tenant: "acme", Job: "j1", Attrs: map[string]string{}},
+	if err := s.Ingest(ctx, batch(StreamKey{"p", "c", "job"}, Labels{Project: "acme", Job: "j1", Attrs: map[string]string{}},
 		lines(0, base, 2, text))); err != nil {
 		t.Fatal(err)
 	}
 	// An index of before (version 1) gets its delete task too.
-	idx.add("ferun-logs-1d", quickwit.Doc{Tenant: "acme", Environment: "e", Stream: "s_v1", Text: "v1"})
+	idx.add("ferun-logs-1d", quickwit.Doc{Project: "acme", Environment: "e", Stream: "s_v1", Text: "v1"})
 	if n, err := s.DeleteStreams(ctx, "other", "e", ""); err != nil || n != 0 {
-		t.Fatalf("another tenant deleted %d: %v", n, err)
+		t.Fatalf("another project deleted %d: %v", n, err)
 	}
 	n, err := s.DeleteStreams(ctx, "acme", "e", "")
 	if err != nil || n != 2 {
@@ -940,7 +940,7 @@ func TestFollow(t *testing.T) {
 	}
 }
 
-// A follow of a tenant's job or of an object before its stream starts
+// A follow of a project's job or of an object before its stream starts
 // gives the stream's lines; one of a stream gives only that stream's; an
 // environment as a whole is not followed.
 func TestFollowBeforeTheStream(t *testing.T) {
@@ -948,8 +948,8 @@ func TestFollowBeforeTheStream(t *testing.T) {
 	cfg.Heartbeat = 20 * time.Millisecond
 	s, _, _ := newTestStore(t, cfg)
 	ctx := context.Background()
-	jl := Labels{Tenant: "acme", Job: "build-1", Attrs: map[string]string{}}
-	other := Labels{Tenant: "acme", Job: "build-2", Attrs: map[string]string{}}
+	jl := Labels{Project: "acme", Job: "build-1", Attrs: map[string]string{}}
+	other := Labels{Project: "acme", Job: "build-2", Attrs: map[string]string{}}
 	byJob, stopJob := follow(t, s, url.Values{"job": {"build-1"}, "follow": {"1"}})
 	byObject, stopObject := follow(t, s, url.Values{"environment": {"f"}, "kind": {"service"}, "object": {"api"}, "follow": {"1"}})
 	// A follow beats once it reads its partitions: wait for that.
@@ -1048,7 +1048,7 @@ func TestFollowKey(t *testing.T) {
 		{Selector{Environment: "e", Kind: "service", Object: "api"}, "acme/e/service/api"},
 		{Selector{Environment: "e", Kind: "service", Object: "api", Replica: new(int)}, "acme/e/service/api"},
 		{Selector{Job: "j"}, "acme//j"},
-		// A tenant's job names its environment (ADR 0035).
+		// A project's job names its environment (ADR 0035).
 		{Selector{Environment: "e", Job: "j"}, "acme//j"},
 		{Selector{Instance: inst}, "acme/e/service/api"},
 		{Selector{Environment: "e"}, ""},

@@ -290,7 +290,7 @@ func TestResolver(t *testing.T) {
 	}
 }
 
-// The resolver reaches what a tenant's image names under the destination
+// The resolver reaches what a project's image names under the destination
 // rule of bindings, on the address it dials: a registry, the target of a
 // redirect and a token realm alike, each over https only; it tells which
 // address it refused, never what a dial found there.

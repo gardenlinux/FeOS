@@ -49,7 +49,7 @@ func TestDenyPrefixesReachTheResolver(t *testing.T) {
 	started(t, i)
 	waitServing(t, i)
 	ctx := context.Background()
-	if _, _, err := i.Store.CreateTenant(ctx, "acme"); err != nil {
+	if _, _, err := i.Store.CreateProject(ctx, "acme"); err != nil {
 		t.Fatal(err)
 	}
 	sb, _, err := i.Store.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: "acme",

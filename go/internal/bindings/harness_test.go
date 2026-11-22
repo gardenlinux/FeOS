@@ -28,19 +28,19 @@ import (
 
 // The rig stands the Service up on a fresh database behind a small mux
 // with api's auth classes: a sandbox route takes a sandbox token that must
-// name the path's sandbox (401 without one, 404 for another), a tenant
-// route a tenant token, an environment's route that and an environment of
-// the token's tenant by name. Tenant acme owns sb1, sb2 and sb3, all in
-// its environment box, and the environment live; tenant other owns its
+// name the path's sandbox (401 without one, 404 for another), a project
+// route a project token, an environment's route that and an environment of
+// the token's project by name. Project acme owns sb1, sb2 and sb3, all in
+// its environment box, and the environment live; project other owns its
 // environment box and nothing in it. The resolver of the destination rule
 // is fakeLookup.
 
 const (
-	tenantToken = "tenant-acme"
-	otherToken  = "tenant-other"
-	sb1Token    = "tok-1"
-	sb2Token    = "tok-2"
-	sb3Token    = "tok-3"
+	projectToken = "project-acme"
+	otherToken   = "project-other"
+	sb1Token     = "tok-1"
+	sb2Token     = "tok-2"
+	sb3Token     = "tok-3"
 )
 
 type rig struct {
@@ -107,7 +107,7 @@ func newRigWith(t *testing.T, enabled bool) *rig {
 	st := store.New(d)
 	r := &rig{t: t, d: d, st: st, key: newKey(t), sb1: podid.Mint(), sb2: podid.Mint(), sb3: podid.ID(uuid.NewString())}
 	for _, tn := range []string{"acme", "other"} {
-		if _, _, err := st.CreateTenant(bg, tn); err != nil {
+		if _, _, err := st.CreateProject(bg, tn); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -145,7 +145,7 @@ func (r *rig) on(svc *Service) *rig {
 // mux mounts the Service as api does.
 func (r *rig) mux() http.Handler {
 	sandboxes := map[string]podid.ID{sb1Token: r.sb1, sb2Token: r.sb2, sb3Token: r.sb3}
-	tenants := map[string]string{tenantToken: "acme", otherToken: "other"}
+	projects := map[string]string{projectToken: "acme", otherToken: "other"}
 	sandbox := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, req *http.Request) {
 			tok := strings.TrimSpace(strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "))
@@ -162,30 +162,30 @@ func (r *rig) mux() http.Handler {
 				TokenHash: store.HashToken(tok)})))
 		}
 	}
-	tenant := func(h http.HandlerFunc) http.HandlerFunc {
+	project := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, req *http.Request) {
 			tok := strings.TrimSpace(strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer "))
 			if tok == "" {
-				apierr.Write(w, apierr.New(http.StatusUnauthorized, "tenant bearer required"))
+				apierr.Write(w, apierr.New(http.StatusUnauthorized, "project bearer required"))
 				return
 			}
-			name, ok := tenants[tok]
+			name, ok := projects[tok]
 			if !ok {
-				apierr.Write(w, apierr.New(http.StatusUnauthorized, "unknown tenant token"))
+				apierr.Write(w, apierr.New(http.StatusUnauthorized, "unknown project token"))
 				return
 			}
-			h(w, req.WithContext(auth.WithTenant(req.Context(), auth.Tenant{Name: name})))
+			h(w, req.WithContext(auth.WithProject(req.Context(), auth.Project{Name: name})))
 		}
 	}
 	env := func(h func(http.ResponseWriter, *http.Request, Env)) http.HandlerFunc {
-		return tenant(func(w http.ResponseWriter, req *http.Request) {
-			t, _ := auth.TenantFrom(req.Context())
+		return project(func(w http.ResponseWriter, req *http.Request) {
+			t, _ := auth.ProjectFrom(req.Context())
 			id, err := r.st.EnvironmentRef(req.Context(), t.Name, req.PathValue("env"))
 			if err != nil {
 				apierr.Write(w, apierr.New(http.StatusNotFound, "no such environment"))
 				return
 			}
-			h(w, req, Env{ID: id, Name: req.PathValue("env"), Tenant: t.Name})
+			h(w, req, Env{ID: id, Name: req.PathValue("env"), Project: t.Name})
 		})
 	}
 	mux := http.NewServeMux()
@@ -198,12 +198,12 @@ func (r *rig) mux() http.Handler {
 		mux.HandleFunc("GET /api/v1/sandboxes/{id}/ssh", sandbox(s.GetSSH))
 		mux.HandleFunc("DELETE /api/v1/sandboxes/{id}/ssh", sandbox(s.DeleteSSH))
 		mux.HandleFunc("POST /api/v1/sandboxes/{id}/ssh/{name}/check", sandbox(s.CheckSSH))
-		mux.HandleFunc("POST /api/v1/kube/preflight", tenant(s.KubePreflight))
-		mux.HandleFunc("POST /api/v1/ssh/preflight", tenant(s.SSHPreflight))
+		mux.HandleFunc("POST /api/v1/kube/preflight", project(s.KubePreflight))
+		mux.HandleFunc("POST /api/v1/ssh/preflight", project(s.SSHPreflight))
 		mux.HandleFunc("PUT /api/v1/sandboxes/{id}/http", sandbox(s.PutHTTP))
 		mux.HandleFunc("GET /api/v1/sandboxes/{id}/http", sandbox(s.GetHTTP))
 		mux.HandleFunc("DELETE /api/v1/sandboxes/{id}/http", sandbox(s.DeleteHTTP))
-		mux.HandleFunc("POST /api/v1/http/preflight", tenant(s.HTTPPreflight))
+		mux.HandleFunc("POST /api/v1/http/preflight", project(s.HTTPPreflight))
 		mux.HandleFunc("GET /api/v1/environments/{env}/credentials", env(s.ListCredentials))
 		mux.HandleFunc("GET /api/v1/environments/{env}/credentials/{name}", env(s.GetCredential))
 		mux.HandleFunc("PUT /api/v1/environments/{env}/credentials/{name}", env(s.PutCredential))
@@ -211,7 +211,7 @@ func (r *rig) mux() http.Handler {
 		mux.HandleFunc("POST /api/v1/environments/{env}/credentials/{name}/check", env(s.CheckCredential))
 		mux.HandleFunc("POST /api/v1/environments/{env}/secrets/{name}/check", env(s.CheckSecret))
 	}
-	mux.HandleFunc("GET /api/v1/sandboxes/{id}/access", tenant(s.Access))
+	mux.HandleFunc("GET /api/v1/sandboxes/{id}/access", project(s.Access))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, req *http.Request) {
 		apierr.Write(w, apierr.New(http.StatusNotFound, "no such route: %s %s", req.Method, req.URL.Path))
 	})
@@ -256,9 +256,9 @@ func (r *rig) sandboxCall(method, suffix, body string) (int, string) {
 	return r.call(method, "/api/v1/sandboxes/"+r.sb1.String()+suffix, "Bearer "+sb1Token, body)
 }
 
-func (r *rig) tenantCall(method, path, body string) (int, string) {
+func (r *rig) projectCall(method, path, body string) (int, string) {
 	r.t.Helper()
-	return r.call(method, path, "Bearer "+tenantToken, body)
+	return r.call(method, path, "Bearer "+projectToken, body)
 }
 
 // codeOf decodes an error body.

@@ -61,8 +61,8 @@ func TestMigrateConcurrent(t *testing.T) {
 	bootstrap := func(ctx context.Context, tx pgx.Tx) error {
 		bootstraps.Add(1)
 		// The schema is there: the bootstrap of §11 runs inside the lock.
-		_, err := tx.Exec(ctx, `INSERT INTO tenants (id) SELECT 'operator'
-			WHERE NOT EXISTS (SELECT 1 FROM tenants) ON CONFLICT DO NOTHING`)
+		_, err := tx.Exec(ctx, `INSERT INTO projects (id) SELECT 'operator'
+			WHERE NOT EXISTS (SELECT 1 FROM projects) ON CONFLICT DO NOTHING`)
 		return err
 	}
 	var wg sync.WaitGroup
@@ -84,11 +84,11 @@ func TestMigrateConcurrent(t *testing.T) {
 		t.Fatalf("bootstrap ran %d times, want at least %d", n, len(handles))
 	}
 	d := handles[0]
-	var applied, tenants, secrets int
+	var applied, projects, secrets int
 	if err := d.Pool.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&applied); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Pool.QueryRow(ctx, "SELECT count(*) FROM tenants").Scan(&tenants); err != nil {
+	if err := d.Pool.QueryRow(ctx, "SELECT count(*) FROM projects").Scan(&projects); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.Pool.QueryRow(ctx, "SELECT count(*) FROM cluster_secrets WHERE name = 'mcp-session' AND length(value) = 32").Scan(&secrets); err != nil {
@@ -99,8 +99,8 @@ func TestMigrateConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if applied != len(ms) || tenants != 1 || secrets != 1 {
-		t.Fatalf("migrations %d, tenants %d, secrets %d; want %d, 1, 1", applied, tenants, secrets, len(ms))
+	if applied != len(ms) || projects != 1 || secrets != 1 {
+		t.Fatalf("migrations %d, projects %d, secrets %d; want %d, 1, 1", applied, projects, secrets, len(ms))
 	}
 	var secret []byte
 	if err := d.Pool.QueryRow(ctx, "SELECT value FROM cluster_secrets WHERE name = 'mcp-session'").Scan(&secret); err != nil {

@@ -107,7 +107,7 @@ func TestTraceIndexQuickwit(t *testing.T) {
 	}
 	pattern := prefix + "-*"
 
-	got, err := c.SearchSpans(ctx, pattern, quickwit.SpanQuery{Tenant: "acme", TraceID: traceA, Max: 100})
+	got, err := c.SearchSpans(ctx, pattern, quickwit.SpanQuery{Project: "acme", TraceID: traceA, Max: 100})
 	if err != nil || len(got) != 2 {
 		t.Fatalf("trace A: %+v, %v", got, err)
 	}
@@ -121,7 +121,7 @@ func TestTraceIndexQuickwit(t *testing.T) {
 		t.Errorf("events or fields: %+v", got[0])
 	}
 
-	all := quickwit.SpanQuery{Tenant: "acme", SinceNs: start - int64(time.Hour), UntilNs: time.Now().UnixNano()}
+	all := quickwit.SpanQuery{Project: "acme", SinceNs: start - int64(time.Hour), UntilNs: time.Now().UnixNano()}
 	for _, q := range []quickwit.SpanQuery{
 		all,
 		{Environment: "env1"}, {Source: SourceIngress}, {Service: "web"}, {Operation: "query"},
@@ -134,7 +134,7 @@ func TestTraceIndexQuickwit(t *testing.T) {
 		{Tags: map[string]string{"big": "1152921504606846976"}},
 		{Tags: map[string]string{"http.response.status_code": "500"}},
 	} {
-		q.Tenant = "acme"
+		q.Project = "acme"
 		if q.SinceNs == 0 {
 			q.SinceNs, q.UntilNs = all.SinceNs, all.UntilNs
 		}

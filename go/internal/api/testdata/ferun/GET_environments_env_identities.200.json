@@ -12,7 +12,7 @@
       {
         "kind": "service",
         "name": "api",
-        "spiffeId": "spiffe://run.fecore.dev/tenant/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/service/api",
+        "spiffeId": "spiffe://run.fecore.dev/project/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/service/api",
         "ou": "wl-aaf659c560616600b189e1e2ee9c31aa",
         "pods": [
           {
@@ -36,14 +36,14 @@
       {
         "kind": "job",
         "name": "migrate",
-        "spiffeId": "spiffe://run.fecore.dev/tenant/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/job/migrate",
+        "spiffeId": "spiffe://run.fecore.dev/project/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/job/migrate",
         "ou": "wl-62738ac44d727a0ee847a2d45e005a1d",
         "pods": []
       },
       {
         "kind": "addon",
         "name": "db",
-        "spiffeId": "spiffe://run.fecore.dev/tenant/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/addon/db",
+        "spiffeId": "spiffe://run.fecore.dev/project/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/addon/db",
         "ou": "wl-9478bb0f8d12f130969b8f2be3ea22c5",
         "pods": [
           {
@@ -59,7 +59,7 @@
       {
         "kind": "sandbox",
         "name": "c3kv9mwq2hd",
-        "spiffeId": "spiffe://run.fecore.dev/tenant/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/sandbox/c3kv9mwq2hd",
+        "spiffeId": "spiffe://run.fecore.dev/project/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/sandbox/c3kv9mwq2hd",
         "ou": "wl-s-c3kv9mwq2hd",
         "pods": [
           {

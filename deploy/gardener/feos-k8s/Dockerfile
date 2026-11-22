@@ -11,6 +11,8 @@
 FROM golang:1.26.8 AS build
 WORKDIR /src/go
 COPY go/go.mod go/go.sum ./
+# The published module (ADR 0057), which go.mod replaces with ./ferun.
+COPY go/ferun/go.mod go/ferun/go.sum ./ferun/
 RUN go mod download
 COPY go/ ./
 RUN CGO_ENABLED=0 go build -trimpath -o /out/feos-k8s ./cmd/feos-k8s

@@ -28,12 +28,12 @@ func validHostLabel(s string) bool {
 // characters.
 var fallbackRE = regexp.MustCompile(`-[0-9a-f]{16}$`)
 
-// unambiguous reports whether the natural label of (name, tenant) names
-// them alone: the name has no '-', the tenant no '.', and the label does
+// unambiguous reports whether the natural label of (name, project) names
+// them alone: the name has no '-', the project no '.', and the label does
 // not end as a fallback does.
-func unambiguous(name, tenant string) bool {
-	return !strings.Contains(name, "-") && !strings.Contains(tenant, ".") && !strings.Contains(tenant, "--") &&
-		!fallbackRE.MatchString(name+"-"+tenant)
+func unambiguous(name, project string) bool {
+	return !strings.Contains(name, "-") && !strings.Contains(project, ".") && !strings.Contains(project, "--") &&
+		!fallbackRE.MatchString(name+"-"+project)
 }
 
 // A chosen label has "--", is a host label and does not end as a
@@ -96,9 +96,9 @@ func TestNaturalPair(t *testing.T) {
 		"kino-":              {"kino", "", ""},
 		"":                   {"", "", ""},
 	} {
-		name, tenant, ok := NaturalPair(in)
-		if name != want[0] || tenant != want[1] || ok != (want[2] == "ok") {
-			t.Errorf("%q: (%q, %q, %v), want %q", in, name, tenant, ok, want)
+		name, project, ok := NaturalPair(in)
+		if name != want[0] || project != want[1] || ok != (want[2] == "ok") {
+			t.Errorf("%q: (%q, %q, %v), want %q", in, name, project, ok, want)
 		}
 	}
 	r := rand.New(rand.NewPCG(5, 6))
@@ -110,17 +110,17 @@ func TestNaturalPair(t *testing.T) {
 		return string(b)
 	}
 	for range 5000 {
-		// A tenant name starts with a letter or a digit (tenants.id).
-		name, tenant := word("ab1-", 1+r.IntN(8)), word("ab1", 1)+word("ab1-.", 1+r.IntN(10))
-		natural, ok, _ := HostLabels(name, tenant, uuid.Nil)
+		// A project name starts with a letter or a digit (projects.id).
+		name, project := word("ab1-", 1+r.IntN(8)), word("ab1", 1)+word("ab1-.", 1+r.IntN(10))
+		natural, ok, _ := HostLabels(name, project, uuid.Nil)
 		if !ok {
 			continue
 		}
 		if !PlainHostLabel(natural) {
-			t.Fatalf("%q %q: natural %q is not plain", name, tenant, natural)
+			t.Fatalf("%q %q: natural %q is not plain", name, project, natural)
 		}
-		if n, tn, ok := NaturalPair(natural); !ok || n != name || tn != tenant {
-			t.Fatalf("%q %q: natural %q splits into (%q, %q, %v)", name, tenant, natural, n, tn, ok)
+		if n, tn, ok := NaturalPair(natural); !ok || n != name || tn != project {
+			t.Fatalf("%q %q: natural %q splits into (%q, %q, %v)", name, project, natural, n, tn, ok)
 		}
 	}
 }
@@ -145,38 +145,38 @@ func TestHostLabels(t *testing.T) {
 	sum := sha256.Sum256([]byte(id.String()))
 	hash := hex.EncodeToString(sum[:])[:16]
 	for _, c := range []struct {
-		desc, name, tenant string
-		natural            string
-		naturalOK          bool
-		fallback           string
+		desc, name, project string
+		natural             string
+		naturalOK           bool
+		fallback            string
 	}{
 		{"natural", "web", "acme", "web-acme", true, "web-" + hash},
-		{"hyphenated tenant", "web", "acme-io", "web-acme-io", true, "web-" + hash},
-		{"dotted tenant", "shop", "team.acme.io", "shop-team.acme.io", false, "shop-" + hash},
+		{"hyphenated project", "web", "acme-io", "web-acme-io", true, "web-" + hash},
+		{"dotted project", "shop", "team.acme.io", "shop-team.acme.io", false, "shop-" + hash},
 		{"hyphenated name", "web-prod", "acme", "web-prod-acme", false, "web-prod-" + hash},
-		{"a tenant of 16 hex characters", "web", "0123456789abcdef", "web-0123456789abcdef", false, "web-" + hash},
-		{"a tenant ending in a hyphen and 16 hex characters", "web", "x-0123456789abcdef",
+		{"a project of 16 hex characters", "web", "0123456789abcdef", "web-0123456789abcdef", false, "web-" + hash},
+		{"a project ending in a hyphen and 16 hex characters", "web", "x-0123456789abcdef",
 			"web-x-0123456789abcdef", false, "web-" + hash},
-		{"a tenant ending in 16 hex characters after a letter", "web", "x0123456789abcdef",
+		{"a project ending in 16 hex characters after a letter", "web", "x0123456789abcdef",
 			"web-x0123456789abcdef", true, "web-" + hash},
-		{"a tenant ending in a hyphen and 15 hex characters", "web", "x-0123456789abcde",
+		{"a project ending in a hyphen and 15 hex characters", "web", "x-0123456789abcde",
 			"web-x-0123456789abcde", true, "web-" + hash},
 		{"exactly 63 characters", strings.Repeat("a", 50), strings.Repeat("t", 12),
 			strings.Repeat("a", 50) + "-" + strings.Repeat("t", 12), true, strings.Repeat("a", 46) + "-" + hash},
 		{"64 characters", strings.Repeat("a", 50), strings.Repeat("t", 13),
 			strings.Repeat("a", 50) + "-" + strings.Repeat("t", 13), false, strings.Repeat("a", 46) + "-" + hash},
 		{"R-LDH natural", "ab--x", "acme", "ab--x-acme", false, "e-ab--x-" + hash},
-		{"R-LDH natural from the tenant", "ab", "-x", "ab--x", false, "ab-" + hash},
+		{"R-LDH natural from the project", "ab", "-x", "ab--x", false, "ab-" + hash},
 		{"R-LDH name, natural over long", "xn--abc", strings.Repeat("t", 60),
 			"xn--abc-" + strings.Repeat("t", 60), false, "e-xn--abc-" + hash},
 		{"one character", "a", "b", "a-b", true, "a-" + hash},
 		{"two-character name", "ab", "cd", "ab-cd", true, "ab-" + hash},
 		{"hyphens at the cut are trimmed", strings.Repeat("a", 45) + "-" + strings.Repeat("b", 10), "t",
 			strings.Repeat("a", 45) + "-" + strings.Repeat("b", 10) + "-t", false, strings.Repeat("a", 45) + "-" + hash},
-		{"a tenant with an invalid character", "web", "Acme", "web-Acme", false, "web-" + hash},
-		{"a tenant that ends in a dot", "web", "acme.", "web-acme.", false, "web-" + hash},
+		{"a project with an invalid character", "web", "Acme", "web-Acme", false, "web-" + hash},
+		{"a project that ends in a dot", "web", "acme.", "web-acme.", false, "web-" + hash},
 	} {
-		natural, ok, fallback := HostLabels(c.name, c.tenant, id)
+		natural, ok, fallback := HostLabels(c.name, c.project, id)
 		if natural != c.natural || ok != c.naturalOK || fallback != c.fallback {
 			t.Errorf("%s: (%q, %v, %q), want (%q, %v, %q)", c.desc, natural, ok, fallback, c.natural, c.naturalOK, c.fallback)
 		}
@@ -191,7 +191,7 @@ func TestHostLabels(t *testing.T) {
 	if _, _, fb := HostLabels("xn--abc", "acme", id); !strings.HasPrefix(fb, "e-xn--abc-") || !validHostLabel(fb) {
 		t.Errorf("xn--abc: %q", fb)
 	}
-	// The fallback depends on the environment, not on the tenant.
+	// The fallback depends on the environment, not on the project.
 	_, _, a := HostLabels("web", "acme", id)
 	_, _, b := HostLabels("web", "other", id)
 	_, _, c := HostLabels("web", "acme", uuid.MustParse("9e3a1c2b-4d5f-4a6b-8c7d-0e1f2a3b4c5d"))
@@ -203,7 +203,7 @@ func TestHostLabels(t *testing.T) {
 // Any input, however malformed, yields an answer without a panic.
 // A label HostLabels gave an environment under any name, the one it has
 // or one it had before a rename, is its own; another's, a chosen one or
-// another tenant's natural label is not.
+// another project's natural label is not.
 func TestGivenHostLabel(t *testing.T) {
 	t.Parallel()
 	id := uuid.MustParse("0b8f4c1e-7a2d-4e6f-9c3b-5d1a2e7f8a90")
@@ -212,8 +212,8 @@ func TestGivenHostLabel(t *testing.T) {
 	_, _, renamed := HostLabels("kino--prod", "fecode", id)
 	_, _, others := HostLabels("kino-prod-9101dfcb", "fecode", other)
 	for _, c := range []struct {
-		label, tenant string
-		want          bool
+		label, project string
+		want           bool
 	}{
 		{fallback, "fecode", true},
 		{renamed, "fecode", true},
@@ -225,8 +225,8 @@ func TestGivenHostLabel(t *testing.T) {
 		{"kino", "fecode", false},
 		{"", "fecode", false},
 	} {
-		if got := GivenHostLabel(c.label, c.tenant, id); got != c.want {
-			t.Errorf("GivenHostLabel(%q, %q) = %v, want %v", c.label, c.tenant, got, c.want)
+		if got := GivenHostLabel(c.label, c.project, id); got != c.want {
+			t.Errorf("GivenHostLabel(%q, %q) = %v, want %v", c.label, c.project, got, c.want)
 		}
 	}
 }
@@ -247,7 +247,7 @@ func TestHostLabelsNeverPanics(t *testing.T) {
 	}
 }
 
-// For random environment names and tenants, the natural label is taken
+// For random environment names and projects, the natural label is taken
 // exactly when it is unambiguous and a host label, and the fallback is
 // always one.
 func TestHostLabelsRandom(t *testing.T) {
@@ -270,22 +270,22 @@ func TestHostLabelsRandom(t *testing.T) {
 		if r.IntN(8) == 0 && len(name) >= 4 {
 			name = name[:2] + "--" + name[4:]
 		}
-		tenant := label(1 + r.IntN(30))
+		project := label(1 + r.IntN(30))
 		if r.IntN(3) == 0 {
-			tenant += "." + label(1+r.IntN(20))
+			project += "." + label(1+r.IntN(20))
 		}
-		natural, ok, fallback := HostLabels(name, tenant, uuid.New())
-		if ok != (unambiguous(name, tenant) && validHostLabel(natural)) {
-			t.Fatalf("%q %q: natural %q ok %v", name, tenant, natural, ok)
+		natural, ok, fallback := HostLabels(name, project, uuid.New())
+		if ok != (unambiguous(name, project) && validHostLabel(natural)) {
+			t.Fatalf("%q %q: natural %q ok %v", name, project, natural, ok)
 		}
 		if len(fallback) > 63 || !validHostLabel(fallback) {
-			t.Fatalf("%q %q: fallback %q (%d)", name, tenant, fallback, len(fallback))
+			t.Fatalf("%q %q: fallback %q (%d)", name, project, fallback, len(fallback))
 		}
 	}
 }
 
 // The collisions of F4 and F14 of the security review: pairs whose
-// "<name>-<tenant with '.' as '-'>" was the same get distinct labels, at
+// "<name>-<project with '.' as '-'>" was the same get distinct labels, at
 // most one of each group the natural one, while simple names keep it.
 func TestHostLabelsCollisions(t *testing.T) {
 	t.Parallel()
@@ -319,21 +319,21 @@ func TestHostLabelsCollisions(t *testing.T) {
 	}
 }
 
-// No two distinct (name, tenant) pairs share a usable natural label, and
+// No two distinct (name, project) pairs share a usable natural label, and
 // none has the form of a fallback: every pair over a small alphabet, where
 // the old scheme collided often, and random pairs that end in hex.
 func TestHostLabelsInjective(t *testing.T) {
 	t.Parallel()
 	owner := map[string][2]string{}
-	check := func(name, tenant string) {
-		natural, ok, _ := HostLabels(name, tenant, uuid.Nil)
+	check := func(name, project string) {
+		natural, ok, _ := HostLabels(name, project, uuid.Nil)
 		if !ok {
 			return
 		}
 		if fallbackRE.MatchString(natural) {
-			t.Fatalf("%q %q: natural %q has a fallback's form", name, tenant, natural)
+			t.Fatalf("%q %q: natural %q has a fallback's form", name, project, natural)
 		}
-		p := [2]string{name, tenant}
+		p := [2]string{name, project}
 		if q, dup := owner[natural]; dup && q != p {
 			t.Fatalf("%q and %q share the natural label %q", q, p, natural)
 		}
@@ -363,15 +363,15 @@ func TestHostLabelsInjective(t *testing.T) {
 			names = append(names, n)
 		}
 	}
-	tenantRE := regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,62}$`)
-	var tenants []string
+	projectRE := regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,62}$`)
+	var projects []string
 	for _, n := range all("a1-.", 2, 5) {
-		if tenantRE.MatchString(n) {
-			tenants = append(tenants, n)
+		if projectRE.MatchString(n) {
+			projects = append(projects, n)
 		}
 	}
 	for _, n := range names {
-		for _, tn := range tenants {
+		for _, tn := range projects {
 			check(n, tn)
 		}
 	}
@@ -386,10 +386,10 @@ func TestHostLabelsInjective(t *testing.T) {
 	}
 	for range 20000 {
 		name := word("ab-", 1+r.IntN(6))
-		tenant := word("ab.-", 1+r.IntN(6))
+		project := word("ab.-", 1+r.IntN(6))
 		if r.IntN(2) == 0 {
-			tenant += word("-"+hexDigits, 14+r.IntN(4)) + word(hexDigits, 2)
+			project += word("-"+hexDigits, 14+r.IntN(4)) + word(hexDigits, 2)
 		}
-		check(name, tenant)
+		check(name, project)
 	}
 }

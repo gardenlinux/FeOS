@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	fapi "github.com/gardenlinux/feos/go/ferun/api"
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/config"
@@ -25,12 +26,12 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// The label of the token a tenant's creation returns.
-const tenantTokenLabel = "default"
+// The label of the token a project's creation returns.
+const projectTokenLabel = "default"
 
-// mintTenantToken returns a new tenant token and its hash: 32 random bytes
+// mintProjectToken returns a new project token and its hash: 32 random bytes
 // in hex. Only the hash is stored; the token is shown once.
-func mintTenantToken() (token, hash string, err error) {
+func mintProjectToken() (token, hash string, err error) {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", "", err
@@ -66,122 +67,149 @@ func detail(m map[string]any) json.RawMessage {
 	return b
 }
 
-// ---------------------------------------------------------------- tenants --
+// ---------------------------------------------------------------- projects --
 
-// tenantTokenInfo is a tenant token as listed: its hash, never the token.
-type tenantTokenInfo struct {
+// projectTokenInfo is a project token as listed: its hash, never the token.
+type projectTokenInfo struct {
 	Hash       string `json:"hash"`
 	HashPrefix string `json:"hashPrefix"`
 	Label      string `json:"label"`
 	// Role and Environment are the token's own grant (ADR 0031):
-	// Environment is its scope's environment ID, "" for the tenant.
+	// Environment is its scope's environment ID, "" for the project.
 	Role        string `json:"role"`
 	Environment string `json:"environment,omitempty"`
 	MadeBy      string `json:"madeBy,omitempty"`
 	CreatedAt   string `json:"createdAt"`
 	LastUsedAt  string `json:"lastUsedAt,omitempty"`
+	// Grants are the token's grants beside its own (PUT
+	// /api/v1/project/tokens/{hash}/grants, the protect dialog's), in the
+	// project's own list only.
+	Grants []tokenGrantInfo `json:"grants,omitempty"`
 }
 
-func tenantTokenOf(t store.TenantToken) tenantTokenInfo {
+// tokenGrantInfo is a grant of a token beside its own: its role, and its
+// environment's ID, "" for the project.
+type tokenGrantInfo struct {
+	Role        string `json:"role"`
+	Environment string `json:"environment"`
+}
+
+func projectTokenOf(t store.ProjectToken) projectTokenInfo {
 	env := ""
 	if t.EnvironmentID != uuid.Nil {
 		env = t.EnvironmentID.String()
 	}
-	return tenantTokenInfo{Hash: t.Hash, HashPrefix: t.Hash[:8], Label: t.Label, Role: t.Role, Environment: env,
+	return projectTokenInfo{Hash: t.Hash, HashPrefix: t.Hash[:8], Label: t.Label, Role: t.Role, Environment: env,
 		MadeBy: t.MadeBy, CreatedAt: rfc3339(t.CreatedAt), LastUsedAt: rfc3339(t.LastUsedAt)}
 }
 
-type tenantInfo struct {
+type projectInfo struct {
 	Name         string `json:"name"`
 	CreatedAt    string `json:"createdAt"`
 	SandboxCount int64  `json:"sandboxCount"`
 	// EnvironmentCount is its environments not being deleted, which its
 	// deletion takes along with their addons' data.
-	EnvironmentCount int64             `json:"environmentCount"`
-	Tokens           []tenantTokenInfo `json:"tokens"`
+	EnvironmentCount int64              `json:"environmentCount"`
+	Tokens           []projectTokenInfo `json:"tokens"`
 	// Deleting is set while a deletion is under way.
 	Deleting bool `json:"deleting,omitempty"`
 	// MadeBy is the person who made it (ADR 0031); "": an operator.
 	MadeBy string     `json:"madeBy,omitempty"`
 	Limits limitsView `json:"limits"`
 	// Zone is the zone of its default hosts (ADR 0031): the apps zone's
-	// name or the tenant zone's, "" while the platform serves neither.
+	// name or the project zone's, "" while the platform serves neither.
 	Zone string `json:"zone"`
+	// Account is the account it is on (ADR 0059).
+	Account fapi.AccountRef `json:"account"`
 }
 
-// listTenants is GET /api/v1/admin/tenants, ordered by name.
-func (s *server) listTenants(w http.ResponseWriter, r *http.Request) error {
-	ts, err := s.st.ListTenants(r.Context())
+// listProjects is GET /api/v1/admin/projects[?account=<a>], ordered by
+// name: every project, or those on the account.
+func (s *server) listProjects(w http.ResponseWriter, r *http.Request) error {
+	ts, err := s.st.ListProjectsOn(r.Context(), r.URL.Query().Get("account"))
 	if err != nil {
-		return fmt.Errorf("list tenants: %w", err)
+		return fmt.Errorf("list projects: %w", err)
 	}
 	out := struct {
-		Tenants []tenantInfo `json:"tenants"`
-	}{Tenants: make([]tenantInfo, 0, len(ts))}
+		Projects []projectInfo `json:"projects"`
+	}{Projects: make([]projectInfo, 0, len(ts))}
 	for _, t := range ts {
-		ti := tenantInfo{Name: t.ID, CreatedAt: rfc3339(t.CreatedAt), SandboxCount: t.SandboxCount,
-			EnvironmentCount: t.EnvironmentCount, Tokens: make([]tenantTokenInfo, 0, len(t.Tokens)), Deleting: t.Deleting(),
+		ti := projectInfo{Name: t.ID, CreatedAt: rfc3339(t.CreatedAt), SandboxCount: t.SandboxCount,
+			EnvironmentCount: t.EnvironmentCount, Tokens: make([]projectTokenInfo, 0, len(t.Tokens)), Deleting: t.Deleting(),
 			MadeBy: idOrEmpty(t.MadeBy), Limits: limitsOf(t.Limits),
-			Zone: s.cfg.Zones.Of(t.Zone)}
+			Zone: s.cfg.Zones.Of(t.Zone), Account: fapi.AccountRef{Name: t.Account, Title: t.AccountTitle}}
 		for _, tk := range t.Tokens {
-			ti.Tokens = append(ti.Tokens, tenantTokenOf(tk))
+			ti.Tokens = append(ti.Tokens, projectTokenOf(tk))
 		}
-		out.Tenants = append(out.Tenants, ti)
+		out.Projects = append(out.Projects, ti)
 	}
 	return writeJSON(w, http.StatusOK, out)
 }
 
-// createTenant is POST /api/v1/admin/tenants {name}: the tenant and its
-// first token in one transaction; the token is shown once.
-func (s *server) createTenant(w http.ResponseWriter, r *http.Request) error {
+// createProject is POST /api/v1/admin/projects {name, account?}: the
+// project on the account (ADR 0059; "": default, unknown 404, closed 409)
+// and its first token in one transaction; the token is shown once.
+func (s *server) createProject(w http.ResponseWriter, r *http.Request) error {
 	var req struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		Account string `json:"account"`
 	}
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	if !store.TenantNamePattern.MatchString(req.Name) {
-		return apierr.New(http.StatusBadRequest, "tenant name must match %s", store.TenantNamePattern)
+	if req.Account == "" {
+		req.Account = store.DefaultAccount
 	}
-	token, hash, err := mintTenantToken()
+	if !store.ProjectNamePattern.MatchString(req.Name) {
+		return apierr.New(http.StatusBadRequest, "project name must match %s", store.ProjectNamePattern)
+	}
+	token, hash, err := mintProjectToken()
 	if err != nil {
-		return fmt.Errorf("create tenant: %w", err)
+		return fmt.Errorf("create project: %w", err)
 	}
-	var t store.Tenant
+	a, _ := auth.AdminFrom(r.Context())
+	var t store.Project
+	var acct store.Account
 	err = s.st.InTx(r.Context(), func(tx *store.Store) error {
-		var created bool
 		var err error
-		t, created, err = tx.CreateTenant(r.Context(), req.Name)
+		acct, err = s.useAccount(r.Context(), tx, req.Account, uuid.Nil, true)
+		if err != nil {
+			return err
+		}
+		var created bool
+		t, created, err = tx.MakeProject(r.Context(), req.Name, store.NewProject{Account: acct.ID,
+			By: a.Principal().String()})
 		if err != nil {
 			return err
 		}
 		if !created {
 			if t.Deleting() {
-				return apierr.New(http.StatusConflict, "tenant %s is being deleted", req.Name)
+				return apierr.New(http.StatusConflict, "project %s is being deleted", req.Name)
 			}
-			return apierr.New(http.StatusConflict, "tenant %s already exists", req.Name)
+			return apierr.New(http.StatusConflict, "project %s already exists", req.Name)
 		}
-		a, _ := auth.AdminFrom(r.Context())
-		_, err = tx.InsertTenantToken(r.Context(), store.TenantToken{Hash: hash, TenantID: req.Name,
-			Label: tenantTokenLabel, Role: auth.RoleAdmin.String(), MadeBy: a.Principal().String()})
+		_, err = tx.InsertProjectToken(r.Context(), store.ProjectToken{Hash: hash, ProjectID: req.Name,
+			Label: projectTokenLabel, Role: auth.RoleAdmin.String(), MadeBy: a.Principal().String()})
 		return err
 	})
 	if err != nil {
-		return passOr(err, "create tenant")
+		return passOr(err, "create project")
 	}
 	by := adminOfRequest(r)
-	s.log.Info("tenant created", "tenant", req.Name, "by", by)
-	s.record(r.Context(), store.ActivityRow{TenantID: req.Name, Kind: "tenant_created", Category: "lifecycle",
-		Name: "tenant " + req.Name + " created by " + by, Detail: detail(map[string]any{"tenant": req.Name, "by": by})})
+	s.log.Info("project created", "project", req.Name, "account", acct.ID, "by", by)
+	s.record(r.Context(), store.ActivityRow{ProjectID: req.Name, Kind: "project_created", Category: "lifecycle",
+		Name:   "project " + req.Name + " created by " + by,
+		Detail: detail(map[string]any{"project": req.Name, "account": acct.ID, "by": by})})
 	return writeJSON(w, http.StatusCreated, struct {
-		Name         string `json:"name"`
-		Token        string `json:"token"`
-		CreatedAt    string `json:"createdAt"`
-		SandboxCount int    `json:"sandboxCount"`
-	}{req.Name, token, rfc3339(t.CreatedAt), 0})
+		Name         string          `json:"name"`
+		Token        string          `json:"token"`
+		CreatedAt    string          `json:"createdAt"`
+		SandboxCount int             `json:"sandboxCount"`
+		Account      fapi.AccountRef `json:"account"`
+	}{req.Name, token, rfc3339(t.CreatedAt), 0, refOf(acct)})
 }
 
-// zoneMove is one environment that moving its tenant to another zone
+// zoneMove is one environment that moving its project to another zone
 // moved: its label before and after, and its default host now.
 type zoneMove struct {
 	ID        string `json:"id"`
@@ -191,18 +219,18 @@ type zoneMove struct {
 	Host      string `json:"host"`
 }
 
-// setTenantZone is PUT /api/v1/admin/tenants/{tenant}/zone {zone}: an
-// operator moves the tenant to the apps zone or the tenant zone, named by
+// setProjectZone is PUT /api/v1/admin/projects/{project}/zone {zone}: an
+// operator moves the project to the apps zone or the project zone, named by
 // its name (ADR 0031), and its environments' default hosts with it, as a
-// changed label moves a host (store.SetTenantZone): the old hosts answer
-// 404 at once. A label that cannot move, another tenant's in the new zone
-// or a plain one where the tenant owns no plain names, gives way to the
-// environment's natural label or its fallback. It answers the tenant's
+// changed label moves a host (store.SetProjectZone): the old hosts answer
+// 404 at once. A label that cannot move, another project's in the new zone
+// or a plain one where the project owns no plain names, gives way to the
+// environment's natural label or its fallback. It answers the project's
 // zone and every environment that holds a label; 400 for a zone the
-// platform does not serve, 404 for an unknown tenant, 409 while it is
+// platform does not serve, 404 for an unknown project, 409 while it is
 // being deleted.
-func (s *server) setTenantZone(w http.ResponseWriter, r *http.Request) error {
-	name := r.PathValue("tenant")
+func (s *server) setProjectZone(w http.ResponseWriter, r *http.Request) error {
+	name := r.PathValue("project")
 	var req struct {
 		Zone string `json:"zone"`
 	}
@@ -218,105 +246,105 @@ func (s *server) setTenantZone(w http.ResponseWriter, r *http.Request) error {
 	var moves []store.ZoneMove
 	var before string
 	err := s.st.InTx(r.Context(), func(tx *store.Store) error {
-		t, err := tx.LockTenant(r.Context(), name, store.ForUpdate)
+		t, err := tx.LockProject(r.Context(), name, store.ForUpdate)
 		if isNoRow(err) {
-			return apierr.New(http.StatusNotFound, "unknown tenant %s", name)
+			return apierr.New(http.StatusNotFound, "unknown project %s", name)
 		}
 		if err != nil {
 			return err
 		}
 		if t.Deleting() {
-			return apierr.New(http.StatusConflict, "tenant %s is being deleted", name)
+			return apierr.New(http.StatusConflict, "project %s is being deleted", name)
 		}
 		before = t.Zone
-		moves, err = tx.SetTenantZone(r.Context(), name, zone, zones.PlainLabels(name, zone))
+		moves, err = tx.SetProjectZone(r.Context(), name, zone, zones.PlainLabels(name, zone))
 		return err
 	})
 	if err != nil {
-		return passOr(err, "set the tenant's zone")
+		return passOr(err, "set the project's zone")
 	}
 	host := zones.Of(zone)
 	out := struct {
-		Tenant       string     `json:"tenant"`
+		Project      string     `json:"project"`
 		Zone         string     `json:"zone"`
 		Environments []zoneMove `json:"environments"`
-	}{Tenant: name, Zone: host, Environments: make([]zoneMove, 0, len(moves))}
+	}{Project: name, Zone: host, Environments: make([]zoneMove, 0, len(moves))}
 	for _, m := range moves {
 		out.Environments = append(out.Environments, zoneMove{ID: m.EnvID.String(), Name: m.Name, HostLabel: m.To,
 			Before: m.From, Host: m.To + "." + host})
 	}
 	if before != zone {
 		by := adminOfRequest(r)
-		s.log.Info("tenant moved to another zone", "tenant", name, "zone", host, "from", zones.Of(before),
+		s.log.Info("project moved to another zone", "project", name, "zone", host, "from", zones.Of(before),
 			"environments", len(moves), "by", by)
-		s.record(r.Context(), store.ActivityRow{TenantID: name, Kind: "tenant_zone_set", Category: "lifecycle",
-			Name: "tenant " + name + " moved to zone " + host + " by " + by,
-			Detail: detail(map[string]any{"tenant": name, "zone": host, "from": zones.Of(before), "by": by,
+		s.record(r.Context(), store.ActivityRow{ProjectID: name, Kind: "project_zone_set", Category: "lifecycle",
+			Name: "project " + name + " moved to zone " + host + " by " + by,
+			Detail: detail(map[string]any{"project": name, "zone": host, "from": zones.Of(before), "by": by,
 				"environments": out.Environments})})
 	}
 	return writeJSON(w, http.StatusOK, out)
 }
 
-// deleteTenant is DELETE /api/v1/admin/tenants/{tenant}: its tokens go at
+// deleteProject is DELETE /api/v1/admin/projects/{project}: its tokens go at
 // once, then its sandboxes in batches, each as a sandbox's delete, then
-// the tenant. The leader finishes a deletion this request does not.
-func (s *server) deleteTenant(w http.ResponseWriter, r *http.Request) error {
-	name := r.PathValue("tenant")
-	existed, err := s.deps.Engine.DeleteTenant(r.Context(), name)
+// the project. The leader finishes a deletion this request does not.
+func (s *server) deleteProject(w http.ResponseWriter, r *http.Request) error {
+	name := r.PathValue("project")
+	existed, err := s.deps.Engine.DeleteProject(r.Context(), name)
 	if err != nil {
-		return internalf("delete tenant: %v", err)
+		return internalf("delete project: %v", err)
 	}
 	if existed {
-		s.log.Info("tenant deleted", "tenant", name, "by", adminOfRequest(r))
+		s.log.Info("project deleted", "project", name, "by", adminOfRequest(r))
 	}
 	return writeJSON(w, http.StatusOK, struct {
 		Deleted bool `json:"deleted"`
 	}{existed})
 }
 
-// lockTenantForToken reads the tenant of a token mint FOR SHARE: unknown
+// lockProjectForToken reads the project of a token mint FOR SHARE: unknown
 // is a 404, being deleted a 409.
-func lockTenantForToken(ctx context.Context, tx *store.Store, name string) error {
-	t, err := tx.LockTenant(ctx, name, store.ForShare)
+func lockProjectForToken(ctx context.Context, tx *store.Store, name string) error {
+	t, err := tx.LockProject(ctx, name, store.ForShare)
 	if isNoRow(err) {
-		return apierr.New(http.StatusNotFound, "unknown tenant %s", name)
+		return apierr.New(http.StatusNotFound, "unknown project %s", name)
 	}
 	if err != nil {
 		return err
 	}
 	if t.Deleting() {
-		return apierr.New(http.StatusConflict, "tenant %s is being deleted", name)
+		return apierr.New(http.StatusConflict, "project %s is being deleted", name)
 	}
 	return nil
 }
 
-// listTenantTokens is GET /api/v1/admin/tenants/{tenant}/tokens.
-func (s *server) listTenantTokens(w http.ResponseWriter, r *http.Request) error {
-	name := r.PathValue("tenant")
-	if _, err := s.st.GetTenant(r.Context(), name); isNoRow(err) {
-		return apierr.New(http.StatusNotFound, "unknown tenant %s", name)
+// listProjectTokens is GET /api/v1/admin/projects/{project}/tokens.
+func (s *server) listProjectTokens(w http.ResponseWriter, r *http.Request) error {
+	name := r.PathValue("project")
+	if _, err := s.st.GetProject(r.Context(), name); isNoRow(err) {
+		return apierr.New(http.StatusNotFound, "unknown project %s", name)
 	} else if err != nil {
 		return fmt.Errorf("list tokens: %w", err)
 	}
-	toks, err := s.st.ListTenantTokens(r.Context(), name)
+	toks, err := s.st.ListProjectTokens(r.Context(), name)
 	if err != nil {
 		return fmt.Errorf("list tokens: %w", err)
 	}
 	out := struct {
-		Tokens []tenantTokenInfo `json:"tokens"`
-	}{Tokens: make([]tenantTokenInfo, 0, len(toks))}
+		Tokens []projectTokenInfo `json:"tokens"`
+	}{Tokens: make([]projectTokenInfo, 0, len(toks))}
 	for _, t := range toks {
-		out.Tokens = append(out.Tokens, tenantTokenOf(t))
+		out.Tokens = append(out.Tokens, projectTokenOf(t))
 	}
 	return writeJSON(w, http.StatusOK, out)
 }
 
-// createTenantToken is POST /api/v1/admin/tenants/{tenant}/tokens
-// {label?, role?, environment?}: another token of the tenant, shown once,
+// createProjectToken is POST /api/v1/admin/projects/{project}/tokens
+// {label?, role?, environment?}: another token of the project, shown once,
 // with its own grant (ADR 0031): role read, write or admin (the default),
-// on the environment of that ID or name, or on the tenant.
-func (s *server) createTenantToken(w http.ResponseWriter, r *http.Request) error {
-	name := r.PathValue("tenant")
+// on the environment of that ID or name, or on the project.
+func (s *server) createProjectToken(w http.ResponseWriter, r *http.Request) error {
+	name := r.PathValue("project")
 	var req struct {
 		Label       string `json:"label"`
 		Role        string `json:"role"`
@@ -331,20 +359,20 @@ func (s *server) createTenantToken(w http.ResponseWriter, r *http.Request) error
 	if _, ok := auth.ParseRole(req.Role); !ok {
 		return apierr.New(http.StatusBadRequest, "role must be read, write or admin, got %q", req.Role)
 	}
-	token, hash, err := mintTenantToken()
+	token, hash, err := mintProjectToken()
 	if err != nil {
 		return fmt.Errorf("create token: %w", err)
 	}
-	var tok store.TenantToken
+	var tok store.ProjectToken
 	err = s.st.InTx(r.Context(), func(tx *store.Store) error {
-		if err := lockTenantForToken(r.Context(), tx, name); err != nil {
+		if err := lockProjectForToken(r.Context(), tx, name); err != nil {
 			return err
 		}
 		var env uuid.UUID
 		if req.Environment != "" {
 			id, err := tx.EnvironmentRef(r.Context(), name, req.Environment)
 			if isNoRow(err) {
-				return apierr.New(http.StatusNotFound, "tenant %s has no environment %s", name, req.Environment)
+				return apierr.New(http.StatusNotFound, "project %s has no environment %s", name, req.Environment)
 			}
 			if err != nil {
 				return err
@@ -353,10 +381,10 @@ func (s *server) createTenantToken(w http.ResponseWriter, r *http.Request) error
 		}
 		a, _ := auth.AdminFrom(r.Context())
 		var err error
-		tok, err = tx.InsertTenantToken(r.Context(), store.TenantToken{Hash: hash, TenantID: name, Label: req.Label,
+		tok, err = tx.InsertProjectToken(r.Context(), store.ProjectToken{Hash: hash, ProjectID: name, Label: req.Label,
 			Role: req.Role, EnvironmentID: env, MadeBy: a.Principal().String()})
 		if isNoRow(err) {
-			return apierr.New(http.StatusNotFound, "unknown tenant %s", name)
+			return apierr.New(http.StatusNotFound, "unknown project %s", name)
 		}
 		return err
 	})
@@ -366,9 +394,9 @@ func (s *server) createTenantToken(w http.ResponseWriter, r *http.Request) error
 	return writeJSON(w, http.StatusCreated, mintedToken{Token: token, HashPrefix: hash[:8], CreatedAt: rfc3339(tok.CreatedAt)})
 }
 
-// revokeTenantToken is DELETE /api/v1/admin/tenants/{tenant}/tokens/{hash}.
-func (s *server) revokeTenantToken(w http.ResponseWriter, r *http.Request) error {
-	ok, err := s.st.DeleteTenantToken(r.Context(), r.PathValue("tenant"), r.PathValue("hash"))
+// revokeProjectToken is DELETE /api/v1/admin/projects/{project}/tokens/{hash}.
+func (s *server) revokeProjectToken(w http.ResponseWriter, r *http.Request) error {
+	ok, err := s.st.DeleteProjectToken(r.Context(), r.PathValue("project"), r.PathValue("hash"))
 	if err != nil {
 		return fmt.Errorf("revoke token: %w", err)
 	}

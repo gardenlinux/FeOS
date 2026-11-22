@@ -14,16 +14,16 @@
 //	               volume, instance, provisioning), deploy jobs, image services
 //	               (rolling, surge 1), attached services, removed objects, deployed
 //	env-probe      1 s: containers' exits and restarts with backoff, readiness
-//	               (http, tcp, exec), attached services' processes; tenants'
-//	               jobs (tenantjobs.go): their ends, starts and pods
+//	               (http, tcp, exec), attached services' processes; projects'
+//	               jobs (projectjobs.go): their ends, starts and pods
 //	env-groups     10 s, hint "env-groups": the security groups each connected
 //	               node should have, re-put where they differ; what a node holds
 //	               of the ingress's groups recorded; stale groups deleted
 //	env-names      2 s, hint "env-names": the name tables each connected node
 //	               should have, updated or re-put where they differ
 //	env-volumes    30 s: the volumes marked deleting, deleted on their nodes
-//	env-delete     5 s: environments deleting (and those of deleting tenants);
-//	               tenants' jobs that ended TenantJobRetention ago
+//	env-delete     5 s: environments deleting (and those of deleting projects);
+//	               projects' jobs that ended ProjectJobRetention ago
 //
 // The controller inserts and deletes instance rows (sandboxes with
 // environment_id) and runs Engine.Ensure for the rows that should run in
@@ -31,8 +31,8 @@
 // row); reconcile steps enqueue, never call Ensure themselves.
 //
 // The security groups (groups.go) are env-<environment>, the set of all
-// an environment's pods (its instances, sandboxes and tenants' jobs'
-// pods), whose one rule is out to itself; sg-<row>, a tenant's group (ADR
+// an environment's pods (its instances, sandboxes and projects' jobs'
+// pods), whose one rule is out to itself; sg-<row>, a project's group (ADR
 // 0034), its rules from the environment's spec and its members the pods
 // whose template names it; ing-<sandbox> for an image service's pod of an
 // environment that was ever public (environments.ingress_group,
@@ -118,7 +118,7 @@ var (
 	// ErrNotRunning: what the call needs does not run, an expected state
 	// (409, never 500): an instance pending, stopped or failed has no log
 	// to read; an attached service's sandbox that is not running, gone or
-	// not the tenant's has no process to read or restart. The error's text
+	// not the project's has no process to read or restart. The error's text
 	// says which. It wraps model.ErrNotRunning.
 	ErrNotRunning = fmt.Errorf("not running: %w", model.ErrNotRunning)
 	// ErrNotReady: the object cannot run yet, an expected state (409): a
@@ -157,8 +157,8 @@ const (
 // while the instance has no --secret-key-file.
 var errNoSealer = errors.New("secrets need --secret-key-file")
 
-// errTenantDeleting refuses an instance insert of a tenant being deleted.
-var errTenantDeleting = errors.New("the tenant is being deleted")
+// errProjectDeleting refuses an instance insert of a project being deleted.
+var errProjectDeleting = errors.New("the project is being deleted")
 
 // errEnvDeleting refuses an instance insert of an environment being
 // deleted.

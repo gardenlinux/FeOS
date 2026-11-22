@@ -222,7 +222,8 @@ describe('pickDomain', () => {
 });
 
 describe('mayBind', () => {
-  const admin = { role: 'admin', environments: [] };
+  // /auth/me lists every environment with ferund's effective role.
+  const admin = { role: 'admin', environments: [{ id: 'e1', name: 'prod', role: 'admin' }, { id: 'e2', name: 'stage', role: 'admin' }] };
   const envAdmin = { role: 'read', environments: [{ id: 'e1', name: 'prod', role: 'admin' }, { id: 'e2', name: 'stage', role: 'write' }] };
   it('needs admin on the environments it leaves and joins', () => {
     expect(mayBind(admin, 'e1', 'e2')).toBe(true);

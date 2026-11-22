@@ -9,7 +9,7 @@ import { SignIn, looksLikeEmail } from './SignIn.jsx';
 // The sign-in screen offers what /auth/config says ferund offers.
 
 const render = (config) => renderToStaticMarkup(
-  <SignIn config={config} next="/tenants/acme/sandboxes" onSignedIn={() => {}} />,
+  <SignIn config={config} next="/projects/acme/sandboxes" onSignedIn={() => {}} />,
 );
 
 describe('SignIn', () => {
@@ -18,7 +18,7 @@ describe('SignIn', () => {
     expect(out).toContain('type="email"');
     expect(out).toContain('action="/auth/login"');
     expect(out).toContain('name="login_hint"');
-    expect(out).toContain('value="/tenants/acme/sandboxes"');
+    expect(out).toContain('value="/projects/acme/sandboxes"');
     expect(out).toContain('Sign in');
     expect(out).not.toContain('type="password"');
     expect(out).not.toContain('control plane');

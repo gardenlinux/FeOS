@@ -22,7 +22,7 @@ type Mode string
 
 const (
 	// ModeSpec is POST /api/v1/environments/plan: no environment, so no
-	// check that needs one (secrets, the current deployment); the tenant's
+	// check that needs one (secrets, the current deployment); the project's
 	// sandboxes are checked.
 	ModeSpec Mode = "spec"
 	// ModePlan is a plan of an environment: an image that cannot be
@@ -87,11 +87,11 @@ const (
 type ValidateContext interface {
 	// Mode is what the validation is for.
 	Mode() Mode
-	// Sandbox reports the tenant's sandbox of id (its canonical form: a
-	// short ID, or a UUID in lowercase); ok false when the tenant has no sandbox of that ID,
+	// Sandbox reports the project's sandbox of id (its canonical form: a
+	// short ID, or a UUID in lowercase); ok false when the project has no sandbox of that ID,
 	// or it is an environment's instance row.
 	Sandbox(id string) (info SandboxInfo, ok bool)
-	// Secret reports a tenant secret of the environment (never a system
+	// Secret reports a project secret of the environment (never a system
 	// secret "addon.…"); ok false when the environment never had a version
 	// of it. A secret whose versions are all deleted is ok with Latest 0.
 	// Not asked in ModeSpec.
@@ -149,10 +149,11 @@ type CredentialInfo struct {
 }
 
 // CredentialTemplate is a credential's version's upstream (canonical)
-// and mode.
+// and mode, and whether the node forwards the host in the name mode.
 type CredentialTemplate struct {
-	Upstream string
-	Mode     string
+	Upstream      string
+	Mode          string
+	ForwardedHost bool
 }
 
 // CredentialContext is what a ValidateContext implements when the
@@ -163,7 +164,7 @@ type CredentialContext interface {
 	Credential(name string) (info CredentialInfo, ok bool)
 }
 
-// SecretInfo is a tenant secret of an environment.
+// SecretInfo is a project secret of an environment.
 type SecretInfo struct {
 	// Latest is its newest version that is not deleted; 0: every version
 	// is deleted.
@@ -197,7 +198,7 @@ type Blueprint interface {
 var (
 	// dnsLabel is an object's name: services, jobs, addons, routes, ports.
 	dnsLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
-	// secretName is a tenant secret's name (env_secrets' CHECK; "addon."
+	// secretName is a project secret's name (env_secrets' CHECK; "addon."
 	// is the system secrets').
 	secretName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 	// envVarName is an environment variable's name.
@@ -215,18 +216,18 @@ var (
 const maxHostBytes = 253
 
 // ValidEnvName reports whether name is an environment variable's name, as
-// a spec's env takes them (a tenant's job's env and secrets too).
+// a spec's env takes them (a project's job's env and secrets too).
 func ValidEnvName(name string) bool { return envVarName.MatchString(name) }
 
 // SystemSecretPrefix begins the names of the addons' credentials, which
-// tenants cannot use.
+// projects cannot use.
 const SystemSecretPrefix = "addon."
 
 // IsDigestRef reports whether an image reference names its image by a
 // sha256 digest, which pins it already.
 func IsDigestRef(image string) bool { return strings.Contains(image, "@sha256:") }
 
-// IsSecretName reports whether name is a tenant secret's name.
+// IsSecretName reports whether name is a project secret's name.
 func IsSecretName(name string) bool {
 	return secretName.MatchString(name) && !strings.HasPrefix(name, SystemSecretPrefix)
 }
@@ -242,7 +243,7 @@ func IsName(name string) bool { return dnsLabel.MatchString(name) }
 // own (dropped secrets).
 func Validate(vc ValidateContext, s Spec, prev *Spec) []Finding {
 	v := &validator{vc: vc, mode: vc.Mode(), s: s, prev: prev, routed: map[string]bool{}, referenced: map[string]bool{},
-		httpRefs: map[string][]string{}}
+		httpRefs: map[string][]string{}, typeSaid: map[string]bool{}}
 	if v.mode == ModeSpec {
 		v.prev = nil
 	}
@@ -286,6 +287,9 @@ type validator struct {
 	// in the order of the objects and their variables: the bindings their
 	// pods get.
 	httpRefs map[string][]string
+	// typeSaid are the secrets whose written type already has a finding
+	// at secrets.<name>.type: once per secret, whatever its references.
+	typeSaid map[string]bool
 	out      []Finding
 }
 
@@ -384,7 +388,9 @@ func (v *validator) service(name string, svc Service) {
 		v.imageCredentials(p+".imageCredentials", svc.ImageCredentials)
 		v.usesOf(p+".uses", svc.Uses)
 		v.egressOf(p+".egress", svc.Egress)
-		if svc.Idle != "" {
+		// never is every runtime's word (ADR 0057): for an image service
+		// it is what no idle says, and needs no route.
+		if svc.Idle != "" && svc.Idle != IdleNever {
 			d, ok := v.duration(p+".idle", svc.Idle)
 			switch {
 			case !ok:
@@ -693,16 +699,35 @@ func (v *validator) valueRef(path string, val EnvValue) {
 			"which only a variable makes")
 		return
 	}
-	if _, ok := v.httpSecret(val.Secret); ok {
-		v.errorf(path, fmt.Sprintf(`reference its url or host: {"secret": "%s", "key": "url"}`, val.Secret),
-			"secret %s is an HTTP secret: its key never reaches a container", val.Secret)
+	name := val.Secret
+	if _, ok := v.httpSecret(name); ok {
+		if v.s.Secrets[name].Type == SecretTypeValue {
+			// The spec says what its code expects: the finding is the
+			// secret's (ADR 0058).
+			v.typeOnce(name, fmt.Sprintf("the kind does not change: make a value secret under another name and "+
+				"reference it, or delete %s and make it anew as a value, or change the code to call it "+
+				`(type http, a reference {"secret": "%s", "key": "url"})`, name, name),
+				"secret %s of the environment is an HTTP secret; the spec's code expects a value", name)
+			return
+		}
+		v.errorf(path, fmt.Sprintf(`reference its url or host: {"secret": "%s", "key": "url"}`, name),
+			"secret %s is an HTTP secret: its key never reaches a container", name)
 		return
 	}
-	if v.s.Secrets[val.Secret].IsHTTP() {
-		v.errorf("secrets."+val.Secret, "remove the pin's type, or reference the secret by its url or host",
-			"secret %s is pinned as an HTTP secret and referenced as a value", val.Secret)
+	if v.s.Secrets[name].IsHTTP() {
+		v.typeOnce(name, fmt.Sprintf(`reference it as {"secret": "%s", "key": "url"}, or change type to value`, name),
+			"the spec expects an HTTP secret %s and a variable references it as a value", name)
 	}
-	v.secretRef(path, val.Secret)
+	v.secretRef(path, name)
+}
+
+// typeOnce is an error at secrets.<name>.type, once per secret.
+func (v *validator) typeOnce(name, remedy, format string, args ...any) {
+	if v.typeSaid[name] {
+		return
+	}
+	v.typeSaid[name] = true
+	v.errorf("secrets."+name+".type", remedy, format, args...)
 }
 
 // httpSecret is the environment's HTTP secret of the name, when the
@@ -741,6 +766,10 @@ func (v *validator) httpSecretRef(path string, val EnvValue, pod bool) {
 	if pod {
 		v.httpRefs[name] = append(v.httpRefs[name], path)
 	}
+	if v.s.Secrets[name].Type == SecretTypeValue {
+		// The spec expects a value: the finding is the secret's (secrets).
+		return
+	}
 	if v.mode == ModeSpec {
 		v.warnf(path, "plan it for an environment, which has its HTTP secrets",
 			"a spec without an environment has no HTTP secret %s to look up", name)
@@ -750,12 +779,38 @@ func (v *validator) httpSecretRef(path string, val EnvValue, pod bool) {
 		return
 	}
 	if info, ok := v.vc.Secret(name); ok && info.Latest > 0 {
+		if v.s.Secrets[name].Type == SecretTypeHTTP {
+			// The spec says what its code expects: the finding is the
+			// secret's (ADR 0058).
+			v.typeOnce(name, fmt.Sprintf("the kind does not change: make an HTTP secret under another name and "+
+				"reference it, or delete %s and make it anew as type http, or change the code to read a value "+
+				`(type value, a reference {"secret": "%s"})`, name, name),
+				"secret %s of the environment is a value; the spec's code expects an HTTP secret", name)
+			return
+		}
 		v.errorf(path, fmt.Sprintf(`reference the value as {"secret": "%s"}, or make an HTTP secret of another name`,
 			name), "secret %s is a value: a key is an HTTP secret's reference", name)
 		return
 	}
-	v.errorf(path, `make it with PUT /api/v1/environments/{env}/secrets/`+name+` {"type": "http", …}, then plan again`,
-		"no HTTP secret %s", name)
+	v.errorf(path, "make it with PUT /api/v1/environments/{env}/secrets/"+name+" "+HTTPSecretToMake(v.s, name)+
+		", then plan again", "no HTTP secret %s", name)
+}
+
+// HTTPSecretToMake is the body of a PUT that makes the HTTP secret name
+// as the spec's code expects it (ADR 0058): its mode, the name mode
+// unless the spec says otherwise, and the forwarded host where the spec
+// says it.
+func HTTPSecretToMake(s Spec, name string) string {
+	ref := s.Secrets[name]
+	mode := ref.Mode
+	if mode == "" {
+		mode = SecretModeName
+	}
+	fh := ""
+	if ref.ForwardedHost != nil {
+		fh = fmt.Sprintf(`, "forwardedHost": %t`, *ref.ForwardedHost)
+	}
+	return fmt.Sprintf(`{"type": "http", "mode": "%s"%s, "upstream": …, "credential": …}`, mode, fh)
 }
 
 // attachedSecrets warns of an HTTP secret an attached service's
@@ -781,7 +836,7 @@ func (v *validator) attachedSecrets(p string, svc Service) {
 	}
 }
 
-// secretRef checks a reference to a tenant secret.
+// secretRef checks a reference to a project secret.
 func (v *validator) secretRef(path, name string) {
 	if !IsSecretName(name) {
 		v.errorf(path, "secret names are lowercase letters, digits, '.', '_' and '-'; \"addon.\" is reserved",
@@ -817,18 +872,21 @@ func (v *validator) secrets() {
 			v.errorf(p+".version", "pin a version, or leave it out to pin the latest", "version %d is negative", ref.Version)
 			continue
 		}
-		if ref.Type != "" && ref.Type != SecretTypeHTTP {
-			v.errorf(p+".type", `leave it out: an HTTP secret's pin is of type "http", a value's has none`,
-				"type %q is no secret's pin", ref.Type)
+		if !v.expectation(p, name, ref) {
 			continue
 		}
 		if _, http := v.httpRefs[name]; http || v.httpRef(name) {
+			if ref.Type == SecretTypeValue {
+				v.typeOnce(name, fmt.Sprintf(`reference it as {"secret": "%s"}, or change type to http`, name),
+					"the spec expects a value secret and a variable references %s by its url or host", name)
+				continue
+			}
 			v.httpPin(p, name, ref)
 			continue
 		}
-		if ref.Upstream != "" || ref.Mode != "" {
-			v.errorf(p, "remove upstream and mode: a value secret's pin is its version", "secret %s is no HTTP "+
-				"secret's pin", name)
+		if ref.Type == "" && (ref.Upstream != "" || ref.Mode != "" || ref.ForwardedHost != nil) {
+			v.errorf(p, "remove upstream, mode and forwardedHost: a value secret's pin is its version",
+				"secret %s is no HTTP secret's pin", name)
 		}
 		if !v.referenced[name] || v.mode == ModeSpec || ref.Version == 0 {
 			continue
@@ -846,6 +904,39 @@ func (v *validator) secrets() {
 				info.Latest), "secret %s has no version %d", name, ref.Version)
 		}
 	}
+}
+
+// expectation checks what a pin says the code expects (ADR 0058), in
+// every mode: its type is a kind, its mode an HTTP secret's, the
+// forwarded host the name mode's, and a value has none of an HTTP
+// secret's fields. false: an error at p, and nothing more of the pin is
+// checked.
+func (v *validator) expectation(p, name string, ref SecretRef) bool {
+	switch ref.Type {
+	case "", SecretTypeValue, SecretTypeHTTP:
+	default:
+		v.errorf(p+".type", `use "value" or "http", the kind the code expects, or leave it out`,
+			"type %q is no secret's kind", ref.Type)
+		return false
+	}
+	switch ref.Mode {
+	case "", SecretModeName, SecretModeIntercept:
+	default:
+		v.errorf(p+".mode", `use "name" or "intercept", the mode the code expects, or leave it out`,
+			"mode %q is no HTTP secret's mode", ref.Mode)
+		return false
+	}
+	if ref.Type == SecretTypeValue && (ref.Upstream != "" || ref.Mode != "" || ref.ForwardedHost != nil) {
+		v.errorf(p, "remove upstream, mode and forwardedHost, or change type to http",
+			"secret %s is expected as a value, which has no upstream, mode or forwarded host", name)
+		return false
+	}
+	if ref.ForwardedHost != nil && ref.Mode == SecretModeIntercept {
+		v.errorf(p+".forwardedHost", "leave forwardedHost out, or expect the name mode",
+			"forwardedHost is the name mode's, and the spec expects the intercept mode")
+		return false
+	}
+	return true
 }
 
 // httpRef reports whether a variable of the spec, an attached service's
@@ -873,10 +964,14 @@ func (v *validator) httpRef(name string) bool {
 }
 
 // httpPin checks an HTTP secret's pin, at p: a version the secret has,
-// and the version's upstream and mode where it names them (a normalised
-// spec, a revert's).
+// the version's upstream where the pin names one (a normalised spec, a
+// revert's), and what the spec expects of it (ADR 0058): the mode and the
+// forwarded host of the version it would pin, the latest when it pins
+// none. Each difference is an error at its field, whose remedy names
+// both ways: a new version of the secret, which needs no key (ADR 0055),
+// or the spec's expectation, with the code.
 func (v *validator) httpPin(p, name string, ref SecretRef) {
-	if v.mode == ModeSpec || (ref.Version == 0 && ref.Upstream == "" && ref.Mode == "") {
+	if v.mode == ModeSpec || (ref.Version == 0 && ref.Upstream == "" && ref.Mode == "" && ref.ForwardedHost == nil) {
 		return
 	}
 	info, ok := v.httpSecret(name)
@@ -894,12 +989,50 @@ func (v *validator) httpPin(p, name string, ref SecretRef) {
 			info.Latest), "HTTP secret %s has no version %d", name, version)
 		return
 	}
-	if ref.Upstream != "" || ref.Mode != "" {
-		if up, mode := BindingTemplate(Binding{Upstream: ref.Upstream, Mode: ref.Mode}); up != t.Upstream || mode != t.Mode {
-			v.errorf(p, "remove upstream and mode: they are the HTTP secret's version's", "HTTP secret %s version "+
-				"%d calls %s in the %s mode", name, version, t.Upstream, t.Mode)
+	if ref.Upstream != "" {
+		if up, _ := BindingTemplate(Binding{Upstream: ref.Upstream}); up != t.Upstream {
+			v.errorf(p, "remove upstream: it is the HTTP secret's version's", "HTTP secret %s version %d calls %s, "+
+				"not %s", name, version, t.Upstream, ref.Upstream)
 		}
 	}
+	// What to do with the pin when the secret gets a new version.
+	pinned := "and leave the pin's version out"
+	if ref.Version > 0 {
+		pinned = "and pin that version"
+	}
+	if ref.Mode != "" && ref.Mode != t.Mode {
+		v.errorf(p+".mode", fmt.Sprintf(`make a new version of %s in the %s mode, `+
+			`PUT /api/v1/environments/{env}/secrets/%s {"type": "http", "mode": "%s", …} (its key stays), %s; `+
+			"or change the spec's mode to %s with the code",
+			name, ref.Mode, name, ref.Mode, pinned, t.Mode),
+			"HTTP secret %s (version %d) is called in the %s mode; the spec's code expects the %s mode",
+			name, version, t.Mode, ref.Mode)
+		return
+	}
+	if fh := ref.ForwardedHost; fh != nil {
+		switch {
+		case t.Mode == SecretModeIntercept:
+			v.errorf(p+".forwardedHost", fmt.Sprintf(`make a new version of %s in the name mode, `+
+				`{"type": "http", "mode": "name", "forwardedHost": %t, …} (its key stays), %s; or leave forwardedHost `+
+				"out and expect the intercept mode, with the code", name, *fh, pinned),
+				"HTTP secret %s (version %d) is called in the intercept mode; forwardedHost is the name mode's",
+				name, version)
+		case *fh != t.ForwardedHost:
+			v.errorf(p+".forwardedHost", fmt.Sprintf(`make a new version of %s with "forwardedHost": %t, `+
+				`PUT /api/v1/environments/{env}/secrets/%s (its key stays), %s; or change the spec's forwardedHost `+
+				"to %t with the code", name, *fh, name, pinned, t.ForwardedHost),
+				"HTTP secret %s (version %d) %s; the spec's code expects one that %s", name, version,
+				forwards(t.ForwardedHost), forwards(*fh))
+		}
+	}
+}
+
+// forwards says whether the node forwards the host.
+func forwards(fh bool) string {
+	if fh {
+		return "forwards the host"
+	}
+	return "does not forward the host"
 }
 
 func (v *validator) job(name string, j Job) {
@@ -1336,3 +1469,6 @@ func ReferencedHTTP(s Spec) []string {
 	}
 	return slices.Sorted(maps.Keys(set))
 }
+
+// index is path's list element i: "a[2]", as Parse writes it.
+func index(path string, i int) string { return path + "[" + strconv.Itoa(i) + "]" }

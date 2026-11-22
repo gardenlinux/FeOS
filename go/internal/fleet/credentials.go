@@ -118,7 +118,7 @@ func (s *Service) issuePodCredentials(ctx context.Context, req *fleetv1.IssuePod
 		}
 		keySum := sha256.Sum256(hpkeKey)
 		if err := s.act.RecordTx(ctx, tx.Q(), activity.Event{
-			SandboxID: sb.ID, TenantID: sb.Owner, Node: p.Node, Kind: activity.KindPodCredentials,
+			SandboxID: sb.ID, ProjectID: sb.Owner, Node: p.Node, Kind: activity.KindPodCredentials,
 			Name: fmt.Sprintf("pod credentials issued on node %s", p.Node),
 			Detail: map[string]any{
 				"node": p.Node, "serial": serial, "hpke_key_sha256": hex.EncodeToString(keySum[:]),

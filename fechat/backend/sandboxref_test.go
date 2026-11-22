@@ -70,7 +70,7 @@ func TestSandboxRefRefused(t *testing.T) {
 	}
 }
 
-// fakeFeRun is ferund's tenant API as FeChat uses it: creates that mint
+// fakeFeRun is ferund's project API as FeChat uses it: creates that mint
 // the ID (and refuse to be given one, as ADR 0019 has it), tokens, and
 // /mcp, whose one tool, whoami, answers the sandbox of the bearer token.
 type fakeFeRun struct {
@@ -92,7 +92,7 @@ func newFakeFeRun(t *testing.T) *fakeFeRun {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/sandboxes", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer tok" {
-			http.Error(w, "tenant", http.StatusUnauthorized)
+			http.Error(w, "project", http.StatusUnauthorized)
 			return
 		}
 		var req map[string]any

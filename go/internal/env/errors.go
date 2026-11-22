@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/gardenlinux/feos/go/ferun/api"
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 )
@@ -16,19 +17,19 @@ import (
 // which clients (FeCode) match.
 const (
 	// CodeInvalidSpec: 422, the spec has error findings (InvalidSpecError).
-	CodeInvalidSpec = "invalid_spec"
+	CodeInvalidSpec = api.CodeInvalidSpec
 	// CodeBaseMismatch: 409, the request's base is not the current deployment
 	// (BaseMismatchError).
-	CodeBaseMismatch = "base_mismatch"
-	// CodeNameTaken: 409, the tenant has an environment of that name with
+	CodeBaseMismatch = api.CodeBaseMismatch
+	// CodeNameTaken: 409, the project has an environment of that name with
 	// another ID.
-	CodeNameTaken = "name_taken"
+	CodeNameTaken = api.CodeNameTaken
 	// CodeIDTaken: 409, an environment of that ID exists with another name
 	// or another owner.
-	CodeIDTaken = "id_taken"
-	// CodeHostLabelTaken: 409, the host label a tenant chose is another
-	// tenant's or another environment's (PUT …/public).
-	CodeHostLabelTaken = "host_label_taken"
+	CodeIDTaken = api.CodeIDTaken
+	// CodeHostLabelTaken: 409, the host label a project chose is another
+	// project's or another environment's (PUT …/public).
+	CodeHostLabelTaken = api.CodeHostLabelTaken
 )
 
 // The texts of the environments' plain answers.
@@ -120,7 +121,7 @@ func WriteError(w http.ResponseWriter, err error) {
 	apierr.Write(w, err)
 }
 
-// errNoEnvironment is the answer for an environment the tenant does not
+// errNoEnvironment is the answer for an environment the project does not
 // have (absent or foreign alike).
 func errNoEnvironment() error { return apierr.New(http.StatusNotFound, textNoEnvironment) }
 

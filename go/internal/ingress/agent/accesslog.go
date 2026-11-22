@@ -166,7 +166,7 @@ func (l *accessLog) take(n int) {
 // usual. Without a certificate the records wait. A batch the sink failed
 // to take is sent again after a backoff, the same records under the same
 // offsets, while new records wait in the buffer; one it refuses as
-// invalid or over the tenant's quota is dropped and counted. Once the
+// invalid or over the project's quota is dropped and counted. Once the
 // sink took or refused a batch, the batch's spans go, once.
 func (a *Agent) sendToSink(ctx context.Context) time.Duration {
 	l := a.alog

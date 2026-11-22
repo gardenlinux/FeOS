@@ -396,7 +396,7 @@ func TestSupersede(t *testing.T) {
 	}
 }
 
-// A tenant holds at most --domain-unverified-max claims that are not
+// A project holds at most --domain-unverified-max claims that are not
 // verified; names are checked and reserved zones refused; with domains
 // off nothing can be claimed.
 func TestCreateRefusals(t *testing.T) {
@@ -432,7 +432,7 @@ func TestCreateRefusals(t *testing.T) {
 	if status, _ := code(errOf(h.s.CreateDomain(bg, "acme", CreateRequest{Name: "l.example.com", Labels: labels}))); status != 400 {
 		t.Fatalf("labels %d", status)
 	}
-	// The cap counts every claim not verified, of the tenant only.
+	// The cap counts every claim not verified, of the project only.
 	first := h.claim("acme", "one.example.com")
 	h.claim("acme", "one.example.com")
 	h.claim("acme", "two.example.com")
@@ -510,7 +510,7 @@ func TestUnbindDeleteEnvDeletion(t *testing.T) {
 	if v := h.row(k.ID); v.EnvID != uuid.Nil || v.State != StateUnbound {
 		t.Fatalf("environment deleted %+v", v)
 	}
-	// Another tenant's domain is absent.
+	// Another project's domain is absent.
 	if _, err := h.s.GetDomain(bg, "rival", k.ID.String()); err == nil {
 		t.Fatal("foreign domain answered")
 	}

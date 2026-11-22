@@ -211,6 +211,16 @@ func TestValidation(t *testing.T) {
 	if err != nil || c.PublicURL != "https://run.example" {
 		t.Fatalf("%q %v", c.PublicURL, err)
 	}
+	// The API's audience is the public URL unless set (ADR 0056), and kept
+	// exactly as set.
+	if c.APIAudience != "https://run.example" {
+		t.Fatalf("audience %q", c.APIAudience)
+	}
+	c, err = Parse([]string{"--database-url", testURL, "--public-url", "https://run.example/"},
+		env(map[string]string{"FERUN_API_AUDIENCE": "https://api.example/"}))
+	if err != nil || c.APIAudience != "https://api.example/" {
+		t.Fatalf("audience %q %v", c.APIAudience, err)
+	}
 }
 
 // Validate wraps the causes it names (%w), so that errors.Is and errors.As
@@ -458,41 +468,41 @@ func TestACME(t *testing.T) {
 	}
 }
 
-// --tenant-zone: empty by default; otherwise a DNS name beside the apps
+// --project-zone: empty by default; otherwise a DNS name beside the apps
 // zone, which it needs, neither under the other (ADR 0031).
-func TestTenantZone(t *testing.T) {
+func TestProjectZone(t *testing.T) {
 	t.Parallel()
-	if EnvName("tenant-zone") != "FERUN_TENANT_ZONE" {
-		t.Fatal(EnvName("tenant-zone"))
+	if EnvName("project-zone") != "FERUN_PROJECT_ZONE" {
+		t.Fatal(EnvName("project-zone"))
 	}
 	base := []string{"--database-url", testURL}
 	c, err := Parse(base, env(nil))
-	if err != nil || c.TenantZone != "" || c.Zones().Tenant != "" {
-		t.Fatalf("default %q, %v", c.TenantZone, err)
+	if err != nil || c.ProjectZone != "" || c.Zones().Project != "" {
+		t.Fatalf("default %q, %v", c.ProjectZone, err)
 	}
 	c, err = Parse(base, env(map[string]string{"FERUN_APPS_ZONE": "apps.example.com",
-		"FERUN_TENANT_ZONE": "apps.run.example.com", "FERUN_APPS_ZONE_OWNERS": "fecode"}))
-	if err != nil || c.TenantZone != "apps.run.example.com" {
-		t.Fatalf("from the variable %q, %v", c.TenantZone, err)
+		"FERUN_PROJECT_ZONE": "apps.run.example.com", "FERUN_APPS_ZONE_OWNERS": "fecode"}))
+	if err != nil || c.ProjectZone != "apps.run.example.com" {
+		t.Fatalf("from the variable %q, %v", c.ProjectZone, err)
 	}
-	if z := c.Zones(); z.Apps != "apps.example.com" || z.Tenant != "apps.run.example.com" ||
+	if z := c.Zones(); z.Apps != "apps.example.com" || z.Project != "apps.run.example.com" ||
 		len(z.AppsOwners) != 1 || z.AppsOwners[0] != "fecode" {
 		t.Fatalf("zones %+v", z)
 	}
-	for _, tc := range []struct{ apps, tenant, want string }{
+	for _, tc := range []struct{ apps, project, want string }{
 		{"", "apps.run.example.com", "needs --apps-zone"},
 		{"apps.example.com", "apps.example.com", "neither"},
 		{"apps.example.com", "x.apps.example.com", "neither"},
 		{"run.apps.example.com", "apps.example.com", "neither"},
-		{"apps.example.com", "Bad_Zone", "--tenant-zone"},
-		{"apps.example.com", "*.apps.run.example.com", "--tenant-zone"},
+		{"apps.example.com", "Bad_Zone", "--project-zone"},
+		{"apps.example.com", "*.apps.run.example.com", "--project-zone"},
 	} {
-		args := append(slices.Clone(base), "--tenant-zone", tc.tenant)
+		args := append(slices.Clone(base), "--project-zone", tc.project)
 		if tc.apps != "" {
 			args = append(args, "--apps-zone", tc.apps)
 		}
 		if _, err := Parse(args, env(nil)); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("apps %q tenant %q: %v", tc.apps, tc.tenant, err)
+			t.Errorf("apps %q project %q: %v", tc.apps, tc.project, err)
 		}
 	}
 }
@@ -547,9 +557,9 @@ func TestAppsZone(t *testing.T) {
 	}
 }
 
-// --apps-zone-owners: none by default; tenant names from the flag or
+// --apps-zone-owners: none by default; project names from the flag or
 // FERUN_APPS_ZONE_OWNERS, comma-separated, the flag winning; a name that
-// is no tenant's is refused.
+// is no project's is refused.
 func TestAppsZoneOwners(t *testing.T) {
 	t.Parallel()
 	if EnvName("apps-zone-owners") != "FERUN_APPS_ZONE_OWNERS" {
@@ -682,13 +692,13 @@ func TestRegistryEgressFlag(t *testing.T) {
 // --visitor-auth-url (ADR 0054): empty by default; from the flag or
 // FERUN_VISITOR_AUTH_URL, without its trailing slash; an https URL of a
 // host of its own (http only on a loopback host), outside the zones of
-// tenants' hosts and not the front door's.
+// projects' hosts and not the front door's.
 func TestVisitorAuthURL(t *testing.T) {
 	t.Parallel()
 	if EnvName("visitor-auth-url") != "FERUN_VISITOR_AUTH_URL" {
 		t.Fatal(EnvName("visitor-auth-url"))
 	}
-	base := []string{"--database-url", testURL, "--apps-zone", "apps.example.com", "--tenant-zone", "apps.run.example.com",
+	base := []string{"--database-url", testURL, "--apps-zone", "apps.example.com", "--project-zone", "apps.run.example.com",
 		"--public-url", "https://run.example.com"}
 	c, err := Parse(base, env(nil))
 	if err != nil || c.VisitorAuthURL != "" {
@@ -724,7 +734,7 @@ func TestVisitorAuthURL(t *testing.T) {
 	}
 	var b strings.Builder
 	Usage(&b, CmdServe)
-	if want := "ferun-auth's URL (ADR 0054): where a visitor of a provider of kind ferun or oidc signs in; empty: no ferun-auth, and only providers of kind tenant"; !strings.Contains(b.String(), want) ||
+	if want := "ferun-auth's URL (ADR 0054): where a visitor of a provider of kind ferun or oidc signs in; empty: no ferun-auth, and only providers of kind project"; !strings.Contains(b.String(), want) ||
 		!strings.Contains(b.String(), "--visitor-auth-url (FERUN_VISITOR_AUTH_URL)") {
 		t.Errorf("serve help lacks the setting")
 	}

@@ -58,16 +58,19 @@ go-fmt-check: ## Check the Go code's formatting.
 	@out=$$(cd $(GO_DIR) && gofmt -l $$(find . -name '*.go' -not -path './gen/*')); \
 	if [ -n "$$out" ]; then echo "gofmt: $$out"; exit 1; fi
 
-go-vet: ## Vet the Go code.
+go-vet: ## Vet the Go code, the published module go/ferun's too.
 	cd $(GO_DIR) && $(GO) vet ./...
+	cd $(GO_DIR)/ferun && $(GO) vet ./...
 
 go-lint: go-fmt-check go-vet ## gofmt and go vet.
 
 go-test-unit: ## The Go tests that need no database: those that do skip.
 	cd $(GO_DIR) && $(GO) test ./...
+	cd $(GO_DIR)/ferun && $(GO) test -race ./...
 
 go-test: ## All Go tests, against a PostgreSQL and Pebble (ACME) in docker unless FERUN_TEST_DATABASE_URL and FERUN_TEST_ACME_DIRECTORY name them.
 	hack/go/with-postgres hack/go/with-pebble sh -c 'cd $(GO_DIR) && $(GO) test -count=1 ./...'
+	cd $(GO_DIR)/ferun && $(GO) test -race -count=1 ./...
 
 go-test-netns: ## The WireGuard test of ferun-ingress in network namespaces of its own; needs sudo -n and WireGuard.
 	GO=$(GO) hack/go/netns-test

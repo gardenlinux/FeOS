@@ -21,7 +21,7 @@ import (
 const certsEvery = 30 * time.Second
 
 // Certs is a certificate of the HTTPS listener from files: the
-// operator's wildcard for the apps zone, or the one for the tenant zone
+// operator's wildcard for the apps zone, or the one for the project zone
 // (ADR 0031), which cert-manager renews into a Secret that the kubelet
 // updates in the mounted files. The apps zone's is the default: every SNI
 // that no other certificate covers, or none, gets it; an unknown host is

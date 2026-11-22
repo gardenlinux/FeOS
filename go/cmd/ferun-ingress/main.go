@@ -32,6 +32,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/gardenlinux/feos/go/internal/config/oldnames"
 	"github.com/gardenlinux/feos/go/internal/ingress"
 	"github.com/gardenlinux/feos/go/internal/ingress/agent"
 )
@@ -44,6 +45,10 @@ var version = ""
 const maxStatus = 16 << 20
 
 func main() {
+	if err := oldnames.Refuse(os.Environ()); err != nil {
+		fmt.Fprintf(os.Stderr, "ferun-ingress: %v\n", err)
+		os.Exit(2)
+	}
 	os.Exit(run(os.Args[1:], os.Getenv, os.Stdout, os.Stderr))
 }
 

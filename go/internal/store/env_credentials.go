@@ -98,17 +98,19 @@ func (s *Store) EnvCredential(ctx context.Context, env uuid.UUID, name string, v
 }
 
 // CredentialVersion is what a version of a credential is to an
-// environment's spec: its number and what makes a pod another.
+// environment's spec: its number, what makes a pod another, and whether
+// the node forwards the host (what a spec may expect, ADR 0058).
 type CredentialVersion struct {
-	Version  int
-	Upstream string
-	Mode     string
+	Version       int
+	Upstream      string
+	Mode          string
+	ForwardedHost bool
 }
 
 // EnvCredentialVersions are the versions of each of an environment's
 // credentials, oldest first.
 func (s *Store) EnvCredentialVersions(ctx context.Context, env uuid.UUID) (map[string][]CredentialVersion, error) {
-	rows, err := s.q.Query(ctx, `SELECT name, version, upstream, mode FROM env_credentials
+	rows, err := s.q.Query(ctx, `SELECT name, version, upstream, mode, forwarded_host FROM env_credentials
 		WHERE env_id = $1 ORDER BY name, version`, env)
 	if err != nil {
 		return nil, err
@@ -118,7 +120,7 @@ func (s *Store) EnvCredentialVersions(ctx context.Context, env uuid.UUID) (map[s
 	for rows.Next() {
 		var name string
 		var v CredentialVersion
-		if err := rows.Scan(&name, &v.Version, &v.Upstream, &v.Mode); err != nil {
+		if err := rows.Scan(&name, &v.Version, &v.Upstream, &v.Mode, &v.ForwardedHost); err != nil {
 			return nil, err
 		}
 		out[name] = append(out[name], v)

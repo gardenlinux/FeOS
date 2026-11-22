@@ -51,7 +51,7 @@ const rowId = (kind, name) => `inv-${kind}-${name}`;
 // EnvSecrets reads the view's data: the latest deployment's spec, the
 // secrets of both kinds, the catalog and the bindings' use; and writes a
 // value secret's value or a secret's delete.
-export function EnvSecrets({ tenant, env, st, ec, item = '', changed = () => {}, navigate }) {
+export function EnvSecrets({ project, env, st, ec, item = '', changed = () => {}, navigate }) {
   const spec = useLatestSpec(st);
   const catalog = useAddonCatalog();
   const usage = useBindingUsage(env);
@@ -97,7 +97,7 @@ export function EnvSecrets({ tenant, env, st, ec, item = '', changed = () => {},
       <OpNote op={op} onDismiss={clear} />
       {loading && !err && <p className="empty">Loading…</p>}
       {!loading && (
-        <SecretsInventory tenant={tenant} env={env} deployment={st.deployment} spec={spec} secrets={secrets}
+        <SecretsInventory project={project} env={env} deployment={st.deployment} spec={spec} secrets={secrets}
           catalog={catalog} usage={usage} sandboxes={sandboxes} ec={ec} focus={item}
           editing={editing} setEditing={setEditing} onPut={put} onDelete={del} busy={!!(op && op.busy)}
           onChanged={() => { readSecrets(); changed(); }} navigate={navigate} />)}
@@ -127,7 +127,7 @@ const GROUP_EMPTY = {
 // deployment (null without one), the secrets as listed (both kinds), the
 // catalog (null while it loads), the bindings' use (null without).
 export function SecretsInventory({
-  tenant, env, deployment = 0, spec, secrets, catalog, usage, sandboxes = null, ec, focus = '', editing = '',
+  project, env, deployment = 0, spec, secrets, catalog, usage, sandboxes = null, ec, focus = '', editing = '',
   setEditing = () => {}, onPut, onDelete, busy = false, onChanged = () => {}, navigate, adding = '',
 }) {
   const rows = inventoryOf(spec, { catalog, secrets: secrets || [] });
@@ -136,7 +136,7 @@ export function SecretsInventory({
   const missing = rows.filter((r) => (r.kind === 'value' || r.kind === 'http') && r.state === 'missing').length;
   const troubled = rows.filter((r) => (r.kind === 'http' || r.kind === 'binding') && usageTone(usageOf(usage, r.name)) === 'bad').length;
   const count = (place) => groupRows(rows, place).length + (place === 'offloaded' ? stray.length : 0);
-  const ctx = { tenant, env, deployment, spec, secrets: secrets || [], usage, sandboxes, ec, focus, navigate, editing, setEditing,
+  const ctx = { project, env, deployment, spec, secrets: secrets || [], usage, sandboxes, ec, focus, navigate, editing, setEditing,
     onPut, onDelete, busy, onChanged };
   return (
     <div className="inv">
@@ -151,7 +151,7 @@ export function SecretsInventory({
         {missing > 0 && <span className="bad" title="named by the spec, without a value">▲ <b className="bad">{missing}</b> missing</span>}
         {troubled > 0 && <span className="bad" title="refused, failing or without a token in the last 24 h">▲ <b className="bad">{troubled}</b> with problems</span>}
         <span className="spacer" />
-        <AddSecret tenant={tenant} env={env} ec={ec} onPut={onPut} navigate={navigate} initial={adding} />
+        <AddSecret project={project} env={env} ec={ec} onPut={onPut} navigate={navigate} initial={adding} />
       </div>
       {usage && usage.unavailable && <p className="muted small inv-unavailable">No numbers of the last 24 h: {usage.unavailable}</p>}
       {INVENTORY_GROUPS.map((g) => (
@@ -165,9 +165,9 @@ export function SecretsInventory({
 // the code reads, whose form is a name and a value here, or an HTTP API
 // the platform calls with the key, whose form is its page's. initial
 // opens it at a step ('ask', 'value').
-export function AddSecret({ tenant, env, ec, onPut, navigate, initial = '' }) {
+export function AddSecret({ project, env, ec, onPut, navigate, initial = '' }) {
   const [step, setStep] = useState(initial);
-  const toHttp = newHttpSecretPath(tenant, env);
+  const toHttp = newHttpSecretPath(project, env);
   if (!step) {
     return (
       <button className="primary mini" disabled={!ec.write} title={ec.write ? 'a value, or an HTTP API and its key' : NEEDS.write}
@@ -240,7 +240,7 @@ function ObjLink({ from, ctx }) {
   return (
     <span className="inv-obj">
       <span className="muted">{kind}</span>{' '}
-      <Link to={objectPath(ctx.tenant, ctx.env, `${kind}/${from.name}`)} navigate={ctx.navigate} className="mono">{from.name}</Link>
+      <Link to={objectPath(ctx.project, ctx.env, `${kind}/${from.name}`)} navigate={ctx.navigate} className="mono">{from.name}</Link>
     </span>
   );
 }
@@ -251,7 +251,7 @@ function SandboxLink({ id, ctx }) {
   return (
     <span className="inv-obj">
       <span className="muted">sandbox</span>{' '}
-      <Link to={sandboxPath(ctx.tenant, ctx.env, id)} navigate={ctx.navigate} className="mono"
+      <Link to={sandboxPath(ctx.project, ctx.env, id)} navigate={ctx.navigate} className="mono"
         title={sb && sb.owner ? `${id} · ${sb.owner}` : id}>{shortId(id)}</Link>
     </span>
   );
@@ -263,7 +263,7 @@ function rowClass(ctx, kind, name, extra = '') {
 }
 
 // logsOf are the environment's outbound requests of the last day.
-const logsOf = (ctx) => envPath(ctx.tenant, ctx.env, 'logs', '', null, queryOf({ source: 'egress', since: '1d' }));
+const logsOf = (ctx) => envPath(ctx.project, ctx.env, 'logs', '', null, queryOf({ source: 'egress', since: '1d' }));
 
 // Reaches is an API's host and how the code calls it, and its
 // authentication's kind.
@@ -287,7 +287,7 @@ function Reaches({ b }) {
 // deployments pin, its last 24 h, Check and the deployment that moves
 // them to the latest.
 function HttpRow({ r, ctx }) {
-  const { tenant, env, ec, navigate } = ctx;
+  const { project, env, ec, navigate } = ctx;
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [op, run] = useOp();
@@ -307,7 +307,7 @@ function HttpRow({ r, ctx }) {
       setBusy(false);
     }
   };
-  const to = httpSecretPath(tenant, env, r.name);
+  const to = httpSecretPath(project, env, r.name);
   return (
     <>
       <tr id={rowId('http', r.name)} className={rowClass(ctx, 'http', r.name, r.state === 'missing' ? 'inv-missing' : '')}>
@@ -339,7 +339,7 @@ function HttpRow({ r, ctx }) {
               {pin && <div className="warntext">{pin}</div>}
             </>)
             : <><span className="badge bad">missing</span> <span className="bad">named by the spec</span></>}
-          <div><BindingNumbers u={usageOf(ctx.usage, r.name)} tenant={tenant} env={env} logs={logsOf(ctx)} navigate={navigate} /></div>
+          <div><BindingNumbers u={usageOf(ctx.usage, r.name)} project={project} env={env} logs={logsOf(ctx)} navigate={navigate} /></div>
         </td>
         <td className="col-quick nowrap">
           {r.item && (
@@ -351,12 +351,12 @@ function HttpRow({ r, ctx }) {
               title={ec.write ? `a new deployment with ${r.name} at version ${r.version}` : NEEDS.write} onClick={move}>
               {busy ? 'Deploying…' : `Move to v${r.version}`}</button></>)}
           {!r.item && ec.write && (
-            <Link to={newHttpSecretPath(tenant, env)} navigate={navigate} className="small">Add it</Link>)}
+            <Link to={newHttpSecretPath(project, env)} navigate={navigate} className="small">Add it</Link>)}
         </td>
       </tr>
       {(result || (op && (op.tone === 'bad' || res))) && (
         <tr className="subrow"><td colSpan={5}>
-          {result && <DeployResult tenant={tenant} env={env} name={r.name} res={result} navigate={navigate} />}
+          {result && <DeployResult project={project} env={env} name={r.name} res={result} navigate={navigate} />}
           {op && op.tone === 'bad' && <div className="envop-note bad">{op.text}</div>}
           {res && <PreflightResult res={res} />}
         </td></tr>)}
@@ -372,7 +372,7 @@ function HttpRow({ r, ctx }) {
 // it, its last 24 h and Check (the preflight with the secrets' latest
 // versions). It becomes an HTTP secret: no form offers a new one.
 function BindingRow({ r, ctx }) {
-  const { tenant, env, ec, navigate, editing } = ctx;
+  const { project, env, ec, navigate, editing } = ctx;
   const b = r.binding;
   const [op, run] = useOp();
   const res = (op && op.result) || null;
@@ -395,7 +395,7 @@ function BindingRow({ r, ctx }) {
             </div>)}
           <div className="warntext inv-hint">
             {r.taken
-              ? <>in the spec — HTTP secret <Link to={httpSecretPath(tenant, env, r.name)} navigate={navigate} className="mono">{r.name}</Link> takes
+              ? <>in the spec — HTTP secret <Link to={httpSecretPath(project, env, r.name)} navigate={navigate} className="mono">{r.name}</Link> takes
                 its place once a deployment references it</>
               : 'in the spec — becomes an HTTP secret'}
           </div>
@@ -408,7 +408,7 @@ function BindingRow({ r, ctx }) {
         </td>
         <td className="small inv-state">
           {missing && <div><span className="badge bad">missing</span> <span className="bad">its key has no value</span></div>}
-          <BindingNumbers u={usageOf(ctx.usage, r.name)} tenant={tenant} env={env} logs={logsOf(ctx)} navigate={navigate} />
+          <BindingNumbers u={usageOf(ctx.usage, r.name)} project={project} env={env} logs={logsOf(ctx)} navigate={navigate} />
         </td>
         <td className="col-quick nowrap">
           <button className="mini" disabled={!ec.write || busy} title={ec.write ? 'resolve, dial, check TLS and the key, from an instance' : NEEDS.write}
@@ -438,7 +438,7 @@ function BindingRow({ r, ctx }) {
 // StrayBindingRow is a binding a sandbox stated itself (its own set,
 // which ADR 0055 ends), from its requests of the last 24 h.
 function StrayBindingRow({ u, ctx }) {
-  const { tenant, env, navigate } = ctx;
+  const { project, env, navigate } = ctx;
   const users = Array.isArray(u.users) ? u.users : [];
   return (
     <tr id={rowId('binding', u.name)} className={rowClass(ctx, 'binding', u.name, 'inv-stray')}>
@@ -452,7 +452,7 @@ function StrayBindingRow({ u, ctx }) {
             : <ObjLink key={`${x.kind}/${x.name}`} from={{ key: `${x.kind}s`, name: x.name }} ctx={ctx} />))}
         </span>
       </td>
-      <td><BindingNumbers u={u} tenant={tenant} env={env} logs={logsOf(ctx)} navigate={navigate} /></td>
+      <td><BindingNumbers u={u} project={project} env={env} logs={logsOf(ctx)} navigate={navigate} /></td>
       <td className="col-quick" />
     </tr>
   );
@@ -462,7 +462,7 @@ function StrayBindingRow({ u, ctx }) {
 // its requests, then its problems in their tone, the last problem and
 // who sent them on hover, the outbound requests in the logs (logs, a
 // path) and the last problem's trace.
-export function BindingNumbers({ u, tenant, env, logs = '', navigate }) {
+export function BindingNumbers({ u, project, env, logs = '', navigate }) {
   if (!u) return null;
   const [head, ...problems] = usageWords(u).split(' · ');
   const p = u.lastProblem;
@@ -479,7 +479,7 @@ export function BindingNumbers({ u, tenant, env, logs = '', navigate }) {
       {logs && Number(u.requests) > 0 && (
         <> · <Link to={logs} navigate={navigate} title="the outbound requests of the last day, in the logs">outbound</Link></>)}
       {p && p.traceId && (
-        <> · <Link to={envPath(tenant, env, 'traces', p.traceId)} navigate={navigate} title={problemWords(p)}>last problem</Link></>)}
+        <> · <Link to={envPath(project, env, 'traces', p.traceId)} navigate={navigate} title={problemWords(p)}>last problem</Link></>)}
     </span>
   );
 }
@@ -523,7 +523,7 @@ function SecretUses({ uses, ctx }) {
       {uses.map((u) => {
         const how = u.how === 'variable' ? <span className="mono">{u.variable}</span>
           : u.how === 'image' ? 'image pull'
-            : <>binding <Link to={secretsPath(ctx.tenant, ctx.env, 'binding', u.binding)} navigate={ctx.navigate} className="mono">{u.binding}</Link></>;
+            : <>binding <Link to={secretsPath(ctx.project, ctx.env, 'binding', u.binding)} navigate={ctx.navigate} className="mono">{u.binding}</Link></>;
         const k = `${u.from.key}/${u.from.name}/${u.how}/${u.variable || u.binding || ''}`;
         if (u.from.key === 'bindings') return <span key={k}>{how} <span className="muted">(no one names it)</span></span>;
         return <span key={k}><ObjLink from={u.from} ctx={ctx} /> <span className="muted">·</span> {how}</span>;
@@ -560,7 +560,7 @@ function SecretState({ r, s }) {
 function AddonRow({ r, ctx }) {
   return (
     <tr id={rowId('addon', r.name)} className={rowClass(ctx, 'addon', r.name)}>
-      <td><Link to={objectPath(ctx.tenant, ctx.env, `addon/${r.name}`)} navigate={ctx.navigate} className="mono strong">{r.name}</Link></td>
+      <td><Link to={objectPath(ctx.project, ctx.env, `addon/${r.name}`)} navigate={ctx.navigate} className="mono strong">{r.name}</Link></td>
       <td className="small"><span className="inv-kind">addon</span> <span className="muted">{r.addon.type}</span></td>
       <td className="small">
         <span className="inv-uses">

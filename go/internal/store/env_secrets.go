@@ -26,7 +26,7 @@ type EnvSecret struct {
 	Version int
 	Sealed  []byte
 	// System: an addon's credential, "addon.<addon>.<key>", never listed
-	// to the tenant.
+	// to the project.
 	System    bool
 	CreatedBy string
 	DeletedAt time.Time // zero: not deleted
@@ -92,7 +92,7 @@ func (s *Store) LatestSecret(ctx context.Context, envID uuid.UUID, name string) 
 }
 
 // ListSecrets returns the latest version of each secret of the
-// environment that is not deleted, the tenant's (system false) or the
+// environment that is not deleted, the project's (system false) or the
 // addons' (system true), by name.
 func (s *Store) ListSecrets(ctx context.Context, envID uuid.UUID, system bool) ([]EnvSecret, error) {
 	return collectSecrets(s.q.Query(ctx, "SELECT DISTINCT ON (name) "+secretCols+` FROM env_secrets
@@ -116,7 +116,7 @@ func (s *Store) PurgeSecrets(ctx context.Context, envID uuid.UUID, prefix string
 	return ct.RowsAffected(), err
 }
 
-// ValueSecretExists reports whether the environment has a tenant's value
+// ValueSecretExists reports whether the environment has a project's value
 // secret of the name with a version that is not deleted: a name an HTTP
 // secret cannot take (ADR 0055, one name space of both kinds).
 func (s *Store) ValueSecretExists(ctx context.Context, envID uuid.UUID, name string) (bool, error) {

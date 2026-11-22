@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // A trace's arithmetic (ADR 0026 §10, docs/architecture/traces.md): the
-// log store answers a tenant's traces in the shape of Jaeger's HTTP query
+// log store answers a project's traces in the shape of Jaeger's HTTP query
 // API under /api/v1/jaeger; fromJaeger reads a trace of it into
 // spans with their service, name, kind, times in µs, error, attributes,
 // resource, events and links, and the rest lays them out as a waterfall.

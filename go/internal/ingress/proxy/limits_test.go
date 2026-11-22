@@ -33,22 +33,22 @@ const (
 	hostB  = "shop-acme." + testZone
 )
 
-// twoEnvs is a state of two environments of two tenants, at hostA and
+// twoEnvs is a state of two environments of two projects, at hostA and
 // hostB, each with a root route to its service web.
 func twoEnvs(a, b wire.Service) *wire.State {
 	s := wire.NewState()
 	s.Self = wire.Self{Name: "ingress-0", AppsZone: testZone}
 	routes := []wire.Route{{Name: "root", Path: "/", Service: "web", Port: "http"}}
-	s.Envs[envA] = wire.Env{ID: envA, Tenant: "evil", Name: "a", Hosts: []string{hostA}, Deployment: 1,
+	s.Envs[envA] = wire.Env{ID: envA, Project: "evil", Name: "a", Hosts: []string{hostA}, Deployment: 1,
 		Routes: routes, Services: []wire.Service{a}}
-	s.Envs[envB] = wire.Env{ID: envB, Tenant: "acme", Name: "shop", Hosts: []string{hostB}, Deployment: 1,
+	s.Envs[envB] = wire.Env{ID: envB, Project: "acme", Name: "shop", Hosts: []string{hostB}, Deployment: 1,
 		Routes: routes, Services: []wire.Service{b}}
 	return s
 }
 
 // silentUpstream routes the endpoint address addr (port 8080) to a
 // listener that accepts connections and never reads or answers: a
-// tenant's app that passed its readiness check and then stays silent.
+// project's app that passed its readiness check and then stays silent.
 func silentUpstream(t *testing.T, fn *fakeNet, addr string) {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -284,13 +284,13 @@ func TestInflightLimits(t *testing.T) {
 	}
 	// A request leaves its count after its answer reached the client.
 	eventually(t, "the requests to end", func() bool { return p.inflight.count() == 0 })
-	if p.m.rejectedInflightEnv.Load() != 1 || p.m.rejectedInflight.Load() != 1 || p.m.rejectedInflightTenant.Load() != 0 {
+	if p.m.rejectedInflightEnv.Load() != 1 || p.m.rejectedInflight.Load() != 1 || p.m.rejectedInflightProject.Load() != 0 {
 		t.Errorf("rejected %d %d %d", p.m.rejectedInflightEnv.Load(), p.m.rejectedInflight.Load(),
-			p.m.rejectedInflightTenant.Load())
+			p.m.rejectedInflightProject.Load())
 	}
 }
 
-// threeEnvs is twoEnvs with a second environment of A's tenant at
+// threeEnvs is twoEnvs with a second environment of A's project at
 // hostA2.
 func threeEnvs(a, a2, b wire.Service) *wire.State {
 	s := twoEnvs(a, b)
@@ -300,18 +300,18 @@ func threeEnvs(a, a2, b wire.Service) *wire.State {
 	return s
 }
 
-// F1, F2: a tenant's environments together have the tenant's share, of
-// the forwarded and of the held requests, so that a tenant does not fill
-// the instance's cap with more environments; another tenant keeps its
+// F1, F2: a project's environments together have the project's share, of
+// the forwarded and of the held requests, so that a project does not fill
+// the instance's cap with more environments; another project keeps its
 // own.
-func TestTenantShare(t *testing.T) {
+func TestProjectShare(t *testing.T) {
 	fn := newFakeNet()
 	release := make(chan struct{})
 	var arrivedA, arrivedA2, arrivedB atomic.Int64
 	blockingUpstream(t, fn, "a", "fd00::a", release, &arrivedA)
 	blockingUpstream(t, fn, "a2", "fd00::a2", release, &arrivedA2)
 	blockingUpstream(t, fn, "b", "fd00::b", release, &arrivedB)
-	p, srv := newTestProxy(t, Config{MaxInflightPerEnv: 2, MaxInflightPerTenant: 3, MaxInflight: 10}, Deps{}, fn, "n1")
+	p, srv := newTestProxy(t, Config{MaxInflightPerEnv: 2, MaxInflightPerProject: 3, MaxInflight: 10}, Deps{}, fn, "n1")
 	free := releaser(t, release)
 	p.SetState(threeEnvs(svc("web", ep("a1", "fd00::a", "n1")), svc("web", ep("a21", "fd00::a2", "n1")),
 		svc("web", ep("b1", "fd00::b", "n1"))))
@@ -323,16 +323,16 @@ func TestTenantShare(t *testing.T) {
 	eventually(t, "A's share in flight", func() bool { return arrivedA.Load() == 2 })
 	go func() { done <- send(context.Background(), srv, "GET", hostA2, "/", nil) }()
 	eventually(t, "A2's request in flight", func() bool { return arrivedA2.Load() == 1 })
-	// A2 has room of its own, its tenant has none.
+	// A2 has room of its own, its project has none.
 	r := quick(t, srv, hostA2)
 	wantPlain(t, r, 503, textBusyHere)
 	if r.header.Get("Retry-After") != "5" {
 		t.Errorf("Retry-After %q", r.header.Get("Retry-After"))
 	}
-	if p.inflight.ofTenant("evil") != 3 || p.inflight.of(envA2) != 1 {
-		t.Errorf("in flight: tenant %d, A2 %d", p.inflight.ofTenant("evil"), p.inflight.of(envA2))
+	if p.inflight.ofProject("evil") != 3 || p.inflight.of(envA2) != 1 {
+		t.Errorf("in flight: project %d, A2 %d", p.inflight.ofProject("evil"), p.inflight.of(envA2))
 	}
-	// The other tenant is not affected.
+	// The other project is not affected.
 	for range 2 {
 		go func() { done <- send(context.Background(), srv, "GET", hostB, "/", nil) }()
 	}
@@ -344,15 +344,15 @@ func TestTenantShare(t *testing.T) {
 		}
 	}
 	eventually(t, "the requests to end", func() bool { return p.inflight.count() == 0 })
-	if p.m.rejectedInflightTenant.Load() != 1 || p.m.rejectedInflightEnv.Load() != 0 || p.m.rejectedInflight.Load() != 0 {
-		t.Errorf("rejected: tenant %d, env %d, cap %d", p.m.rejectedInflightTenant.Load(),
+	if p.m.rejectedInflightProject.Load() != 1 || p.m.rejectedInflightEnv.Load() != 0 || p.m.rejectedInflight.Load() != 0 {
+		t.Errorf("rejected: project %d, env %d, cap %d", p.m.rejectedInflightProject.Load(),
 			p.m.rejectedInflightEnv.Load(), p.m.rejectedInflight.Load())
 	}
 
-	// Held requests: shares of 2 per environment and 3 per tenant.
+	// Held requests: shares of 2 per environment and 3 per project.
 	pending := svc("web")
 	pending.Pending = 1
-	p2, srv2 := newTestProxy(t, Config{MaxHeld: 10, MaxHeldPerTenant: 3, MaxHeldPerEnv: 2, PendingHold: 10 * time.Second},
+	p2, srv2 := newTestProxy(t, Config{MaxHeld: 10, MaxHeldPerProject: 3, MaxHeldPerEnv: 2, PendingHold: 10 * time.Second},
 		Deps{}, fn, "n1")
 	p2.SetState(threeEnvs(pending, pending, pending))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -364,9 +364,9 @@ func TestTenantShare(t *testing.T) {
 	eventually(t, "the requests held", func() bool { return p2.held.count() == 4 })
 	r = quick(t, srv2, hostA2)
 	wantPlain(t, r, 503, textTooManyHere)
-	if p2.held.ofTenant("evil") != 3 || p2.m.rejectedHeldTenant.Load() != 1 || p2.m.rejectedHeldEnv.Load() != 0 {
-		t.Errorf("held: tenant %d, rejected: tenant %d, env %d", p2.held.ofTenant("evil"),
-			p2.m.rejectedHeldTenant.Load(), p2.m.rejectedHeldEnv.Load())
+	if p2.held.ofProject("evil") != 3 || p2.m.rejectedHeldProject.Load() != 1 || p2.m.rejectedHeldEnv.Load() != 0 {
+		t.Errorf("held: project %d, rejected: project %d, env %d", p2.held.ofProject("evil"),
+			p2.m.rejectedHeldProject.Load(), p2.m.rejectedHeldEnv.Load())
 	}
 	cancel()
 	wg.Wait()
@@ -1018,29 +1018,29 @@ func TestRerouteAfterTableChange(t *testing.T) {
 }
 
 func TestBudget(t *testing.T) {
-	// Shares of 2 per environment and 3 per tenant, 4 in all.
+	// Shares of 2 per environment and 3 per project, 4 in all.
 	b := newBudget(2, 3, 4)
 	var s1, s2, s3, s4, s5, s6 slot
 	for _, c := range []struct {
-		s           *slot
-		tenant, env string
-		want        full
+		s            *slot
+		project, env string
+		want         full
 	}{
 		{&s1, "t", "a", fits}, {&s1, "t", "a", fits}, {&s2, "t", "a", fits}, {&s3, "t", "a", envFull},
-		{&s3, "t", "b", fits}, {&s4, "t", "c", tenantFull}, {&s4, "u", "d", fits}, {&s5, "v", "e", allFull},
+		{&s3, "t", "b", fits}, {&s4, "t", "c", projectFull}, {&s4, "u", "d", fits}, {&s5, "v", "e", allFull},
 	} {
-		if got := b.enter(c.s, c.tenant, c.env); got != c.want {
-			t.Errorf("enter %s/%s: %d, want %d", c.tenant, c.env, got, c.want)
+		if got := b.enter(c.s, c.project, c.env); got != c.want {
+			t.Errorf("enter %s/%s: %d, want %d", c.project, c.env, got, c.want)
 		}
 	}
-	if b.count() != 4 || b.of("a") != 2 || b.of("b") != 1 || b.ofTenant("t") != 3 || b.ofTenant("u") != 1 {
-		t.Errorf("count %d, a %d, b %d, t %d, u %d", b.count(), b.of("a"), b.of("b"), b.ofTenant("t"), b.ofTenant("u"))
+	if b.count() != 4 || b.of("a") != 2 || b.of("b") != 1 || b.ofProject("t") != 3 || b.ofProject("u") != 1 {
+		t.Errorf("count %d, a %d, b %d, t %d, u %d", b.count(), b.of("a"), b.of("b"), b.ofProject("t"), b.ofProject("u"))
 	}
 	b.leave(&s1)
 	b.leave(&s1)
 	b.leave(&s6)
-	if b.count() != 3 || b.of("a") != 1 || b.ofTenant("t") != 2 {
-		t.Errorf("after leave: count %d, a %d, t %d", b.count(), b.of("a"), b.ofTenant("t"))
+	if b.count() != 3 || b.of("a") != 1 || b.ofProject("t") != 2 {
+		t.Errorf("after leave: count %d, a %d, t %d", b.count(), b.of("a"), b.ofProject("t"))
 	}
 	if b.enter(&s5, "v", "e") != fits {
 		t.Error("no room after leave")
@@ -1048,8 +1048,8 @@ func TestBudget(t *testing.T) {
 	for _, s := range []*slot{&s2, &s3, &s4, &s5} {
 		b.leave(s)
 	}
-	if b.count() != 0 || len(b.envs) != 0 || len(b.tenants) != 0 {
-		t.Errorf("after all left: count %d, envs %v, tenants %v", b.count(), b.envs, b.tenants)
+	if b.count() != 0 || len(b.envs) != 0 || len(b.projects) != 0 {
+		t.Errorf("after all left: count %d, envs %v, projects %v", b.count(), b.envs, b.projects)
 	}
 }
 
@@ -1195,7 +1195,7 @@ func postBlock(path string) []byte {
 // before the request reads it. A held request reads nothing, and the
 // server keeps what came: with Go's default window of 1 MiB, each held
 // request's body took about 1.1 MiB, an environment's default share 140
-// MiB, a tenant's 280 MiB, the cap 1.1 GiB. Each request here is on a
+// MiB, a project's 280 MiB, the cap 1.1 GiB. Each request here is on a
 // connection of its own and sends as much of a 1 MiB body as the server
 // lets it.
 func TestHTTP2BodyWindow(t *testing.T) {

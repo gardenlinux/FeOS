@@ -43,7 +43,7 @@ What constrains a builder:
 - **No git and no registry.** Images come from any registry, with the
   create's credentials (ADR 0022); FeRun stores no source.
 - **People have roles** (ADR 0031): some only read, some write one
-  environment, some a tenant.
+  environment, some a project.
 - **Narrow screens** have room for one column.
 
 What a builder must not become: a second truth (a format of its own
@@ -187,7 +187,7 @@ draws no graph.
 
 - One form per kind, with the API's fields and its defaults as
   placeholders.
-- **A catalog in ferund**: the tenant class answers the registered
+- **A catalog in ferund**: the project class answers the registered
   blueprints, each with its type, versions, plans, default plan, the
   output keys and fields a reference may name, and the option fields the
   blueprint declares (a name, a kind, a default, whether it is required,
@@ -217,7 +217,7 @@ draws no graph.
 
 ### The draft lives in the browser
 
-- In local storage, per tenant and environment and one slot for a new
+- In local storage, per project and environment and one slot for a new
   environment, written on every change and read when the builder opens.
   Where storage fails, the draft lives in memory and the builder says
   so. Undo and redo live in memory.
@@ -237,7 +237,7 @@ draws no graph.
 - ADR 0031's grants decide: `read` sees the forms, the deployments'
   specs and the text, and exports; `write` on the environment edits,
   plans, sets secrets' values, applies and edits attached services (ADR
-  0035); `write` on the tenant makes a new environment from the builder;
+  0035); `write` on the project makes a new environment from the builder;
   `admin` on the environment publishes it. Below `write` the builder
   shows the latest deployment's spec read-only, plans nothing (a plan
   needs `write`), writes no secret and stores no draft. The builder
@@ -258,7 +258,7 @@ draws no graph.
   that narrow screens lack, and no cloud console edits a service that
   way. The references stay visible as the typed values and each
   object's "used by".
-- **Forms for a tenant's security groups** in the builder, for one day:
+- **Forms for a project's security groups** in the builder, for one day:
   they went when ADR 0012 came to derive reachability from
   the spec's references, so there are no groups to edit; the service and
   job forms carry `egress` and `uses`, the route form `from`, and the
@@ -287,7 +287,7 @@ draws no graph.
   `on` reads as `true`, `no` as false, `1.20` as a number.
 - **Judging a write by what it changes** (a draft whose attached
   services are unchanged passing for someone who writes the environment
-  alone): needed while attached services were the tenant grant's; ADR
+  alone): needed while attached services were the project grant's; ADR
   0035 makes them the environment's, so the role on the environment
   decides.
 
@@ -313,7 +313,7 @@ Proposed on 2026-11-06 (83ec240) with a graph of the references as the
 main view; the plan's image pins and the catalog came the same day
 (cfc051f), and the graph was built (4250b9a, ce2bc85) and replaced by
 forms on 2026-11-07 (5df7f5d) after people did not take to it. Forms
-for a tenant's security groups were added on 2026-11-07 (fd72896) and
+for a project's security groups were added on 2026-11-07 (fd72896) and
 went with ADR 0034's revision on 2026-11-08 (a061348, 551904f), which
 gave the forms `egress`, `uses` and `from`. ADR 0035 (fea6fcb,
 2026-11-07) made an attached service a matter of `write` on the

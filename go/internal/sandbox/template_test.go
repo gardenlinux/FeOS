@@ -61,18 +61,18 @@ func (s *secrets) resolve(_ context.Context, row store.Sandbox, name string, ver
 	return v, nil
 }
 
-// environment inserts an environment of the test tenant.
+// environment inserts an environment of the test project.
 func (h *harness) environment() uuid.UUID {
 	h.t.Helper()
 	id := uuid.New()
-	h.exec("INSERT INTO environments (id, owner, name) VALUES ($1, $2, $3)", id, testTenant, "e"+id.String()[:8])
+	h.exec("INSERT INTO environments (id, owner, name) VALUES ($1, $2, $3)", id, testProject, "e"+id.String()[:8])
 	return id
 }
 
 // instance inserts an instance row of env with the template.
 func (h *harness) instance(env uuid.UUID, t *model.PodTemplate, mod ...func(*store.NewSandbox)) store.Sandbox {
 	h.t.Helper()
-	n := store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: testImage, VCPUs: 1, MemoryMiB: 512,
+	n := store.NewSandbox{ID: podid.Mint(), Owner: testProject, Image: testImage, VCPUs: 1, MemoryMiB: 512,
 		EnvironmentID: env, Instance: true, PodTemplate: t}
 	for _, m := range mod {
 		m(&n)
@@ -134,7 +134,7 @@ func wantWebSpec(t *testing.T, spec *podv1.PodSpec, sb store.Sandbox) {
 		t.Fatalf("groups %v", g)
 	}
 	l := spec.GetLabels()
-	if l[LabelSandbox] != sb.ID.String() || l[LabelTenant] != testTenant || l[LabelIncarnation] != sb.Incarnation.String() ||
+	if l[LabelSandbox] != sb.ID.String() || l[LabelProject] != testProject || l[LabelIncarnation] != sb.Incarnation.String() ||
 		l[model.LabelObject] != "service/web" || l[model.LabelEnvironment] != sb.EnvironmentID.String() || len(l) != 6 {
 		t.Fatalf("labels %v", l)
 	}
@@ -250,7 +250,7 @@ func TestEscapeUserinfo(t *testing.T) {
 
 func TestBuildPodSpec(t *testing.T) {
 	env := uuid.New()
-	sb := store.Sandbox{ID: podid.Mint(), Incarnation: uuid.New(), Owner: testTenant, ImageRef: testImage, VCPUs: 2,
+	sb := store.Sandbox{ID: podid.Mint(), Incarnation: uuid.New(), Owner: testProject, ImageRef: testImage, VCPUs: 2,
 		MemoryMiB: 1024, EnvironmentID: env, Instance: true}
 
 	// No template: the sandbox's own pod.
@@ -318,7 +318,7 @@ func TestBuildPodSpec(t *testing.T) {
 func TestPodSpecNamesTheIdentity(t *testing.T) {
 	env := uuid.MustParse("3f2c0000-0000-4000-8000-000000000001")
 	id := podid.Mint()
-	sb := store.Sandbox{ID: id, Incarnation: uuid.New(), Owner: testTenant, ImageRef: testImage, VCPUs: 1,
+	sb := store.Sandbox{ID: id, Incarnation: uuid.New(), Owner: testProject, ImageRef: testImage, VCPUs: 1,
 		MemoryMiB: 256, EnvironmentID: env}
 	off := &Engine{cfg: Config{}}
 	spec, err := off.podSpec(bg, sb)
@@ -326,14 +326,14 @@ func TestPodSpecNamesTheIdentity(t *testing.T) {
 		t.Fatalf("without a trust domain: %q %v", spec.GetIdentity(), err)
 	}
 	on := &Engine{cfg: Config{TrustDomain: "run.example"}}
-	envPath := "spiffe://run.example/tenant/" + testTenant + "/env/" + env.String()
+	envPath := "spiffe://run.example/project/" + testProject + "/env/" + env.String()
 	for _, c := range []struct {
 		name string
 		row  store.Sandbox
 		want string
 	}{
 		{"a sandbox", sb, envPath + "/sandbox/" + id.String()},
-		{"a tenant's job", func() store.Sandbox { r := sb; r.TenantJob = true; return r }(), envPath + "/tenant-job/" + id.String()},
+		{"a project's job", func() store.Sandbox { r := sb; r.ProjectJob = true; return r }(), envPath + "/project-job/" + id.String()},
 		{"a service's instance", func() store.Sandbox {
 			r := sb
 			r.Instance = true
@@ -341,7 +341,7 @@ func TestPodSpecNamesTheIdentity(t *testing.T) {
 			return r
 		}(), envPath + "/service/api"},
 		{"outside an environment", func() store.Sandbox { r := sb; r.EnvironmentID = uuid.Nil; return r }(),
-			"spiffe://run.example/tenant/" + testTenant + "/sandbox/" + id.String()},
+			"spiffe://run.example/project/" + testProject + "/sandbox/" + id.String()},
 	} {
 		spec, err = on.podSpec(bg, c.row)
 		if err != nil || spec.GetIdentity() != c.want {
@@ -353,7 +353,7 @@ func TestPodSpecNamesTheIdentity(t *testing.T) {
 // An image service's instance's pod names model.ServiceStopGrace; a
 // sandbox's, a job's and an addon's name none: the node's 10 s.
 func TestPodSpecNamesTheStopGrace(t *testing.T) {
-	sb := store.Sandbox{ID: podid.Mint(), Incarnation: uuid.New(), Owner: testTenant, ImageRef: testImage, VCPUs: 1,
+	sb := store.Sandbox{ID: podid.Mint(), Incarnation: uuid.New(), Owner: testProject, ImageRef: testImage, VCPUs: 1,
 		MemoryMiB: 256, EnvironmentID: uuid.New()}
 	instance := func(kind string) store.Sandbox {
 		r := sb
@@ -371,7 +371,7 @@ func TestPodSpecNamesTheStopGrace(t *testing.T) {
 		{"a job's run", instance("job"), 0},
 		{"an addon", instance("addon"), 0},
 		{"a sandbox", sb, 0},
-		{"a tenant's job", func() store.Sandbox { r := sb; r.TenantJob = true; return r }(), 0},
+		{"a project's job", func() store.Sandbox { r := sb; r.ProjectJob = true; return r }(), 0},
 	} {
 		spec, err := buildPodSpec(bg, c.row, nil, nil)
 		if err != nil || spec.GetStopGraceSeconds() != c.want {
@@ -383,7 +383,7 @@ func TestPodSpecNamesTheStopGrace(t *testing.T) {
 // A row's disk of its own size is its pod's; without one the pod has the
 // guest's (0), as before.
 func TestPodSpecNamesTheDisk(t *testing.T) {
-	sb := store.Sandbox{ID: podid.Mint(), Incarnation: uuid.New(), Owner: testTenant, ImageRef: testImage, VCPUs: 1,
+	sb := store.Sandbox{ID: podid.Mint(), Incarnation: uuid.New(), Owner: testProject, ImageRef: testImage, VCPUs: 1,
 		MemoryMiB: 256, EnvironmentID: uuid.New(), Instance: true, PodTemplate: &model.PodTemplate{}}
 	for _, want := range []int{0, 30} {
 		sb.DiskGiB = want
@@ -401,11 +401,11 @@ func TestRestoreRequest(t *testing.T) {
 	env := uuid.New()
 	id := podid.Mint()
 	row := store.Sandbox{ID: id, CheckpointHead: "snapshots/x/1/head.json",
-		LogLabels: map[string]string{"ferun.tenant": "acme"}, PodTemplate: model.SandboxTemplate(env, id.String(), false, nil)}
+		LogLabels: map[string]string{"ferun.project": "acme"}, PodTemplate: model.SandboxTemplate(env, id.String(), false, nil)}
 	h := &OpHandle{id: row.ID, row: row}
 	req := restoreRequest(h)
 	if req.GetPodId() != row.ID.String() || req.GetHeadKey() != row.CheckpointHead ||
-		req.GetLogLabels()["ferun.tenant"] != "acme" {
+		req.GetLogLabels()["ferun.project"] != "acme" {
 		t.Fatalf("request %v", req)
 	}
 	if !slices.Equal(req.GetSecurityGroups(), row.PodTemplate.SecurityGroups) ||
@@ -427,7 +427,7 @@ func TestRestoreRequest(t *testing.T) {
 func TestPodSpecEgressNames(t *testing.T) {
 	env := uuid.New()
 	id := podid.Mint()
-	sb := store.Sandbox{ID: id, Owner: testTenant, ImageRef: testImage, VCPUs: 1, MemoryMiB: 512, EnvironmentID: env,
+	sb := store.Sandbox{ID: id, Owner: testProject, ImageRef: testImage, VCPUs: 1, MemoryMiB: 512, EnvironmentID: env,
 		PodTemplate: model.SandboxTemplate(env, id.String(), true, []string{"api.stripe.com", "*.example.com"})}
 	spec, err := buildPodSpec(bg, sb, nil, nil)
 	if err != nil {
@@ -475,10 +475,10 @@ func TestRegistryEgress(t *testing.T) {
 }
 
 // A template's TLS bindings reach the pod's spec, each pinned to its
-// addon's ID in the pod's tenant and environment (ADR 0036).
+// addon's ID in the pod's project and environment (ADR 0036).
 func TestPodSpecPinsTLSBindingsToTheirAddons(t *testing.T) {
 	env := uuid.MustParse("3f2c0000-0000-4000-8000-000000000001")
-	sb := store.Sandbox{ID: podid.Mint(), Incarnation: uuid.New(), Owner: testTenant, ImageRef: testImage, VCPUs: 1,
+	sb := store.Sandbox{ID: podid.Mint(), Incarnation: uuid.New(), Owner: testProject, ImageRef: testImage, VCPUs: 1,
 		MemoryMiB: 256, EnvironmentID: env, Instance: true,
 		LogLabels: map[string]string{model.LogKind: "service", model.LogObject: "api"},
 		PodTemplate: &model.PodTemplate{TLSBindings: []model.TemplateTLSBinding{
@@ -491,13 +491,13 @@ func TestPodSpecPinsTLSBindingsToTheirAddons(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := spec.GetTlsBindings()
-	want := "spiffe://run.example/tenant/" + testTenant + "/env/" + env.String() + "/addon/db"
+	want := "spiffe://run.example/project/" + testProject + "/env/" + env.String() + "/addon/db"
 	if len(b) != 2 || b[0].GetListen() != "127.88.1.2:5432" || b[0].GetHost() != "db" || b[0].GetPort() != 5432 ||
 		b[0].GetAlpn() != "postgresql" || b[0].GetServerId() != want {
 		t.Fatalf("TLS bindings %v, want one to %s", b, want)
 	}
 	if b[1].GetListen() != "127.88.1.3:6379" || b[1].GetHost() != "cache" || b[1].GetPort() != 6379 || b[1].GetAlpn() != "" ||
-		b[1].GetServerId() != "spiffe://run.example/tenant/"+testTenant+"/env/"+env.String()+"/addon/cache" {
+		b[1].GetServerId() != "spiffe://run.example/project/"+testProject+"/env/"+env.String()+"/addon/cache" {
 		t.Fatalf("valkey's binding %v", b[1])
 	}
 	off := &Engine{cfg: Config{}}

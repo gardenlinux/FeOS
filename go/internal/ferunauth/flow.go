@@ -26,11 +26,11 @@ import (
 // takes the issuer's answer and answers the challenge at ferund.
 //
 // Every provider has a redirect URI of its own: <public-url>/callback/ferun
-// for kind ferun, <public-url>/callback/<tenant>/<provider> for kind oidc.
+// for kind ferun, <public-url>/callback/<project>/<provider> for kind oidc.
 // The flow is bound to it and to the issuer and client it began with, so
 // that a code one issuer gave cannot be finished as another provider's
-// flow: with one URI for all, a tenant's issuer could send the browser on
-// to another issuer, have its code come back under the tenant's own state,
+// flow: with one URI for all, a project's issuer could send the browser on
+// to another issuer, have its code come back under the project's own state,
 // and read it at its token endpoint (the OAuth mix-up attack).
 
 // The provider kinds ferun-auth serves (ferund's model.ProviderKind…).
@@ -77,14 +77,14 @@ type flow struct {
 const callbackPrefix = "/callback/"
 
 // callbackOf is the path after callbackPrefix of a challenge's provider:
-// "ferun" for kind ferun, "<tenant>/<provider>" for kind oidc. ok is false
+// "ferun" for kind ferun, "<project>/<provider>" for kind oidc. ok is false
 // for a name that is no DNS label (ferund makes none).
 func callbackOf(ch challengeView) (string, bool) {
 	switch ch.Provider.Kind {
 	case kindFerun:
 		return kindFerun, true
 	case kindOIDC:
-		t, n := ch.Environment.Tenant, ch.Provider.Name
+		t, n := ch.Environment.Project, ch.Provider.Name
 		return t + "/" + n, nameRE.MatchString(t) && nameRE.MatchString(n)
 	}
 	return "", false
@@ -229,7 +229,7 @@ type relyingParty struct {
 }
 
 // client is the relying party a challenge's provider signs in with: the
-// installation's for kind ferun, the tenant's for kind oidc. ok is false
+// installation's for kind ferun, the project's for kind oidc. ok is false
 // when the browser was answered.
 func (s *Server) client(w http.ResponseWriter, ch challengeView) (relyingParty, bool) {
 	switch ch.Provider.Kind {
@@ -346,7 +346,7 @@ func (s *Server) visit(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, flowCookie(old, "", -1))
 	}
 	http.SetCookie(w, cookie)
-	s.log.Info("ferun-auth: sign-in started", "env", ch.Environment.ID, "tenant", ch.Environment.Tenant,
+	s.log.Info("ferun-auth: sign-in started", "env", ch.Environment.ID, "project", ch.Environment.Project,
 		"provider", ch.Provider.Name, "kind", ch.Provider.Kind)
 	seeOther(w, auth.String())
 }
@@ -486,7 +486,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request, cb string) {
 	if ch.Provider.Kind == kindOIDC && !ch.OIDC.Rule.admits(v) {
 		a, err = s.ferund.reject(ctx, f.Challenge)
 		s.log.Info("ferun-auth: the provider's rule does not admit the visitor", "env", ch.Environment.ID,
-			"tenant", ch.Environment.Tenant, "provider", ch.Provider.Name)
+			"project", ch.Environment.Project, "provider", ch.Provider.Name)
 	} else {
 		a, err = s.ferund.accept(ctx, s.acceptOf(ch, f.Challenge, v))
 	}
@@ -509,7 +509,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request, cb string) {
 		page(w, http.StatusBadGateway, msgUnavailable)
 		return
 	}
-	s.log.Info("ferun-auth: challenge answered", "env", ch.Environment.ID, "tenant", ch.Environment.Tenant,
+	s.log.Info("ferun-auth: challenge answered", "env", ch.Environment.ID, "project", ch.Environment.Project,
 		"provider", ch.Provider.Name, "kind", ch.Provider.Kind, "admitted", a.Admitted)
 	seeOther(w, a.Redirect)
 }

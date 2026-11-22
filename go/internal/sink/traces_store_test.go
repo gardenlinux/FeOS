@@ -43,7 +43,7 @@ func ingestSpans(t *testing.T, tr *Traces, req *otlptracev1.ExportTraceServiceRe
 }
 
 // topicSpans are the spans of the trace topic's records, keyed by trace
-// ID in its partition, by tenant.
+// ID in its partition, by project.
 func topicSpans(t *testing.T, tr *Traces, lg *memLog) map[string]int {
 	t.Helper()
 	id, _ := tr.indexID()
@@ -57,7 +57,7 @@ func topicSpans(t *testing.T, tr *Traces, lg *memLog) map[string]int {
 		if string(r.Key) != d.TraceID || r.Partition != kafka.Partition(d.TraceID, parts) {
 			t.Errorf("span %s: key %q, partition %d", d.SpanID, r.Key, r.Partition)
 		}
-		out[d.Tenant]++
+		out[d.Project]++
 	}
 	return out
 }
@@ -92,18 +92,18 @@ func TestTraceStore(t *testing.T) {
 		t.Fatalf("topic %s: %v", id, topicSpans(t, tr, lg))
 	}
 	var used int64
-	if err := tr.db.Pool.QueryRow(ctx, `SELECT bytes FROM trace_usage WHERE tenant = 'acme'`).Scan(&used); err != nil || used < 300 {
+	if err := tr.db.Pool.QueryRow(ctx, `SELECT bytes FROM trace_usage WHERE project = 'acme'`).Scan(&used); err != nil || used < 300 {
 		t.Errorf("usage %d, %v", used, err)
 	}
 
 	// reads answers the same before and after the index took the spans.
 	reads := func(when string) {
 		t.Helper()
-		spans, err := tr.Trace(ctx, quickwit.SpanQuery{Tenant: "acme", TraceID: traceA})
+		spans, err := tr.Trace(ctx, quickwit.SpanQuery{Project: "acme", TraceID: traceA})
 		if err != nil || spanIDs(spans) != "000a 000b " {
 			t.Errorf("%s: trace A: %s %v", when, spanIDs(spans), err)
 		}
-		if spans, err := tr.Trace(ctx, quickwit.SpanQuery{Tenant: "acme", TraceID: traceA, Environment: "env2"}); err != nil || spans != nil {
+		if spans, err := tr.Trace(ctx, quickwit.SpanQuery{Project: "acme", TraceID: traceA, Environment: "env2"}); err != nil || spans != nil {
 			t.Errorf("%s: trace A of env2: %s %v", when, spanIDs(spans), err)
 		}
 		since := start - int64(time.Hour)
@@ -123,7 +123,7 @@ func TestTraceStore(t *testing.T) {
 			{quickwit.SpanQuery{UntilNs: start + int64(time.Second)}, traceA},
 		} {
 			q := c.q
-			q.Tenant, q.SinceNs = "acme", since
+			q.Project, q.SinceNs = "acme", since
 			if q.UntilNs == 0 {
 				q.UntilNs = time.Now().UnixNano()
 			}
@@ -139,37 +139,37 @@ func TestTraceStore(t *testing.T) {
 				t.Errorf("%s: find %+v: %q %v, want %q", when, c.q, got, err, c.want)
 			}
 		}
-		if found, err := tr.Find(ctx, quickwit.SpanQuery{Tenant: "acme", SinceNs: since, UntilNs: time.Now().UnixNano()}, 1); err != nil ||
+		if found, err := tr.Find(ctx, quickwit.SpanQuery{Project: "acme", SinceNs: since, UntilNs: time.Now().UnixNano()}, 1); err != nil ||
 			len(found) != 1 || found[0][0].TraceID != traceB {
 			t.Errorf("%s: find 1: %v", when, err)
 		}
 		// A trace found by one span answers its spans of the selectors.
-		if found, err := tr.Find(ctx, quickwit.SpanQuery{Tenant: "acme", Operation: "query", SinceNs: since}, 20); err != nil ||
+		if found, err := tr.Find(ctx, quickwit.SpanQuery{Project: "acme", Operation: "query", SinceNs: since}, 20); err != nil ||
 			len(found) != 1 || spanIDs(found[0]) != "000a 000b " {
 			t.Errorf("%s: whole trace: %v", when, err)
 		}
-		svcs, err := tr.Services(ctx, quickwit.SpanQuery{Tenant: "acme"}, since)
+		svcs, err := tr.Services(ctx, quickwit.SpanQuery{Project: "acme"}, since)
 		if err != nil || fmt.Sprint(svcs) != "[api web]" {
 			t.Errorf("%s: services %v %v", when, svcs, err)
 		}
-		ops, err := tr.Operations(ctx, quickwit.SpanQuery{Tenant: "acme", Service: "api"}, since)
+		ops, err := tr.Operations(ctx, quickwit.SpanQuery{Project: "acme", Service: "api"}, since)
 		if err != nil || fmt.Sprint(ops) != "[GET / query]" {
 			t.Errorf("%s: operations %v %v", when, ops, err)
 		}
 	}
 	// Before the index's commit, a trace is read by its ID from the
 	// topic's tail; a search reads the index alone and finds none.
-	if spans, err := tr.Trace(ctx, quickwit.SpanQuery{Tenant: "acme", TraceID: traceA}); err != nil || spanIDs(spans) != "000a 000b " {
+	if spans, err := tr.Trace(ctx, quickwit.SpanQuery{Project: "acme", TraceID: traceA}); err != nil || spanIDs(spans) != "000a 000b " {
 		t.Errorf("tail: trace A: %s %v", spanIDs(spans), err)
 	}
-	if spans, err := tr.Trace(ctx, quickwit.SpanQuery{Tenant: "acme", TraceID: traceA, Environment: "env2"}); err != nil || spans != nil {
+	if spans, err := tr.Trace(ctx, quickwit.SpanQuery{Project: "acme", TraceID: traceA, Environment: "env2"}); err != nil || spans != nil {
 		t.Errorf("tail: trace A of env2: %s %v", spanIDs(spans), err)
 	}
-	if found, err := tr.Find(ctx, quickwit.SpanQuery{Tenant: "acme", SinceNs: start - int64(time.Hour), UntilNs: time.Now().UnixNano()}, 20); err != nil ||
+	if found, err := tr.Find(ctx, quickwit.SpanQuery{Project: "acme", SinceNs: start - int64(time.Hour), UntilNs: time.Now().UnixNano()}, 20); err != nil ||
 		len(found) != 0 {
 		t.Errorf("tail: find %d, %v", len(found), err)
 	}
-	if svcs, err := tr.Services(ctx, quickwit.SpanQuery{Tenant: "acme"}, start-int64(time.Hour)); err != nil || len(svcs) != 0 {
+	if svcs, err := tr.Services(ctx, quickwit.SpanQuery{Project: "acme"}, start-int64(time.Hour)); err != nil || len(svcs) != 0 {
 		t.Errorf("tail: services %v %v", svcs, err)
 	}
 	idx.sync(lg)
@@ -196,7 +196,7 @@ func TestTraceStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	var days int
-	if err := tr.db.Pool.QueryRow(ctx, `SELECT count(*) FROM trace_usage WHERE tenant = 'acme'`).Scan(&days); err != nil || days != 1 {
+	if err := tr.db.Pool.QueryRow(ctx, `SELECT count(*) FROM trace_usage WHERE project = 'acme'`).Scan(&days); err != nil || days != 1 {
 		t.Errorf("usage days %d, %v", days, err)
 	}
 }
@@ -215,7 +215,7 @@ func TestTraceQuota(t *testing.T) {
 		t.Errorf("over the quota: %v", err)
 	}
 	if err := ingestSpans(t, tr, traceRequest(podAttrs("other", "e", "api"), sp("0000000000000003"))); err != nil {
-		t.Errorf("another tenant: %v", err)
+		t.Errorf("another project: %v", err)
 	}
 	if got := fmt.Sprint(topicSpans(t, tr, lg)); got != "map[acme:1 other:1]" {
 		t.Errorf("spans stored %s", got)
@@ -243,7 +243,7 @@ func TestTraceProduceFailure(t *testing.T) {
 	if got := fmt.Sprint(topicSpans(t, tr, lg)); got != "map[acme:1]" {
 		t.Errorf("spans stored %s", got)
 	}
-	if spans, err := tr.Trace(ctx, quickwit.SpanQuery{Tenant: "acme", TraceID: traceA}); err != nil || len(spans) != 1 {
+	if spans, err := tr.Trace(ctx, quickwit.SpanQuery{Project: "acme", TraceID: traceA}); err != nil || len(spans) != 1 {
 		t.Errorf("trace: %d spans, %v", len(spans), err)
 	}
 }

@@ -14,11 +14,11 @@ import (
 	"github.com/gardenlinux/feos/go/internal/domains"
 )
 
-// No domain can be the apps zone, the tenant zone (ADR 0031) or a name
+// No domain can be the apps zone, the project zone (ADR 0031) or a name
 // under either; a name beside them can.
 func TestZonesAreReserved(t *testing.T) {
 	cfg := testConfig(dbtest.NewDatabase(t), testCA(t))
-	cfg.AppsZone, cfg.TenantZone, cfg.EdgeName = "apps.example.com", "apps.run.example.com", "edge.example.com"
+	cfg.AppsZone, cfg.ProjectZone, cfg.EdgeName = "apps.example.com", "apps.run.example.com", "edge.example.com"
 	i, err := New(context.Background(), cfg, dbtest.Logger(t))
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +33,7 @@ func TestZonesAreReserved(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	if _, _, err := i.Store.CreateTenant(ctx, "acme"); err != nil {
+	if _, _, err := i.Store.CreateProject(ctx, "acme"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := i.Domains.CreateDomain(ctx, "acme", domains.CreateRequest{Name: "run.example.com"}); err != nil {

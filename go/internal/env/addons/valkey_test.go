@@ -246,9 +246,9 @@ func TestValkeyOutputs(t *testing.T) {
 func TestValkeyProvision(t *testing.T) {
 	a := addon(t, "cache", `{"type":"valkey","version":"9"}`)
 	const (
-		admin   = "spiffe://run.test/tenant/t/env/01a196e9-4ac8-71a8-94d7-f6aa5688b1fc/addon/cache"
-		catalog = "spiffe://run.test/tenant/t/env/01a196e9-4ac8-71a8-94d7-f6aa5688b1fc/service/catalog"
-		sandbox = "spiffe://run.test/tenant/t/env/01a196e9-4ac8-71a8-94d7-f6aa5688b1fc/sandbox/xmxfgckmkt6"
+		admin   = "spiffe://run.test/project/t/env/01a196e9-4ac8-71a8-94d7-f6aa5688b1fc/addon/cache"
+		catalog = "spiffe://run.test/project/t/env/01a196e9-4ac8-71a8-94d7-f6aa5688b1fc/service/catalog"
+		sandbox = "spiffe://run.test/project/t/env/01a196e9-4ac8-71a8-94d7-f6aa5688b1fc/sandbox/xmxfgckmkt6"
 	)
 	tls := &TLS{CertPEM: "CHAIN", CAPEM: "ROOTS", ID: admin, Grants: []Grant{
 		{Workload: "wl-0123456789abcdef0123456789abcdef", ID: catalog, Role: "data"},

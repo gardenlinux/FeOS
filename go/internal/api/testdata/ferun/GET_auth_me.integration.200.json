@@ -1,0 +1,54 @@
+{
+  "method": "GET",
+  "path": "/auth/me",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "response": {
+    "kind": "integration",
+    "integration": {
+      "name": "fecode",
+      "title": "Integration fecode",
+      "url": "https://fecode.example.test",
+      "disabled": false
+    },
+    "projects": [
+      {
+        "project": "acme",
+        "createdAt": "2026-11-21T10:00:00Z",
+        "role": "write",
+        "integrationRole": "write",
+        "environments": [
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000001",
+            "name": "box",
+            "role": "write",
+            "integrationRole": "write",
+            "protected": false,
+            "plan": true,
+            "delete": true
+          },
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000002",
+            "name": "prod",
+            "role": "read",
+            "integrationRole": "admin",
+            "protected": true,
+            "plan": true,
+            "delete": false
+          },
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000003",
+            "name": "stage",
+            "role": "write",
+            "integrationRole": "write",
+            "protected": false,
+            "plan": true,
+            "delete": true
+          }
+        ]
+      }
+    ],
+    "accounts": []
+  }
+}

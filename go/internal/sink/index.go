@@ -74,28 +74,28 @@ func (s *Store) ensure(ctx context.Context, id string, days int) (int32, error) 
 	})
 }
 
-// streamKey is a stream's key in the topics: its tenant, environment
+// streamKey is a stream's key in the topics: its project, environment
 // and object (an environment's service, addon or job, or a sandbox, by
-// kind and name), or, for a stream of no object (a tenant's job, which
+// kind and name), or, for a stream of no object (a project's job, which
 // names its environment since ADR 0035, or none when shipped before),
-// its tenant and job. A read selects by these labels: an object's
+// its project and job. A read selects by these labels: an object's
 // streams, its replicas' and its ingress's, lie in one partition, an
 // environment's in those of its objects.
-func streamKey(tenant, environment, kind, object, job string) string {
+func streamKey(project, environment, kind, object, job string) string {
 	if environment != "" && kind != "" {
-		return tenant + "/" + environment + "/" + kind + "/" + object
+		return project + "/" + environment + "/" + kind + "/" + object
 	}
-	return tenant + "//" + job
+	return project + "//" + job
 }
 
 // keyOf is a stream's key.
 func keyOf(st *streamRow) string {
-	return streamKey(st.Tenant, st.Environment, st.Kind, st.Object, st.Job)
+	return streamKey(st.Project, st.Environment, st.Kind, st.Object, st.Job)
 }
 
 // docOf is a line as its stream's index holds it.
 func docOf(l Line, st *streamRow) quickwit.Doc {
-	return quickwit.Doc{TS: l.TS, Tenant: st.Tenant, Stream: st.SID, Environment: st.Environment, Kind: st.Kind,
+	return quickwit.Doc{TS: l.TS, Project: st.Project, Stream: st.SID, Environment: st.Environment, Kind: st.Kind,
 		Object: st.Object, Replica: st.Replica, Deployment: st.Deployment, Instance: st.Instance, Container: st.Container,
 		Job: st.Job, Attempt: st.Attempt, Source: st.Source, IOStream: l.Source, Level: l.Level, TraceID: l.Trace,
 		Off: l.Off, Partial: l.Partial, Cont: l.Cont, Text: l.Text}

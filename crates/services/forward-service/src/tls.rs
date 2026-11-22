@@ -664,8 +664,8 @@ mod tests {
     use rcgen::SigningKey;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    const POD: &str = "spiffe://run.example/tenant/acme/env/e1/service/api";
-    const ADDON: &str = "spiffe://run.example/tenant/acme/env/e1/addon/db";
+    const POD: &str = "spiffe://run.example/project/acme/env/e1/service/api";
+    const ADDON: &str = "spiffe://run.example/project/acme/env/e1/addon/db";
 
     fn binding(listen: &str) -> Binding {
         Binding {
@@ -994,7 +994,7 @@ mod tests {
         let ca = Ca::new();
         let socket = signer(dir.path(), &ca);
         let good = upstream(&ca, ADDON).await;
-        let other = upstream(&ca, "spiffe://run.example/tenant/evil/env/e9/addon/db").await;
+        let other = upstream(&ca, "spiffe://run.example/project/evil/env/e9/addon/db").await;
         let ok = Binding {
             host: "::1".into(),
             port: good.port(),

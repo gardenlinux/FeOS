@@ -3,7 +3,7 @@
 **Status:** Merged into [ADR 0014](0014-identity-and-credentials.md) · **Date:** 2026-11-07
 
 It decided the layout of the SPIFFE IDs (one per service, job and
-addon, shared by their replicas and rolls; a sandbox and a tenant's job
+addon, shared by their replicas and rolls; a sandbox and a project's job
 by their IDs; the environment by its ID), the subject that names the pod
 in its CN and the workload's set in an `OU`, that a certificate says who
 and never what, that within a cluster the address is the workload and no

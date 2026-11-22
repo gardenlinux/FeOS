@@ -22,16 +22,16 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// instanceRow inserts an environment of the env's tenant and an instance
+// instanceRow inserts an environment of the env's project and an instance
 // row of it, with a sandbox token in the table as if one had been minted.
 func (e *env) instanceRow() (store.Sandbox, string) {
 	e.t.Helper()
 	ctx := context.Background()
-	envRow, err := e.st.InsertEnvironment(ctx, store.NewEnvironment{ID: uuid.New(), Owner: testTenant, Name: "stage"})
+	envRow, err := e.st.InsertEnvironment(ctx, store.NewEnvironment{ID: uuid.New(), Owner: testProject, Name: "stage"})
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	sb, created, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testTenant, Image: "img",
+	sb, created, err := e.st.CreateSandbox(ctx, store.NewSandbox{ID: podid.Mint(), Owner: testProject, Image: "img",
 		VCPUs: 1, MemoryMiB: 512, EnvironmentID: envRow.ID, Instance: true,
 		PodTemplate: &model.PodTemplate{SecurityGroups: []string{model.EnvGroupID(envRow.ID)}}})
 	if err != nil || !created {
@@ -48,7 +48,7 @@ func (e *env) instanceRow() (store.Sandbox, string) {
 }
 
 // An environment's instance row is no sandbox to the sandbox routes: the
-// tenant's routes answer as for an absent sandbox, its ID is taken for a
+// project's routes answer as for an absent sandbox, its ID is taken for a
 // create, the listing leaves it out, and a token of it opens no sandbox
 // door.
 func TestInstanceRowsAreNoSandboxes(t *testing.T) {
@@ -67,7 +67,7 @@ func TestInstanceRowsAreNoSandboxes(t *testing.T) {
 		{"DELETE", "/api/v1/sandboxes/" + id + "/tokens/abc"},
 		{"GET", "/api/v1/sandboxes/" + id + "/access"},
 	} {
-		w := e.do(c.method, c.path, bearerOf(e.tenantToken), nil)
+		w := e.do(c.method, c.path, bearerOf(e.projectToken), nil)
 		expect(t, w, http.StatusNotFound, errBody("unknown sandbox "+id))
 	}
 	if _, err := e.st.GetSandbox(context.Background(), inst.ID); err != nil {
@@ -81,8 +81,8 @@ func TestInstanceRowsAreNoSandboxes(t *testing.T) {
 		t.Fatalf("a token was minted: %v %v", toks, err)
 	}
 
-	// The listing has the tenant's own sandbox only.
-	w := e.do("GET", "/api/v1/sandboxes", bearerOf(e.tenantToken), nil)
+	// The listing has the project's own sandbox only.
+	w := e.do("GET", "/api/v1/sandboxes", bearerOf(e.projectToken), nil)
 	list := decode[struct {
 		Sandboxes []map[string]any `json:"sandboxes"`
 	}](t, w)
@@ -141,7 +141,7 @@ func (e *env) deploySpec(id uuid.UUID, raw []byte) {
 func TestSandboxEnvironment(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
-	tok := bearerOf(e.tenantToken)
+	tok := bearerOf(e.projectToken)
 	create := func(body map[string]any) *httptest.ResponseRecorder {
 		t.Helper()
 		return e.do("POST", "/api/v1/sandboxes", tok, body)
@@ -189,7 +189,7 @@ func TestSandboxEnvironment(t *testing.T) {
 
 	// Another environment, by its ID, reaching what its deployed
 	// deployment has, with an egress of its own.
-	dev := e.mkEnv(testTenant, "dev")
+	dev := e.mkEnv(testProject, "dev")
 	e.deploySpec(dev, []byte(devSpec))
 	w = create(map[string]any{"environment": dev.String(),
 		"reaches": []any{map[string]any{"service": "web", "port": "http"}, map[string]any{"addon": "db"}},
@@ -260,7 +260,7 @@ func mustSpec(t *testing.T, raw string) *spec.Spec {
 func TestSandboxReaches(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
-	tok := bearerOf(e.tenantToken)
+	tok := bearerOf(e.projectToken)
 	e.deploySpec(e.box, []byte(devSpec))
 	id, _ := e.createSandbox()
 	path := "/api/v1/sandboxes/" + id + "/reaches"

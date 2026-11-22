@@ -67,7 +67,7 @@ func newUUID() string {
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// bearerRT sets the Authorization header (tenant token or sandbox
+// bearerRT sets the Authorization header (project token or sandbox
 // token). Deliberately without keep-alives: chat and sandbox traffic are
 // often minutes apart, and a half-open connection that k3s conntrack
 // dropped silently then eats the full client timeout (Go does not retry
@@ -82,7 +82,7 @@ func (rt bearerRT) RoundTrip(req *http.Request) (*http.Response, error) {
 	return bearerTransport.RoundTrip(r)
 }
 
-// sandboxClient is the provisioning client (tenant bearer) plus the
+// sandboxClient is the provisioning client (project bearer) plus the
 // cache of MCP sessions per conversation.
 type sandboxClient struct {
 	base      string // e.g. http://ferund.ferun.svc.cluster.local:8100
@@ -182,7 +182,7 @@ func isNoSuchSandbox(err error) bool {
 	return errors.As(err, &ae) && (ae.status == http.StatusNotFound || ae.status == http.StatusBadRequest)
 }
 
-// provisioningAPI calls one route of ferund's tenant-scoped REST API.
+// provisioningAPI calls one route of ferund's project-scoped REST API.
 // body may be empty for a GET.
 func (s *sandboxClient) provisioningAPI(ctx context.Context, method, path, body string, out any) error {
 	var rdr io.Reader
@@ -320,7 +320,7 @@ func (s *sandboxClient) create(ctx context.Context, image string) (id, token str
 	return id, token, nil
 }
 
-// mintToken gets a new token for a sandbox of the tenant.
+// mintToken gets a new token for a sandbox of the project.
 func (s *sandboxClient) mintToken(ctx context.Context, id string) (string, error) {
 	var minted struct {
 		Token string `json:"token"`
@@ -443,7 +443,7 @@ func (s *sandboxClient) loadedTools(ctx context.Context) (*toolset, error) {
 
 // sandboxTools fetches the tool schemas from GET /api/v1/tools and
 // builds the OpenAI tool definitions from them, the one source. The
-// schemas are not per sandbox, which is why they come from the tenant's
+// schemas are not per sandbox, which is why they come from the project's
 // REST API and not from an MCP session (no sandbox token needed). The
 // same answer carries ferund's preparation wait, which sizes every tool
 // call's timeout (callTimeout); a ferund that does not announce it is

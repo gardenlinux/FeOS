@@ -17,18 +17,18 @@ import (
 
 // A default host is a label in a zone (ADR 0021, ADR 0031): host_labels
 // registers each label per zone (host_labels.zone: "" for the apps zone,
-// else the zone's name, as tenants.zone holds it), and an environment's
-// label lives in its tenant's zone.
+// else the zone's name, as projects.zone holds it), and an environment's
+// label lives in its project's zone.
 
 // ClaimHostLabel claims the default host label of the environment e in
-// its tenant's zone and returns it (D12 of the ingress's design): the
-// natural label "<name>-<tenant>" when model.HostLabels finds it usable,
-// that is unambiguous and a DNS label, else, or when another tenant owns
+// its project's zone and returns it (D12 of the ingress's design): the
+// natural label "<name>-<project>" when model.HostLabels finds it usable,
+// that is unambiguous and a DNS label, else, or when another project owns
 // it or another environment holds it in that zone, the fallback with the
-// hash of e's ID. Since no other pair of name and tenant has the same
+// hash of e's ID. Since no other pair of name and project has the same
 // usable natural label and no fallback has its form, the owner check
-// below is a second guard. A label belongs to the tenant that first
-// claimed it in its zone, forever, and is free again for that tenant
+// below is a second guard. A label belongs to the project that first
+// claimed it in its zone, forever, and is free again for that project
 // alone once its environment is gone (host_labels.env_id ON DELETE SET
 // NULL). A label e holds already is returned as it is. It runs in the
 // caller's transaction, with e's row locked; the caller writes the label
@@ -42,7 +42,7 @@ func (s *Store) ClaimHostLabel(ctx context.Context, e Environment) (string, erro
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return "", fmt.Errorf("claim a host label for environment %s: %w", e.ID, err)
 	}
-	zone, err := s.tenantZone(ctx, e.Owner)
+	zone, err := s.projectZone(ctx, e.Owner)
 	if err != nil {
 		return "", err
 	}
@@ -66,13 +66,13 @@ func (s *Store) claimDefaultLabel(ctx context.Context, e Environment, zone strin
 			return label, nil
 		}
 	}
-	// Only a SHA-256 collision gives the fallback to another tenant's
+	// Only a SHA-256 collision gives the fallback to another project's
 	// environment, or to a live one.
 	return "", fmt.Errorf("claim a host label for environment %s: %s taken", e.ID, strings.Join(candidates, " and "))
 }
 
-// takeHostLabel registers label in zone to e: free, or e's tenant's with
-// no environment holding it; false when another tenant owns it or another
+// takeHostLabel registers label in zone to e: free, or e's project's with
+// no environment holding it; false when another project owns it or another
 // environment holds it. e holds no label at the time.
 func (s *Store) takeHostLabel(ctx context.Context, zone, label string, e Environment) (bool, error) {
 	var got string
@@ -89,17 +89,17 @@ func (s *Store) takeHostLabel(ctx context.Context, zone, label string, e Environ
 	return true, nil
 }
 
-// tenantZone is tenants.zone of the tenant ("": the apps zone).
-func (s *Store) tenantZone(ctx context.Context, tenant string) (string, error) {
+// projectZone is projects.zone of the project ("": the apps zone).
+func (s *Store) projectZone(ctx context.Context, project string) (string, error) {
 	var zone string
-	err := s.q.QueryRow(ctx, "SELECT coalesce(zone, '') FROM tenants WHERE id = $1", tenant).Scan(&zone)
+	err := s.q.QueryRow(ctx, "SELECT coalesce(zone, '') FROM projects WHERE id = $1", project).Scan(&zone)
 	if err != nil {
-		return "", fmt.Errorf("the zone of tenant %s: %w", tenant, noRow(err, ErrNoRow))
+		return "", fmt.Errorf("the zone of project %s: %w", project, noRow(err, ErrNoRow))
 	}
 	return zone, nil
 }
 
-// HostLabelOwner returns the tenant host_labels registers label to in
+// HostLabelOwner returns the project host_labels registers label to in
 // zone ("": the apps zone), the one that first claimed it there; ErrNoRow
 // when none did.
 func (s *Store) HostLabelOwner(ctx context.Context, zone, label string) (string, error) {
@@ -111,25 +111,25 @@ func (s *Store) HostLabelOwner(ctx context.Context, zone, label string) (string,
 	return owner, err
 }
 
-// ErrHostLabelTaken: the label a tenant chose is another tenant's, or
+// ErrHostLabelTaken: the label a project chose is another project's, or
 // another environment holds it.
 var ErrHostLabelTaken = errors.New("host label taken")
 
 // SetEnvironmentHostLabel gives the environment e the default host label
-// its tenant chose (model.ChosenHostLabel or, for a tenant that owns the
+// its project chose (model.ChosenHostLabel or, for a project that owns the
 // apps zone and has its hosts there, model.PlainHostLabel, which the
-// caller checks) in its tenant's zone and returns its row. It runs in the
-// caller's transaction, with e's row and its tenant's locked. The label e
-// held is released first, and stays its tenant's like one of a deleted
+// caller checks) in its project's zone and returns its row. It runs in the
+// caller's transaction, with e's row and its project's locked. The label e
+// held is released first, and stays its project's like one of a deleted
 // environment; the chosen one is claimed as ClaimHostLabel claims: free,
-// or its tenant's with no environment holding it, else ErrHostLabelTaken.
+// or its project's with no environment holding it, else ErrHostLabelTaken.
 // A label e holds already changes nothing. A write sends ferun_ingress
 // "env:<id>", so the instances serve the new host and drop the old one.
 func (s *Store) SetEnvironmentHostLabel(ctx context.Context, e Environment, label string) (Environment, error) {
 	if e.HostLabel == label {
 		return e, nil
 	}
-	zone, err := s.tenantZone(ctx, e.Owner)
+	zone, err := s.projectZone(ctx, e.Owner)
 	if err != nil {
 		return Environment{}, err
 	}
@@ -156,7 +156,7 @@ func (s *Store) writeHostLabel(ctx context.Context, id uuid.UUID, label string) 
 	return out, s.notifyIngressEnvs(ctx, []uuid.UUID{id})
 }
 
-// ZoneMove is what moving a tenant to another zone did to one of its
+// ZoneMove is what moving a project to another zone did to one of its
 // environments' labels: From is the label it held in the zone before, To
 // the one it holds in the new zone.
 type ZoneMove struct {
@@ -165,41 +165,41 @@ type ZoneMove struct {
 	From, To string
 }
 
-// SetTenantZone moves the tenant to zone (tenants.zone; "": the apps
+// SetProjectZone moves the project to zone (projects.zone; "": the apps
 // zone) and its environments' default hosts with it (ADR 0031): each
 // environment that holds a label keeps it in the new zone where it may,
 // else gets its natural label or its fallback there, as at a first
-// publish. A label may move when it is free in zone or the tenant's
-// there, and is not a plain label unless plainOK (the tenant owns the new
+// publish. A label may move when it is free in zone or the project's
+// there, and is not a plain label unless plainOK (the project owns the new
 // zone's plain names, model.Zones.PlainLabels); its natural label and its
 // fallback, also of a name it had before a rename, are never plain ones. The labels in the old zone stay the
-// tenant's, free for it alone, as a changed label's do. It locks the
-// tenant FOR UPDATE, runs in a transaction (the caller's, when in one),
+// project's, free for it alone, as a changed label's do. It locks the
+// project FOR UPDATE, runs in a transaction (the caller's, when in one),
 // sends ferun_ingress for every environment it moved and returns the
-// moves, by name; ErrNoRow for an unknown tenant. A move to the zone the
-// tenant has changes nothing.
-func (s *Store) SetTenantZone(ctx context.Context, tenant, zone string, plainOK bool) ([]ZoneMove, error) {
+// moves, by name; ErrNoRow for an unknown project. A move to the zone the
+// project has changes nothing.
+func (s *Store) SetProjectZone(ctx context.Context, project, zone string, plainOK bool) ([]ZoneMove, error) {
 	var moves []ZoneMove
 	err := s.InTx(ctx, func(tx *Store) error {
 		moves = nil
-		t, err := tx.LockTenant(ctx, tenant, ForUpdate)
+		t, err := tx.LockProject(ctx, project, ForUpdate)
 		if err != nil {
 			return err
 		}
 		if t.Zone == zone {
 			return nil
 		}
-		if _, err := tx.q.Exec(ctx, "UPDATE tenants SET zone = $2 WHERE id = $1", tenant, nullString(zone)); err != nil {
-			return fmt.Errorf("set the zone of tenant %s: %w", tenant, err)
+		if _, err := tx.q.Exec(ctx, "UPDATE projects SET zone = $2 WHERE id = $1", project, nullString(zone)); err != nil {
+			return fmt.Errorf("set the zone of project %s: %w", project, err)
 		}
 		rows, err := tx.q.Query(ctx, "SELECT "+environmentCols+` FROM environments
-			WHERE owner = $1 AND host_label IS NOT NULL ORDER BY name FOR UPDATE`, tenant)
+			WHERE owner = $1 AND host_label IS NOT NULL ORDER BY name FOR UPDATE`, project)
 		if err != nil {
 			return err
 		}
 		envs, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (Environment, error) { return scanEnvironment(r) })
 		if err != nil {
-			return fmt.Errorf("the environments of tenant %s: %w", tenant, err)
+			return fmt.Errorf("the environments of project %s: %w", project, err)
 		}
 		ids := make([]uuid.UUID, 0, len(envs))
 		for _, e := range envs {
@@ -233,7 +233,7 @@ func (s *Store) SetTenantZone(ctx context.Context, tenant, zone string, plainOK 
 		return tx.notifyIngressEnvs(ctx, ids)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("move tenant %s to zone %q: %w", tenant, zone, err)
+		return nil, fmt.Errorf("move project %s to zone %q: %w", project, zone, err)
 	}
 	return moves, nil
 }

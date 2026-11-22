@@ -20,7 +20,7 @@ import (
 // short IDs through every query of its life.
 func TestLegacySandboxBesideShortIDs(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	legacy := mkSandboxID(t, s, "acme", "0190a7c4-1e2f-7a3b-9c4d-5e6f708192a3")
 	short := mkSandbox(t, s, "acme")
@@ -91,7 +91,7 @@ func TestLegacySandboxBesideShortIDs(t *testing.T) {
 
 func TestCreateMintedSandbox(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	seen := map[podid.ID]bool{}
 	env := boxEnv(t, s, "acme")
 	for range 20 {
@@ -125,7 +125,7 @@ func TestCreateMintedSandbox(t *testing.T) {
 // The schema keeps every sandbox ID in its canonical form.
 func TestSandboxIDCheck(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	env := boxEnv(t, s, "acme")
 	for _, id := range []string{"NOT-AN-ID", "0190A7C4-1E2F-7A3B-9C4D-5E6F708192A3", "Abcdefghjkm", "0bcdefghjkm",
 		"abcdefghjkl", "abcdefghjk", ""} {
@@ -151,7 +151,7 @@ func TestSandboxIDCheck(t *testing.T) {
 // mixed.
 func TestSteadyPodsByteOrder(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	ids := []string{"abcdef12xyz", "abcdef12-0000-4000-8000-000000000001", "0190a7c4-1e2f-7a3b-9c4d-5e6f708192a3",
 		"z0000000000", "a0000000000", "ffffffff-0000-4000-8000-000000000001", "b1234567890"}
@@ -175,7 +175,7 @@ func TestSteadyPodsByteOrder(t *testing.T) {
 // Placement's snapshot names a TAP conflict only between UUIDs.
 func TestPlacementSnapshotTAP(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	running := mkSandboxID(t, s, "acme", "abcdef12-0000-4000-8000-000000000001")
 	place(t, s, running.ID, "n1", model.StateRunning)

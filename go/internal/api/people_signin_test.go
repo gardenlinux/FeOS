@@ -15,15 +15,17 @@ import (
 
 	"github.com/google/uuid"
 
+	fapi "github.com/gardenlinux/feos/go/ferun/api"
+
 	"github.com/gardenlinux/feos/go/internal/oidc"
 	"github.com/gardenlinux/feos/go/internal/oidc/oidctest"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// mkEnvRow makes an environment row of tenant and returns its ID.
-func mkEnvRow(t *testing.T, e *env, tenant, name string) uuid.UUID {
+// mkEnvRow makes an environment row of project and returns its ID.
+func mkEnvRow(t *testing.T, e *env, project, name string) uuid.UUID {
 	t.Helper()
-	row, err := e.st.InsertEnvironment(context.Background(), store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: name})
+	row, err := e.st.InsertEnvironment(context.Background(), store.NewEnvironment{ID: uuid.New(), Owner: project, Name: name})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +49,7 @@ func sessionOf(t *testing.T, e *env, c *http.Cookie) store.UISession {
 }
 
 // Everyone the provider lets in gets a session: a person who is no
-// operator is recorded, sees their tenants with their roles at /auth/me
+// operator is recorded, sees their projects with their roles at /auth/me
 // and is refused the operators' routes; a disabled person loses their
 // sessions and gets none.
 func TestSignInPerson(t *testing.T) {
@@ -69,10 +71,10 @@ func TestSignInPerson(t *testing.T) {
 		expect(t, w, http.StatusOK, "")
 		return decode[me](t, w)
 	}
-	if m := getMe(); m.Admin || m.Person != person.ID.String() || len(m.Tenants) != 0 || m.Tenants == nil {
+	if m := getMe(); m.Admin || m.Person != person.ID.String() || len(m.Projects) != 0 || m.Projects == nil {
 		t.Fatalf("me %+v", m)
 	}
-	expect(t, a.serve(withCookie(request{method: "GET", path: "/api/v1/admin/tenants"}, sc)), http.StatusForbidden,
+	expect(t, a.serve(withCookie(request{method: "GET", path: "/api/v1/admin/projects"}, sc)), http.StatusForbidden,
 		errBody("operators only"))
 
 	// A second sign-in is the same person.
@@ -81,19 +83,19 @@ func TestSignInPerson(t *testing.T) {
 		t.Fatalf("second session %+v", s2)
 	}
 
-	stage := mkEnvRow(t, a, testTenant, "stage")
-	mustTenant(t, a, "other")
-	for _, g := range []store.Grant{{TenantID: testTenant, PersonID: person.ID, EnvironmentID: stage, Role: "write"},
-		{TenantID: "other", PersonID: person.ID, Role: "read"}} {
+	stage := mkEnvRow(t, a, testProject, "stage")
+	mustProject(t, a, "other")
+	for _, g := range []store.Grant{{ProjectID: testProject, PersonID: person.ID, EnvironmentID: stage, Role: "write"},
+		{ProjectID: "other", PersonID: person.ID, Role: "read"}} {
 		if _, err := a.st.PutGrant(context.Background(), g); err != nil {
 			t.Fatal(err)
 		}
 	}
 	m := getMe()
-	if len(m.Tenants) != 2 || m.Tenants[0].Tenant != testTenant || m.Tenants[0].Role != "" ||
-		len(m.Tenants[0].Environments) != 1 || m.Tenants[0].Environments[0] != (meEnvironment{ID: stage.String(),
-		Name: "stage", Role: "write"}) || m.Tenants[1].Tenant != "other" || m.Tenants[1].Role != "read" ||
-		len(m.Tenants[1].Environments) != 0 {
+	if len(m.Projects) != 2 || m.Projects[0].Project != testProject || m.Projects[0].Role != "" ||
+		len(m.Projects[0].Environments) != 1 || m.Projects[0].Environments[0] != (fapi.MeEnvironment{ID: stage.String(),
+		Name: "stage", Role: "write", Plan: true}) || m.Projects[1].Project != "other" || m.Projects[1].Role != "read" ||
+		len(m.Projects[1].Environments) != 0 {
 		t.Fatalf("me %+v", m)
 	}
 
@@ -117,7 +119,7 @@ func TestSignInPerson(t *testing.T) {
 		t.Fatal(err)
 	}
 	sc = signIn(t, a, b, p, oidctest.UserClaims())
-	if m := getMe(); len(m.Tenants) != 2 {
+	if m := getMe(); len(m.Projects) != 2 {
 		t.Fatalf("me after enabling %+v", m)
 	}
 }

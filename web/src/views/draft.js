@@ -322,12 +322,12 @@ function short(v) {
 
 // ------------------------------------------------------------- storage --
 
-// DRAFT_PREFIX keys the drafts in local storage, one per tenant and
-// environment and one slot per tenant for a new environment.
+// DRAFT_PREFIX keys the drafts in local storage, one per project and
+// environment and one slot per project for a new environment.
 export const DRAFT_PREFIX = 'ferun-draft:';
 
-export function draftKey(tenant, env) {
-  return `${DRAFT_PREFIX}${tenant}/${env || ''}`;
+export function draftKey(project, env) {
+  return `${DRAFT_PREFIX}${project}/${env || ''}`;
 }
 
 // encodeDraft is what storage keeps: the spec, the base, where the draft
@@ -382,11 +382,19 @@ export function draftWords({ isNew = false, readOnly = false, base = 0, latest =
   return { title: `Draft of deployment ${latest + 1}`, from, behind: latest > base ? latest : 0, count, next: latest + 1 };
 }
 
+// PROTECTED_DEPLOY says why a plan-only builder deploys nothing (ADR
+// 0060): the deploy's blocker and the builder's notice alike.
+export const PROTECTED_DEPLOY = 'protected: deploying here needs a grant on this environment, or admin on the project';
+
 // deployBlock is why a draft cannot be deployed yet, '' when it can:
-// in the order a person fixes them.
+// in the order a person fixes them; planOnly, a protected environment's
+// for one ferund lets plan but not deploy, before everything.
 export function deployBlock({ isNew = false, name = '', planning = false, answer = null, diff = [], unresolved = [],
-  heavy = 0, ack = false, conflicts = 0, busy = false }) {
+  heavy = 0, ack = false, conflicts = 0, busy = false, planOnly = false }) {
   if (busy) return 'deploying…';
+  // A protected environment's plan-only builder (ADR 0060) plans, and
+  // deploys nothing.
+  if (planOnly) return PROTECTED_DEPLOY;
   if (isNew && !isDnsLabel(name)) return 'name the environment first';
   if (conflicts > 0) return 'decide the conflicts first';
   if (planning || !answer) return 'planning…';

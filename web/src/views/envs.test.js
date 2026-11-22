@@ -410,9 +410,9 @@ describe('domains and access', () => {
     expect(UNGUARDED).toBe('this ferund does not guard environments yet: open to anyone');
   });
 
-  it('point an unknown provider to the tenant\'s providers, and keep ferund\'s sentence of a missing key', () => {
-    const e = new ApiError('no provider sso in this tenant', 422, { code: 'unknown_provider' });
-    expect(actionProblem(e)).toBe('no provider sso in this tenant — make it on the tenant\'s Access providers first.');
+  it('point an unknown provider to the project\'s providers, and keep ferund\'s sentence of a missing key', () => {
+    const e = new ApiError('no provider sso in this project', 422, { code: 'unknown_provider' });
+    expect(actionProblem(e)).toBe('no provider sso in this project — make it on the project\'s Access providers first.');
     const k = new ApiError('this installation guards no environments: ferund runs without --secret-key-file', 409,
       { code: 'visits_need_secret_key' });
     expect(actionProblem(k)).toBe('this installation guards no environments: ferund runs without --secret-key-file');

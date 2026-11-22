@@ -5,15 +5,23 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+
+	fapi "github.com/gardenlinux/feos/go/ferun/api"
+
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/auth"
 	envs "github.com/gardenlinux/feos/go/internal/env"
+	"github.com/gardenlinux/feos/go/internal/env/spec"
+	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// The environments' routes (ADR 0018, the contract's §5): tenant class,
+// The environments' routes (ADR 0018, the contract's §5): project class,
 // each a thin adapter of a request to one method of Deps.Environments and
 // of its answer (or error, envs.WriteError: 422 with findings, 409 with
 // the current deployment) back. The route door, a class of its own, is the
@@ -24,24 +32,27 @@ import (
 //
 // Each states its role and scope (ADR 0031): what reaches beyond one
 // environment (the list, a create, a clone, a spec without an
-// environment) the tenant's grant, the rest the environment's, where the
-// higher of the tenant's and the environment's grant counts. A rename and
-// a deletion are the environment's admin's or the tenant's writer's.
-func (s *server) envRoutes(tenant func(n need, pattern string, h apiHandler),
+// environment) the project's grant, the rest the environment's, where the
+// higher of the project's and the environment's grant counts, the
+// project's on a protected environment admin as admin and below as read
+// (ADR 0060). A rename and a deletion are the environment's admin's, or
+// the project's writer's unless it is protected; a plan is not held back
+// by protection. Route tokens are write's (ADR 0056).
+func (s *server) envRoutes(project func(n need, pattern string, h apiHandler),
 	add func(c class, pattern string, h http.Handler)) {
 	e := s.deps.Environments
 	if e == nil {
 		return
 	}
-	env := func(n need, pattern string, h apiHandler) { tenant(n, pattern, s.envHandler(h)) }
-	env(onTenant(write), "POST /api/v1/environments", s.createEnv)
+	env := func(n need, pattern string, h apiHandler) { project(n, pattern, s.envHandler(h)) }
+	env(onProject(write), "POST /api/v1/environments", s.createEnv)
 	env(member, "GET /api/v1/environments", s.listEnvs)
-	env(onTenant(read), "POST /api/v1/environments/plan", s.planSpec)
+	env(onProject(read), "POST /api/v1/environments/plan", s.planSpec)
 	env(member, "GET /api/v1/addons", s.addonCatalog)
 	env(onEnv(read), "GET /api/v1/environments/{env}", s.getEnv)
-	env(need{role: admin, scope: scopeEnv, orTenant: write}, "PATCH /api/v1/environments/{env}", s.renameEnv)
-	env(need{role: admin, scope: scopeEnv, orTenant: write}, "DELETE /api/v1/environments/{env}", s.deleteEnv)
-	env(onEnv(write), "POST /api/v1/environments/{env}/plan", s.planEnv)
+	env(onEnvOrProject(admin, write), "PATCH /api/v1/environments/{env}", s.renameEnv)
+	env(onEnvOrProject(admin, write), "DELETE /api/v1/environments/{env}", s.deleteEnv)
+	env(onEnvPlan(write), "POST /api/v1/environments/{env}/plan", s.planEnv)
 	env(onEnv(write), "POST /api/v1/environments/{env}/deployments", s.applyDeployment)
 	env(onEnv(read), "GET /api/v1/environments/{env}/deployments", s.listDeployments)
 	env(onEnv(read), "GET /api/v1/environments/{env}/deployments/{n}", s.getDeployment)
@@ -53,7 +64,7 @@ func (s *server) envRoutes(tenant func(n need, pattern string, h apiHandler),
 	env(onEnv(read), "GET /api/v1/environments/{env}/tags/{tag}", s.getTag)
 	env(onEnv(write), "PUT /api/v1/environments/{env}/tags/{tag}", s.putTag)
 	env(onEnv(write), "DELETE /api/v1/environments/{env}/tags/{tag}", s.deleteTag)
-	env(onTenant(write), "POST /api/v1/environments/{env}/clone", s.cloneEnv)
+	env(onProject(write), "POST /api/v1/environments/{env}/clone", s.cloneEnv)
 	env(onEnv(read), "GET /api/v1/environments/{env}/secrets", s.listSecrets)
 	env(onEnv(read), "GET /api/v1/environments/{env}/secrets/{name}", s.getSecret)
 	env(onEnv(write), "PUT /api/v1/environments/{env}/secrets/{name}", s.putSecret)
@@ -67,9 +78,11 @@ func (s *server) envRoutes(tenant func(n need, pattern string, h apiHandler),
 	env(onEnv(write), "POST /api/v1/environments/{env}/services/{name}/restart", s.restartService)
 	env(onEnv(write), "POST /api/v1/environments/{env}/jobs/{name}/run", s.runJob)
 	env(onEnv(write), "POST /api/v1/environments/{env}/bindings/{name}/check", s.checkBinding)
-	env(onEnv(admin), "POST /api/v1/environments/{env}/route-tokens", s.createRouteToken)
-	env(onEnv(admin), "DELETE /api/v1/environments/{env}/route-tokens", s.revokeRouteTokens)
+	env(onEnv(write), "POST /api/v1/environments/{env}/route-tokens", s.createRouteToken)
+	env(onEnv(write), "DELETE /api/v1/environments/{env}/route-tokens", s.revokeRouteTokens)
 	env(onEnv(admin), "PUT /api/v1/environments/{env}/public", s.setEnvPublic)
+	env(onEnv(admin), "PUT /api/v1/environments/{env}/protected", s.setEnvProtected)
+	env(onEnv(admin), "GET /api/v1/environments/{env}/principals", s.envPrincipals)
 	add(classRoute, "/api/v1/environments/{env}/http/{path...}", http.HandlerFunc(e.ServeRoute))
 }
 
@@ -125,7 +138,7 @@ func (s *server) createEnv(w http.ResponseWriter, r *http.Request) error {
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	st, created, err := s.deps.Environments.CreateEnv(r.Context(), tenantOf(r), req)
+	st, created, err := s.deps.Environments.CreateEnv(r.Context(), projectOf(r), req)
 	if err != nil {
 		return err
 	}
@@ -146,7 +159,7 @@ func (s *server) listEnvs(w http.ResponseWriter, r *http.Request) error {
 		}
 		labels[k] = v
 	}
-	list, err := s.deps.Environments.ListEnvs(r.Context(), tenantOf(r), labels)
+	list, err := s.deps.Environments.ListEnvs(r.Context(), projectOf(r), labels)
 	if err != nil {
 		return err
 	}
@@ -161,12 +174,18 @@ func (s *server) listEnvs(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, http.StatusOK, list)
 }
 
+// planSpec is POST /api/v1/environments/plan: {"spec"}, or the spec
+// alone in YAML.
 func (s *server) planSpec(w http.ResponseWriter, r *http.Request) error {
 	var req envs.PlanSpecRequest
-	if _, err := decodeJSON(r, &req); err != nil {
+	format, doc, err := specBody(r, &req)
+	if err != nil {
 		return err
 	}
-	a, err := s.deps.Environments.PlanSpec(r.Context(), tenantOf(r), req)
+	if format == spec.FormatYAML {
+		req = envs.PlanSpecRequest{Spec: doc}
+	}
+	a, err := s.deps.Environments.PlanSpec(r.Context(), projectOf(r), req, format)
 	if err != nil {
 		return err
 	}
@@ -174,9 +193,9 @@ func (s *server) planSpec(w http.ResponseWriter, r *http.Request) error {
 }
 
 // addonCatalog is GET /api/v1/addons: the addon types' blueprints (ADR
-// 0032), the same for every tenant.
+// 0032), the same for every project.
 func (s *server) addonCatalog(w http.ResponseWriter, r *http.Request) error {
-	c, err := s.deps.Environments.Addons(r.Context(), tenantOf(r))
+	c, err := s.deps.Environments.Addons(r.Context(), projectOf(r))
 	if err != nil {
 		return err
 	}
@@ -184,7 +203,7 @@ func (s *server) addonCatalog(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) getEnv(w http.ResponseWriter, r *http.Request) error {
-	st, err := s.deps.Environments.GetEnv(r.Context(), tenantOf(r), r.PathValue("env"))
+	st, err := s.deps.Environments.GetEnv(r.Context(), projectOf(r), r.PathValue("env"))
 	if err != nil {
 		return err
 	}
@@ -197,7 +216,7 @@ func (s *server) renameEnv(w http.ResponseWriter, r *http.Request) error {
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	st, err := s.deps.Environments.RenameEnv(r.Context(), tenantOf(r), r.PathValue("env"), req)
+	st, err := s.deps.Environments.RenameEnv(r.Context(), projectOf(r), r.PathValue("env"), req)
 	if err != nil {
 		return err
 	}
@@ -205,30 +224,52 @@ func (s *server) renameEnv(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) deleteEnv(w http.ResponseWriter, r *http.Request) error {
-	if err := s.deps.Environments.DeleteEnv(r.Context(), tenantOf(r), r.PathValue("env")); err != nil {
+	if err := s.deps.Environments.DeleteEnv(r.Context(), projectOf(r), r.PathValue("env")); err != nil {
 		return err
 	}
 	return noContent(w, http.StatusAccepted)
 }
 
+// planEnv is POST …/{env}/plan: {"spec", "base"}, or the spec alone in
+// YAML with ?base=.
 func (s *server) planEnv(w http.ResponseWriter, r *http.Request) error {
 	var req envs.PlanRequest
-	if _, err := decodeJSON(r, &req); err != nil {
+	format, doc, err := specBody(r, &req)
+	if err != nil {
 		return err
 	}
-	a, err := s.deps.Environments.Plan(r.Context(), tenantOf(r), r.PathValue("env"), req)
+	if format == spec.FormatYAML {
+		base, err := queryIntPtr(r, "base")
+		if err != nil {
+			return err
+		}
+		req = envs.PlanRequest{Spec: doc, Base: base}
+	}
+	a, err := s.deps.Environments.Plan(r.Context(), projectOf(r), r.PathValue("env"), req, format)
 	if err != nil {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, a)
 }
 
+// applyDeployment is POST …/{env}/deployments: {"spec", "base",
+// "author", "message", "annotations"}, or the spec alone in YAML with
+// ?base=&author=&message= (annotations are JSON's alone).
 func (s *server) applyDeployment(w http.ResponseWriter, r *http.Request) error {
 	var req envs.ApplyRequest
-	if _, err := decodeJSON(r, &req); err != nil {
+	format, doc, err := specBody(r, &req)
+	if err != nil {
 		return err
 	}
-	a, err := s.deps.Environments.Apply(r.Context(), tenantOf(r), r.PathValue("env"), req)
+	if format == spec.FormatYAML {
+		base, err := queryInt(r, "base")
+		if err != nil {
+			return err
+		}
+		q := r.URL.Query()
+		req = envs.ApplyRequest{Spec: doc, Base: base, Author: q.Get("author"), Message: q.Get("message")}
+	}
+	a, err := s.deps.Environments.Apply(r.Context(), projectOf(r), r.PathValue("env"), req, format)
 	if err != nil {
 		return err
 	}
@@ -240,7 +281,7 @@ func (s *server) listDeployments(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	list, err := s.deps.Environments.Deployments(r.Context(), tenantOf(r), r.PathValue("env"), limit)
+	list, err := s.deps.Environments.Deployments(r.Context(), projectOf(r), r.PathValue("env"), limit)
 	if err != nil {
 		return err
 	}
@@ -252,7 +293,7 @@ func (s *server) getDeployment(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	d, err := s.deps.Environments.Deployment(r.Context(), tenantOf(r), r.PathValue("env"), n)
+	d, err := s.deps.Environments.Deployment(r.Context(), projectOf(r), r.PathValue("env"), n)
 	if err != nil {
 		return err
 	}
@@ -268,7 +309,7 @@ func (s *server) revertDeployment(w http.ResponseWriter, r *http.Request) error 
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	a, err := s.deps.Environments.Revert(r.Context(), tenantOf(r), r.PathValue("env"), n, req)
+	a, err := s.deps.Environments.Revert(r.Context(), projectOf(r), r.PathValue("env"), n, req)
 	if err != nil {
 		return err
 	}
@@ -280,7 +321,7 @@ func (s *server) putObject(w http.ResponseWriter, r *http.Request) error {
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	a, err := s.deps.Environments.PutObject(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("kind"),
+	a, err := s.deps.Environments.PutObject(r.Context(), projectOf(r), r.PathValue("env"), r.PathValue("kind"),
 		r.PathValue("name"), req)
 	if err != nil {
 		return err
@@ -301,7 +342,7 @@ func (s *server) deleteObject(w http.ResponseWriter, r *http.Request) error {
 	}
 	q := r.URL.Query()
 	req := envs.DeleteObjectRequest{Base: base, DryRun: dryRun, Author: q.Get("author"), Message: q.Get("message")}
-	a, err := s.deps.Environments.DeleteObject(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("kind"),
+	a, err := s.deps.Environments.DeleteObject(r.Context(), projectOf(r), r.PathValue("env"), r.PathValue("kind"),
 		r.PathValue("name"), req)
 	if err != nil {
 		return err
@@ -319,7 +360,7 @@ func (s *server) objectLogs(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	a, err := s.deps.Environments.Logs(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("kind"),
+	a, err := s.deps.Environments.Logs(r.Context(), projectOf(r), r.PathValue("env"), r.PathValue("kind"),
 		r.PathValue("name"), lines, replica)
 	if err != nil {
 		return err
@@ -328,7 +369,7 @@ func (s *server) objectLogs(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) listTags(w http.ResponseWriter, r *http.Request) error {
-	list, err := s.deps.Environments.Tags(r.Context(), tenantOf(r), r.PathValue("env"))
+	list, err := s.deps.Environments.Tags(r.Context(), projectOf(r), r.PathValue("env"))
 	if err != nil {
 		return err
 	}
@@ -336,7 +377,7 @@ func (s *server) listTags(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) getTag(w http.ResponseWriter, r *http.Request) error {
-	t, err := s.deps.Environments.Tag(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("tag"))
+	t, err := s.deps.Environments.Tag(r.Context(), projectOf(r), r.PathValue("env"), r.PathValue("tag"))
 	if err != nil {
 		return err
 	}
@@ -348,7 +389,7 @@ func (s *server) putTag(w http.ResponseWriter, r *http.Request) error {
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	t, err := s.deps.Environments.PutTag(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("tag"), req)
+	t, err := s.deps.Environments.PutTag(r.Context(), projectOf(r), r.PathValue("env"), r.PathValue("tag"), req)
 	if err != nil {
 		return err
 	}
@@ -356,26 +397,71 @@ func (s *server) putTag(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) deleteTag(w http.ResponseWriter, r *http.Request) error {
-	if err := s.deps.Environments.DeleteTag(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("tag")); err != nil {
+	if err := s.deps.Environments.DeleteTag(r.Context(), projectOf(r), r.PathValue("env"), r.PathValue("tag")); err != nil {
 		return err
 	}
 	return noContent(w, http.StatusNoContent)
 }
 
+// cloneEnv is POST …/{env}/clone: {"name", "id", "deployment", "spec",
+// …}, or the spec alone in YAML with ?name=&id=&deployment=&author=
+// (labels, secrets, credentials and data are JSON's alone: a YAML clone
+// copies no secret).
 func (s *server) cloneEnv(w http.ResponseWriter, r *http.Request) error {
 	var req envs.CloneRequest
-	if _, err := decodeJSON(r, &req); err != nil {
+	format, doc, err := specBody(r, &req)
+	if err != nil {
 		return err
 	}
-	st, err := s.deps.Environments.Clone(r.Context(), tenantOf(r), r.PathValue("env"), req)
+	if format == spec.FormatYAML {
+		deployment, err := queryIntPtr(r, "deployment")
+		if err != nil {
+			return err
+		}
+		q := r.URL.Query()
+		req = envs.CloneRequest{Name: q.Get("name"), ID: q.Get("id"), Deployment: deployment, Spec: doc,
+			Author: q.Get("author")}
+	}
+	ref := r.PathValue("env")
+	// A clone that copies secrets or credentials hands their values to an
+	// environment its maker writes: that needs write on the source too, so
+	// that a reader of a protected environment (ADR 0060) takes none.
+	if cloneCopies(req) {
+		t, _ := auth.ProjectFrom(r.Context())
+		if !t.EveryEnv(write) {
+			id, err := s.envRef(r, t, ref)
+			if err != nil {
+				return err
+			}
+			if err := allowEnvID(t, id, write); err != nil {
+				return err
+			}
+			ref = id.String()
+		}
+	}
+	st, err := s.deps.Environments.Clone(r.Context(), projectOf(r), ref, req, format)
 	if err != nil {
 		return err
 	}
 	return writeJSON(w, http.StatusCreated, st)
 }
 
+// cloneCopies reports whether a clone copies a secret or a credential of
+// its source.
+func cloneCopies(req envs.CloneRequest) bool {
+	if len(req.Credentials) > 0 {
+		return true
+	}
+	for _, sec := range req.Secrets {
+		if sec.Copy {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *server) listSecrets(w http.ResponseWriter, r *http.Request) error {
-	list, err := s.deps.Environments.Secrets(r.Context(), tenantOf(r), r.PathValue("env"))
+	list, err := s.deps.Environments.Secrets(r.Context(), projectOf(r), r.PathValue("env"))
 	if err != nil {
 		return err
 	}
@@ -383,7 +469,7 @@ func (s *server) listSecrets(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) getSecret(w http.ResponseWriter, r *http.Request) error {
-	sec, err := s.deps.Environments.Secret(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("name"))
+	sec, err := s.deps.Environments.Secret(r.Context(), projectOf(r), r.PathValue("env"), r.PathValue("name"))
 	if err != nil {
 		return err
 	}
@@ -398,7 +484,7 @@ func (s *server) putSecret(w http.ResponseWriter, r *http.Request) error {
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	v, err := s.deps.Environments.PutSecret(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("name"), req)
+	v, err := s.deps.Environments.PutSecret(r.Context(), projectOf(r), r.PathValue("env"), r.PathValue("name"), req)
 	if err != nil {
 		return err
 	}
@@ -410,7 +496,7 @@ func (s *server) putSecret(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) deleteSecret(w http.ResponseWriter, r *http.Request) error {
-	if err := s.deps.Environments.DeleteSecret(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("name")); err != nil {
+	if err := s.deps.Environments.DeleteSecret(r.Context(), projectOf(r), r.PathValue("env"), r.PathValue("name")); err != nil {
 		return err
 	}
 	return noContent(w, http.StatusNoContent)
@@ -422,7 +508,7 @@ func (s *server) listIncidents(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	list, err := s.deps.Environments.Incidents(r.Context(), tenantOf(r), r.PathValue("env"), open)
+	list, err := s.deps.Environments.Incidents(r.Context(), projectOf(r), r.PathValue("env"), open)
 	if err != nil {
 		return err
 	}
@@ -434,7 +520,7 @@ func (s *server) getIncident(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	inc, err := s.deps.Environments.Incident(r.Context(), tenantOf(r), r.PathValue("env"), id)
+	inc, err := s.deps.Environments.Incident(r.Context(), projectOf(r), r.PathValue("env"), id)
 	if err != nil {
 		return err
 	}
@@ -456,7 +542,7 @@ func (s *server) accessLogs(w http.ResponseWriter, r *http.Request) error {
 	if trace != "" && !isTraceID(trace) {
 		return apierr.New(http.StatusBadRequest, "traceId must be 32 lower case hex digits, got %q", trace)
 	}
-	list, err := s.deps.Environments.AccessLogs(r.Context(), tenantOf(r), r.PathValue("env"),
+	list, err := s.deps.Environments.AccessLogs(r.Context(), projectOf(r), r.PathValue("env"),
 		envs.AccessLogQuery{Limit: limit, BeforeTsNs: before, TraceID: trace})
 	if err != nil {
 		return err
@@ -472,7 +558,7 @@ func (s *server) traffic(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	t, err := s.deps.Environments.Traffic(r.Context(), tenantOf(r), r.PathValue("env"), window)
+	t, err := s.deps.Environments.Traffic(r.Context(), projectOf(r), r.PathValue("env"), window)
 	if err != nil {
 		return err
 	}
@@ -487,7 +573,7 @@ func (s *server) bindingUsage(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	u, err := s.deps.Environments.BindingUsage(r.Context(), tenantOf(r), r.PathValue("env"), window)
+	u, err := s.deps.Environments.BindingUsage(r.Context(), projectOf(r), r.PathValue("env"), window)
 	if err != nil {
 		return err
 	}
@@ -498,7 +584,7 @@ func (s *server) bindingUsage(w http.ResponseWriter, r *http.Request) error {
 // environment's workloads and the certificates its pods hold, without
 // key material (ADR 0036).
 func (s *server) identities(w http.ResponseWriter, r *http.Request) error {
-	ids, err := s.deps.Environments.Identities(r.Context(), tenantOf(r), r.PathValue("env"))
+	ids, err := s.deps.Environments.Identities(r.Context(), projectOf(r), r.PathValue("env"))
 	if err != nil {
 		return err
 	}
@@ -520,14 +606,14 @@ func isTraceID(s string) bool {
 }
 
 func (s *server) restartService(w http.ResponseWriter, r *http.Request) error {
-	if err := s.deps.Environments.RestartService(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("name")); err != nil {
+	if err := s.deps.Environments.RestartService(r.Context(), projectOf(r), r.PathValue("env"), r.PathValue("name")); err != nil {
 		return err
 	}
 	return noContent(w, http.StatusAccepted)
 }
 
 func (s *server) runJob(w http.ResponseWriter, r *http.Request) error {
-	if err := s.deps.Environments.RunJob(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("name")); err != nil {
+	if err := s.deps.Environments.RunJob(r.Context(), projectOf(r), r.PathValue("env"), r.PathValue("name")); err != nil {
 		return err
 	}
 	return noContent(w, http.StatusAccepted)
@@ -541,7 +627,7 @@ func (s *server) checkBinding(w http.ResponseWriter, r *http.Request) error {
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	res, err := s.deps.Environments.CheckBinding(r.Context(), tenantOf(r), r.PathValue("env"), r.PathValue("name"), req)
+	res, err := s.deps.Environments.CheckBinding(r.Context(), projectOf(r), r.PathValue("env"), r.PathValue("name"), req)
 	if err != nil {
 		return err
 	}
@@ -549,7 +635,7 @@ func (s *server) checkBinding(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) createRouteToken(w http.ResponseWriter, r *http.Request) error {
-	t, err := s.deps.Environments.CreateRouteToken(r.Context(), tenantOf(r), r.PathValue("env"))
+	t, err := s.deps.Environments.CreateRouteToken(r.Context(), projectOf(r), r.PathValue("env"))
 	if err != nil {
 		return err
 	}
@@ -557,7 +643,7 @@ func (s *server) createRouteToken(w http.ResponseWriter, r *http.Request) error 
 }
 
 func (s *server) revokeRouteTokens(w http.ResponseWriter, r *http.Request) error {
-	if err := s.deps.Environments.RevokeRouteTokens(r.Context(), tenantOf(r), r.PathValue("env")); err != nil {
+	if err := s.deps.Environments.RevokeRouteTokens(r.Context(), projectOf(r), r.PathValue("env")); err != nil {
 		return err
 	}
 	return noContent(w, http.StatusNoContent)
@@ -576,9 +662,163 @@ func (s *server) setEnvPublic(w http.ResponseWriter, r *http.Request) error {
 	if raw, ok := sent["public"]; !ok || string(raw) == "null" {
 		return apierr.New(http.StatusBadRequest, "public is required: {\"public\": true} or {\"public\": false}")
 	}
-	a, err := s.deps.Environments.SetPublic(r.Context(), tenantOf(r), r.PathValue("env"), req)
+	a, err := s.deps.Environments.SetPublic(r.Context(), projectOf(r), r.PathValue("env"), req)
 	if err != nil {
 		return err
 	}
 	return writeJSON(w, http.StatusOK, a)
+}
+
+// checkedEnvironment is the environment of t's project that the path's
+// {env} names: the one allow resolved, else resolved here; 404 for one
+// the project does not have.
+func (s *server) checkedEnvironment(r *http.Request) (store.Environment, error) {
+	t, _ := auth.ProjectFrom(r.Context())
+	ref := r.PathValue("env")
+	id, ok := checkedEnv(r, ref)
+	if !ok {
+		var err error
+		if id, err = s.envRef(r, t, ref); err != nil {
+			return store.Environment{}, err
+		}
+	}
+	e, err := s.st.GetEnvironment(r.Context(), id)
+	if isNoRow(err) || (err == nil && e.Owner != t.Name) {
+		return store.Environment{}, errNoEnvironment()
+	}
+	if err != nil {
+		return store.Environment{}, fmt.Errorf("environment %s: %w", ref, err)
+	}
+	return e, nil
+}
+
+// setEnvProtected is PUT /api/v1/environments/{env}/protected
+// {"protected": bool} (ADR 0060), by an admin of the environment:
+// protected is required (absent or null is a 400). A change is an
+// activity row of the project; the same again changes nothing.
+func (s *server) setEnvProtected(w http.ResponseWriter, r *http.Request) error {
+	var req fapi.ProtectedRequest
+	sent, err := decodeJSON(r, &req)
+	if err != nil {
+		return err
+	}
+	if raw, ok := sent["protected"]; !ok || string(raw) == "null" {
+		return apierr.New(http.StatusBadRequest, "protected is required: {\"protected\": true} or {\"protected\": false}")
+	}
+	e, err := s.checkedEnvironment(r)
+	if err != nil {
+		return err
+	}
+	if e.Deleting {
+		return apierr.New(http.StatusConflict, "environment %s is being deleted", e.Name)
+	}
+	after, changed, err := s.st.SetEnvironmentProtected(r.Context(), e.ID, req.Protected)
+	if isNoRow(err) {
+		return errNoEnvironment()
+	}
+	if err != nil {
+		return err
+	}
+	if changed {
+		kind, what := "environment_unprotected", "unprotected"
+		if after.Protected {
+			kind, what = "environment_protected", "protected"
+		}
+		by := auth.MadeBy(r.Context())
+		s.log.Info("environment "+what, "project", e.Owner, "environment", e.ID, "by", by)
+		s.record(r.Context(), store.ActivityRow{ProjectID: e.Owner, Kind: kind, Category: "lifecycle",
+			Name:   "environment " + e.Name + " " + what + " by " + by,
+			Detail: detail(map[string]any{"environment": e.ID.String(), "name": e.Name, "by": by})})
+	}
+	return writeJSON(w, http.StatusOK, fapi.ProtectedAnswer{ID: after.ID.String(), Name: after.Name,
+		Protected: after.Protected, Changed: changed})
+}
+
+// envPrincipals is GET /api/v1/environments/{env}/principals: who holds a
+// grant in the project, people not disabled, project tokens and
+// integrations, each with its grants on the project and on the
+// environment, and whether it changes the environment by its project
+// grant alone, which it only reads once the environment is protected
+// (ADR 0060's dialog, which offers each a grant on it). An integration is
+// not told the project's tokens.
+func (s *server) envPrincipals(w http.ResponseWriter, r *http.Request) error {
+	ctx, project := r.Context(), projectOf(r)
+	e, err := s.checkedEnvironment(r)
+	if err != nil {
+		return err
+	}
+	out := fapi.Principals{Principals: []fapi.Principal{}}
+	add := func(kind, id, label string, onProject, onEnv auth.Role) {
+		out.Principals = append(out.Principals, fapi.Principal{Kind: kind, ID: id, Label: label,
+			ProjectRole: onProject.String(), EnvironmentRole: onEnv.String(),
+			LosesWrite: onProject == auth.RoleWrite && onEnv < auth.RoleWrite})
+	}
+	// roles are a principal's grants on the project and on e.
+	roles := func(gs []store.MemberGrant) (auth.Role, auth.Role) {
+		var p, en auth.Role
+		for _, g := range gs {
+			role, _ := auth.ParseRole(g.Role)
+			switch g.EnvironmentID {
+			case uuid.Nil:
+				p = max(p, role)
+			case e.ID:
+				en = max(en, role)
+			}
+		}
+		return p, en
+	}
+	ms, err := s.st.ListMembers(ctx, project)
+	if err != nil {
+		return fmt.Errorf("principals: %w", err)
+	}
+	for _, m := range ms {
+		if m.Disabled() {
+			continue
+		}
+		label := m.Email
+		if m.Name != "" {
+			label = m.Name + " <" + m.Email + ">"
+		}
+		p, en := roles(m.Grants)
+		add("person", m.ID.String(), label, p, en)
+	}
+	// The project's tokens are no integration's to list (GET
+	// /api/v1/project/tokens refuses one), here neither.
+	var toks []store.ProjectToken
+	if t, _ := auth.ProjectFrom(ctx); !t.Principal.IsIntegration() {
+		if toks, err = s.st.ListProjectTokens(ctx, project); err != nil {
+			return fmt.Errorf("principals: %w", err)
+		}
+	}
+	gs, err := s.st.ListGrants(ctx, project)
+	if err != nil {
+		return fmt.Errorf("principals: %w", err)
+	}
+	for _, tok := range toks {
+		own := []store.MemberGrant{{Role: tok.Role, EnvironmentID: tok.EnvironmentID}}
+		for _, g := range gs {
+			if g.TokenHash == tok.Hash {
+				own = append(own, store.MemberGrant{Role: g.Role, EnvironmentID: g.EnvironmentID})
+			}
+		}
+		label := tok.Label
+		if label == "" {
+			label = "token " + tok.Hash[:8]
+		}
+		p, en := roles(own)
+		add("token", tok.Hash, label, p, en)
+	}
+	is, err := s.st.ListIntegrationGrants(ctx, project)
+	if err != nil {
+		return fmt.Errorf("principals: %w", err)
+	}
+	for _, i := range is {
+		label := i.Title
+		if label == "" {
+			label = i.Name
+		}
+		p, en := roles(i.Grants)
+		add("integration", i.Name, label, p, en)
+	}
+	return writeJSON(w, http.StatusOK, out)
 }

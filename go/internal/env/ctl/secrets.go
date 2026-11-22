@@ -23,7 +23,7 @@ import (
 )
 
 // ResolveSecret is the value of version version of the secret name of
-// environment envID, a tenant's or an addon's system secret
+// environment envID, a project's or an addon's system secret
 // ("addon.<addon>.<key>"), unsealed with its AAD (envdeps.SecretAAD). A
 // deleted version still resolves: a deployment pins it until a later one is
 // deployed. Without a Sealer it is an error naming --secret-key-file. It
@@ -207,7 +207,7 @@ func (c *Controller) credentialValues(ctx context.Context, envID uuid.UUID, addo
 
 // envSecretValues are the values a stored log tail is redacted of
 // (§13.7): the credentials of every addon of T and R, the environment's
-// tenant secrets (their latest versions and the versions T and R pin),
+// project secrets (their latest versions and the versions T and R pin),
 // and the secrets tmpl's env refers to (the versions the instance runs
 // with). Those that do not resolve are left out.
 func (c *Controller) envSecretValues(ctx context.Context, v *view, tmpl *model.PodTemplate) []string {

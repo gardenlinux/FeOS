@@ -41,9 +41,9 @@ const (
 	DefaultMaxConnsPerEndpoint = 256
 )
 
-// Defaults of the limits that keep one tenant from taking the instance:
-// a share per tenant of the held and of the forwarded requests, a
-// quarter of the cap, so that it takes four tenants to fill it, and
+// Defaults of the limits that keep one project from taking the instance:
+// a share per project of the held and of the forwarded requests, a
+// quarter of the cap, so that it takes four projects to fill it, and
 // within it a share per environment, an eighth; caps that fit the
 // instance's memory limit (a held request takes at most about 250 KiB,
 // HTTP/2 with its body's window, streamReceiveWindow, full and its path
@@ -53,12 +53,12 @@ const (
 // 1.5 GiB on Kubernetes, beside the client connections); and the bound
 // of the wait for a connection to an instance.
 const (
-	DefaultMaxHeldPerTenant     = DefaultMaxHeld / 4
-	DefaultMaxHeldPerEnv        = DefaultMaxHeld / 8
-	DefaultMaxInflight          = 2048
-	DefaultMaxInflightPerTenant = DefaultMaxInflight / 4
-	DefaultMaxInflightPerEnv    = DefaultMaxInflight / 8
-	DefaultConnWaitTimeout      = 10 * time.Second
+	DefaultMaxHeldPerProject     = DefaultMaxHeld / 4
+	DefaultMaxHeldPerEnv         = DefaultMaxHeld / 8
+	DefaultMaxInflight           = 2048
+	DefaultMaxInflightPerProject = DefaultMaxInflight / 4
+	DefaultMaxInflightPerEnv     = DefaultMaxInflight / 8
+	DefaultConnWaitTimeout       = 10 * time.Second
 )
 
 // The servers' limits (D14). There is no write timeout and no timeout
@@ -117,15 +117,15 @@ type Config struct {
 	// asleep or waking; PendingHold one held while they are only
 	// pending. Both are measured from the request's start.
 	WakeHold, PendingHold time.Duration
-	// MaxHeld is how many requests may be held at once, MaxHeldPerTenant
-	// how many of them one tenant's, MaxHeldPerEnv how many one
+	// MaxHeld is how many requests may be held at once, MaxHeldPerProject
+	// how many of them one project's, MaxHeldPerEnv how many one
 	// environment's.
-	MaxHeld, MaxHeldPerTenant, MaxHeldPerEnv int
+	MaxHeld, MaxHeldPerProject, MaxHeldPerEnv int
 	// MaxInflight is how many requests may be forwarded at once, waiting
 	// for a connection to an instance or for its answer, upgraded ones
-	// included; MaxInflightPerTenant how many of them one tenant's,
+	// included; MaxInflightPerProject how many of them one project's,
 	// MaxInflightPerEnv how many one environment's.
-	MaxInflight, MaxInflightPerTenant, MaxInflightPerEnv int
+	MaxInflight, MaxInflightPerProject, MaxInflightPerEnv int
 	// ConnWaitTimeout bounds each wait for a connection to an instance,
 	// the dial included; the answer's time is not bounded.
 	ConnWaitTimeout time.Duration
@@ -151,8 +151,8 @@ func (c Config) withDefaults() Config {
 	if c.MaxHeld <= 0 {
 		c.MaxHeld = DefaultMaxHeld
 	}
-	if c.MaxHeldPerTenant <= 0 {
-		c.MaxHeldPerTenant = DefaultMaxHeldPerTenant
+	if c.MaxHeldPerProject <= 0 {
+		c.MaxHeldPerProject = DefaultMaxHeldPerProject
 	}
 	if c.MaxHeldPerEnv <= 0 {
 		c.MaxHeldPerEnv = DefaultMaxHeldPerEnv
@@ -160,8 +160,8 @@ func (c Config) withDefaults() Config {
 	if c.MaxInflight <= 0 {
 		c.MaxInflight = DefaultMaxInflight
 	}
-	if c.MaxInflightPerTenant <= 0 {
-		c.MaxInflightPerTenant = DefaultMaxInflightPerTenant
+	if c.MaxInflightPerProject <= 0 {
+		c.MaxInflightPerProject = DefaultMaxInflightPerProject
 	}
 	if c.MaxInflightPerEnv <= 0 {
 		c.MaxInflightPerEnv = DefaultMaxInflightPerEnv
@@ -295,8 +295,8 @@ func New(cfg Config, d Deps) *Proxy {
 		skipped:  map[string]bool{},
 		cooling:  map[string]time.Time{},
 		cookieAt: map[string]time.Time{},
-		held:     newBudget(cfg.MaxHeldPerEnv, cfg.MaxHeldPerTenant, cfg.MaxHeld),
-		inflight: newBudget(cfg.MaxInflightPerEnv, cfg.MaxInflightPerTenant, cfg.MaxInflight),
+		held:     newBudget(cfg.MaxHeldPerEnv, cfg.MaxHeldPerProject, cfg.MaxHeld),
+		inflight: newBudget(cfg.MaxInflightPerEnv, cfg.MaxInflightPerProject, cfg.MaxInflight),
 		drain:    make(chan struct{}),
 	}
 	p.up = newUpstreams(cfg, d.Dial, p.route)
@@ -569,7 +569,7 @@ func (p *Proxy) answerChallenge(w http.ResponseWriter, r *http.Request, host str
 }
 
 // GetCertificate is the HTTPS listener's choice of certificate: by SNI,
-// a domain's own from the table, else the first of zones (the tenant
+// a domain's own from the table, else the first of zones (the project
 // zone's wildcard, ADR 0031) that covers the name, else the operator's
 // wildcard of c, the apps zone's.
 func (p *Proxy) GetCertificate(c *Certs, zones ...*Certs) func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -635,14 +635,14 @@ type request struct {
 	wait waiter
 	// inflight is its place among the forwarded requests.
 	inflight slot
-	// trace is its server span (W3C Trace Context); env, its tenant and
+	// trace is its server span (W3C Trace Context); env, its project and
 	// service are where it was routed, "" before; instance is the last attempt's,
 	// attempts counts them, held is how long it waited for an instance.
 	// reason says why the proxy answered it itself, "" when it did not
 	// (wire.AccessLogEntry.Reason). They make its access log record.
 	trace    trace
 	env      string
-	tenant   string
+	project  string
 	service  string
 	instance string
 	attempts int
@@ -707,7 +707,7 @@ func (p *Proxy) serve(w *recorder, r *http.Request) {
 		rep.write(w)
 		return
 	}
-	q.env, q.tenant, q.service = tg.env.id, tg.env.tenant, tg.svc.name
+	q.env, q.project, q.service = tg.env.id, tg.env.project, tg.svc.name
 	if r.ContentLength != 0 && r.Body != nil && r.Body != http.NoBody {
 		if p.cfg.MaxBody > 0 && r.ContentLength > p.cfg.MaxBody {
 			q.tooLarge()
@@ -734,7 +734,7 @@ func headerFields(h http.Header) int {
 // that in its access log record.
 func (q *request) refused(tg target, rep *reply) {
 	q.p.m.refusedClient.Add(1)
-	q.env, q.tenant, q.service, q.reason = tg.env.id, tg.env.tenant, tg.route.Service, wire.ReasonRouteRefusedClient
+	q.env, q.project, q.service, q.reason = tg.env.id, tg.env.project, tg.route.Service, wire.ReasonRouteRefusedClient
 	rep.write(q.w)
 }
 
@@ -816,22 +816,22 @@ func (q *request) run(v *view, tg target) {
 }
 
 // admit counts the request among the forwarded ones: against its
-// environment's share, MaxInflightPerEnv, its tenant's,
-// MaxInflightPerTenant, and MaxInflight. It answers 503 and returns false
+// environment's share, MaxInflightPerEnv, its project's,
+// MaxInflightPerProject, and MaxInflight. It answers 503 and returns false
 // when one is taken.
 func (q *request) admit(tg target) bool {
 	p := q.p
-	switch p.inflight.enter(&q.inflight, tg.env.tenant, tg.env.id) {
+	switch p.inflight.enter(&q.inflight, tg.env.project, tg.env.id) {
 	case envFull:
 		p.m.rejectedInflightEnv.Add(1)
 		p.rl.warn("inflight-env", "an environment's share of forwarded requests is taken",
 			"host", q.host, "env", tg.env.id, "max", p.cfg.MaxInflightPerEnv)
 		reply{http.StatusServiceUnavailable, textBusyHere, 5}.write(q.w)
 		return false
-	case tenantFull:
-		p.m.rejectedInflightTenant.Add(1)
-		p.rl.warn("inflight-tenant", "a tenant's share of forwarded requests is taken",
-			"host", q.host, "tenant", tg.env.tenant, "max", p.cfg.MaxInflightPerTenant)
+	case projectFull:
+		p.m.rejectedInflightProject.Add(1)
+		p.rl.warn("inflight-project", "a project's share of forwarded requests is taken",
+			"host", q.host, "project", tg.env.project, "max", p.cfg.MaxInflightPerProject)
 		reply{http.StatusServiceUnavailable, textBusyHere, 5}.write(q.w)
 		return false
 	case allFull:

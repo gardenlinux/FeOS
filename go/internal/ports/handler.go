@@ -106,12 +106,12 @@ type Handler struct {
 	resolve func(ctx context.Context, bearer string) (auth.Sandbox, error)
 	db      *db.DB
 	st      *store.Store
-	// tenantOf names the tenant of a tenant token's hash; it is the
+	// projectOf names the project of a project token's hash; it is the
 	// store's lookup, nil without a database.
-	tenantOf func(ctx context.Context, hash string) (string, error)
-	log      *slog.Logger
-	rl       *rateLog
-	t        timings
+	projectOf func(ctx context.Context, hash string) (string, error)
+	log       *slog.Logger
+	rl        *rateLog
+	t         timings
 
 	// base is the parent of every Forward stream and of the wakes nobody
 	// waits for; Run's end cancels it.
@@ -141,7 +141,7 @@ type Handler struct {
 
 // New returns the port door. kp may be nil (no binding ever refuses a
 // port); d, when set, tells the door of sandboxes whose pooled connections
-// lost their pod (Run) and of tenants' tokens, which it refuses with 401
+// lost their pod (Run) and of projects' tokens, which it refuses with 401
 // rather than as unknown.
 func New(s Sandboxes, conns nodelink.Conns, kp KubePorts,
 	resolve func(ctx context.Context, bearer string) (auth.Sandbox, error), d *db.DB, log *slog.Logger) *Handler {
@@ -159,7 +159,7 @@ func New(s Sandboxes, conns nodelink.Conns, kp KubePorts,
 	}
 	if d != nil {
 		h.st = store.New(d)
-		h.tenantOf = h.st.ResolveTenantToken
+		h.projectOf = h.st.ResolveProjectToken
 	}
 	h.base, h.cancelBase = context.WithCancel(context.Background())
 	return h
@@ -308,16 +308,16 @@ func (h *Handler) kubeRefusal(ctx context.Context, id podid.ID, port int) *reply
 	return nil
 }
 
-// notSandboxToken answers a bearer that is no sandbox's token. A tenant's
+// notSandboxToken answers a bearer that is no sandbox's token. A project's
 // token is told what the door takes, 401 as without a token: its holder
 // sent the wrong one of its tokens, and the answer names no sandbox, so it
 // tells nothing about the one in the path. Any other token gets the answer
 // of an absent sandbox.
 func (h *Handler) notSandboxToken(ctx context.Context, tok string) reply {
-	if h.tenantOf == nil {
+	if h.projectOf == nil {
 		return reply{http.StatusNotFound, textNoSandbox, 0}
 	}
-	_, err := h.tenantOf(ctx, store.HashToken(tok))
+	_, err := h.projectOf(ctx, store.HashToken(tok))
 	switch {
 	case err == nil:
 		return reply{http.StatusUnauthorized, textNoToken, 0}

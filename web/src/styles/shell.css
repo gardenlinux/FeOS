@@ -5,7 +5,7 @@
 
 /* The sidebar picks the thing, the tab bar how to look at it: the
    environment one works in as a card (its name, its state, its host),
-   its objects by kind below it with their states, the tenant at the foot
+   its objects by kind below it with their states, the project at the foot
    (its pages while none of an environment is open). */
 
 .side-env { display: flex; flex-direction: column; gap: 2px; }
@@ -50,27 +50,27 @@ button.objitem {
 .objitem .sdot.failed, .envcard .sdot.failed { box-shadow: 0 0 0 3px rgba(242, 119, 107, .22); }
 
 .side-foot { margin-top: auto; padding-top: 18px; display: flex; flex-direction: column; gap: 6px; }
-.tenantrow {
+.projectrow {
   display: flex; align-items: center; gap: 12px; padding: 11px 14px;
   border-radius: var(--radius); border: 1px solid var(--border-soft); color: var(--text);
 }
-.tenantrow:hover { background: var(--panel); color: var(--text); text-decoration: none; }
-.tenantrow > .icon { color: var(--muted); flex: none; }
-.tenantrow-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.tenantrow-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tenantrow-pages { font-size: 12.5px; line-height: 1.4; color: var(--faint); }
-.tenantnav { margin-top: 10px; }
+.projectrow:hover { background: var(--panel); color: var(--text); text-decoration: none; }
+.projectrow > .icon { color: var(--muted); flex: none; }
+.projectrow-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.projectrow-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.projectrow-pages { font-size: 12.5px; line-height: 1.4; color: var(--faint); }
+.projectnav { margin-top: 10px; }
 
 @media (max-width: 820px) {
-  /* narrow: the sidebar is a bar at the top; the card and the tenant
+  /* narrow: the sidebar is a bar at the top; the card and the project
      stay, the objects are a tap away on the environment's overview */
-  .sidebar .objnav, .sidebar .tenantnav .snav-label, .sidebar .tenantrow-pages, .sidebar .side-env > .snav-label,
+  .sidebar .objnav, .sidebar .projectnav .snav-label, .sidebar .projectrow-pages, .sidebar .side-env > .snav-label,
   .sidebar .envcard-host, .sidebar .envcard-state > span:not(.sdot) { display: none; }
   .sidebar .side-env { flex-direction: row; flex: none; }
   .sidebar .envcard { padding: 6px 12px; flex-direction: row; align-items: center; gap: 8px; white-space: nowrap; }
   .sidebar .envcard-name { font-size: 14px; }
   .sidebar .side-foot { margin: 0; padding: 0; flex-direction: row; flex: none; }
-  .sidebar .tenantrow { padding: 6px 12px; white-space: nowrap; }
-  .sidebar .tenantnav { flex-direction: row; margin: 0; flex: none; }
-  .sidebar .tenantnav .snav-item { white-space: nowrap; }
+  .sidebar .projectrow { padding: 6px 12px; white-space: nowrap; }
+  .sidebar .projectnav { flex-direction: row; margin: 0; flex: none; }
+  .sidebar .projectnav .snav-item { white-space: nowrap; }
 }

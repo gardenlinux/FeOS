@@ -70,7 +70,7 @@ type traceSpan struct {
 }
 
 // parseTraceExport reads a request into documents (traces.md, The sink).
-// A ResourceSpans without ferun.tenant and ferun.pod, or of another peer
+// A ResourceSpans without ferun.project and ferun.pod, or of another peer
 // (a node's: ferun.source not ingress (a container's spans, or egress, a
 // pod's requests through its HTTP bindings), ferun.pod not ingress/…; an
 // ingress's: ferun.source ingress, ferun.pod ingress/<its name>), refuses
@@ -94,9 +94,9 @@ func parseTraceExport(req *otlptracev1.ExportTraceServiceRequest, p ingestPeer, 
 		for _, kv := range rs.GetResource().GetAttributes() {
 			text[kv.GetKey()] = anyText(kv.GetValue())
 		}
-		tenant, pod := text[attrTenant], text[attrPod]
-		if tenant == "" || pod == "" {
-			return nil, 0, fmt.Errorf("resource %d: %w: %s and %s are required", i, errNotYours, attrTenant, attrPod)
+		project, pod := projectOf(text), text[attrPod]
+		if project == "" || pod == "" {
+			return nil, 0, fmt.Errorf("resource %d: %w: %s and %s are required", i, errNotYours, attrProject, attrPod)
 		}
 		source := sourceOf(text[attrSource])
 		if source == SourceIngress {
@@ -117,7 +117,7 @@ func parseTraceExport(req *otlptracev1.ExportTraceServiceRequest, p ingestPeer, 
 			service = unknownService
 		}
 		base := quickwit.SpanDoc{
-			Tenant: cleanText(tenant), Environment: cleanText(text[attrEnvironment]), Kind: cleanText(text[attrKind]),
+			Project: cleanText(project), Environment: cleanText(text[attrEnvironment]), Kind: cleanText(text[attrKind]),
 			Object: cleanText(text[attrObject]), Instance: cleanText(text[attrInstance]), Job: cleanText(text[attrJob]),
 			Source: source, Pod: cleanText(pod), Node: cleanText(text[attrNode]),
 			Replica: num(attrReplica), Deployment: num(deploymentAttr(text)), Attempt: num(attrAttempt),
@@ -174,13 +174,13 @@ func parseTraceExport(req *otlptracev1.ExportTraceServiceRequest, p ingestPeer, 
 	return out, rejected, nil
 }
 
-// ErrTraceQuota is Ingest's refusal of a tenant over its trace quota;
-// the other tenants' spans are stored.
-var ErrTraceQuota = errors.New("over the tenant's trace quota")
+// ErrTraceQuota is Ingest's refusal of a project over its trace quota;
+// the other projects' spans are stored.
+var ErrTraceQuota = errors.New("over the project's trace quota")
 
-// Ingest stores spans: in one transaction, each tenant's quota checked,
+// Ingest stores spans: in one transaction, each project's quota checked,
 // the spans produced to the trace topic (keyed by their trace IDs), the
-// usage counted, and the commit. A tenant over its quota is left out and
+// usage counted, and the commit. A project over its quota is left out and
 // Ingest returns ErrTraceQuota (wrapped) after the commit; a failed
 // produce stores nothing, and the sender sends again.
 func (t *Traces) Ingest(ctx context.Context, spans []traceSpan) error {
@@ -192,25 +192,25 @@ func (t *Traces) Ingest(ctx context.Context, spans []traceSpan) error {
 	if err != nil {
 		return err
 	}
-	byTenant := map[string][]*traceSpan{}
+	byProject := map[string][]*traceSpan{}
 	for i := range spans {
 		s := &spans[i]
-		byTenant[s.doc.Tenant] = append(byTenant[s.doc.Tenant], s)
+		byProject[s.doc.Project] = append(byProject[s.doc.Project], s)
 	}
-	tenants := make([]string, 0, len(byTenant))
-	for tn := range byTenant {
-		tenants = append(tenants, tn)
+	projects := make([]string, 0, len(byProject))
+	for tn := range byProject {
+		projects = append(projects, tn)
 	}
-	slices.Sort(tenants)
+	slices.Sort(projects)
 	var over []string
 	err = t.db.Tx(ctx, func(tx pgx.Tx) error {
 		over = over[:0]
 		var recs []kafka.Record
 		usage := map[string]int64{}
-		for _, tn := range tenants {
+		for _, tn := range projects {
 			if t.cfg.TraceQuota > 0 {
 				var used int64
-				err := tx.QueryRow(ctx, `SELECT bytes FROM trace_usage WHERE tenant = $1 AND day = (now() AT TIME ZONE 'utc')::date`,
+				err := tx.QueryRow(ctx, `SELECT bytes FROM trace_usage WHERE project = $1 AND day = (now() AT TIME ZONE 'utc')::date`,
 					tn).Scan(&used)
 				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 					return err
@@ -220,7 +220,7 @@ func (t *Traces) Ingest(ctx context.Context, spans []traceSpan) error {
 					continue
 				}
 			}
-			for _, s := range byTenant[tn] {
+			for _, s := range byProject[tn] {
 				recs = append(recs, spanRecord(s.doc.TraceID, s.raw, n))
 				usage[tn] += int64(len(s.raw))
 			}
@@ -228,12 +228,12 @@ func (t *Traces) Ingest(ctx context.Context, spans []traceSpan) error {
 		if err := t.pipes.produce(ctx, id, recs); err != nil {
 			return err
 		}
-		for _, tn := range tenants {
+		for _, tn := range projects {
 			if usage[tn] == 0 {
 				continue
 			}
-			if _, err := tx.Exec(ctx, `INSERT INTO trace_usage (tenant, day, bytes) VALUES ($1, (now() AT TIME ZONE 'utc')::date, $2)
-				ON CONFLICT (tenant, day) DO UPDATE SET bytes = trace_usage.bytes + EXCLUDED.bytes`, tn, usage[tn]); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO trace_usage (project, day, bytes) VALUES ($1, (now() AT TIME ZONE 'utc')::date, $2)
+				ON CONFLICT (project, day) DO UPDATE SET bytes = trace_usage.bytes + EXCLUDED.bytes`, tn, usage[tn]); err != nil {
 				return fmt.Errorf("usage: %w", err)
 			}
 		}

@@ -263,7 +263,7 @@ func TestLostDeleteRecreate(t *testing.T) {
 	n1.Partition(true)
 	c.waitNodeStatus("n1", model.NodeDown, 60*time.Second)
 	c.waitGone(60*time.Second, sb.id)
-	r := c.call(nil, "DELETE", sb.path(""), tenantAuth, "")
+	r := c.call(nil, "DELETE", sb.path(""), projectAuth, "")
 	if r.code != http.StatusOK || !strings.Contains(r.body, `"clientState":"absent"`) {
 		t.Fatalf("delete: %d %s", r.code, r.body)
 	}
@@ -290,7 +290,7 @@ func TestDeleteRecreateSingleNode(t *testing.T) {
 	sb := c.create(nil)
 	c.run(nil, sb, "echo old > marker")
 	old := c.row(sb.id).Incarnation
-	if r := c.call(nil, "DELETE", sb.path(""), tenantAuth, ""); r.code != http.StatusOK {
+	if r := c.call(nil, "DELETE", sb.path(""), projectAuth, ""); r.code != http.StatusOK {
 		t.Fatalf("delete: %d %s", r.code, r.body)
 	}
 	again := c.createID(sb.id, "box", false)
@@ -319,13 +319,13 @@ func TestLegacyUUIDSandboxes(t *testing.T) {
 		if p, ok := n1.pod(sb.id); !ok || p.GetState() != podv1.PodState_POD_STATE_RUNNING {
 			t.Fatalf("the pod of %s: %v %v", sb.id, p, ok)
 		}
-		if r := c.call(nil, "GET", sb.path(""), tenantAuth, ""); r.code != http.StatusOK ||
+		if r := c.call(nil, "GET", sb.path(""), projectAuth, ""); r.code != http.StatusOK ||
 			!strings.Contains(r.body, `"sandboxId":"`+sb.id.String()+`"`) {
 			t.Fatalf("GET %s: %d %s", sb.id, r.code, r.body)
 		}
 	}
 	// An uppercase UUID in the path names the same sandbox.
-	if r := c.call(nil, "GET", "/api/v1/sandboxes/"+strings.ToUpper(legacy.id.String()), tenantAuth, ""); r.code != http.StatusOK {
+	if r := c.call(nil, "GET", "/api/v1/sandboxes/"+strings.ToUpper(legacy.id.String()), projectAuth, ""); r.code != http.StatusOK {
 		t.Fatalf("GET of the uppercase UUID: %d %s", r.code, r.body)
 	}
 	twin := c.createID(podid.ID("abcdef12-1111-4000-8000-"+uuid.NewString()[24:]), "box", false)
@@ -339,7 +339,7 @@ func TestLegacyUUIDSandboxes(t *testing.T) {
 		t.Fatalf("the UUID twin was placed: %+v", row)
 	}
 	// Deleted, the legacy sandbox frees the name.
-	if r := c.call(nil, "DELETE", legacy.path(""), tenantAuth, ""); r.code != http.StatusOK {
+	if r := c.call(nil, "DELETE", legacy.path(""), projectAuth, ""); r.code != http.StatusOK {
 		t.Fatalf("delete: %d %s", r.code, r.body)
 	}
 	eventually(t, 60*time.Second, "the legacy pod deleted", func() bool {

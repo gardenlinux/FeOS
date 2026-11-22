@@ -18,65 +18,96 @@ import (
 // contract of who may call what. A route missing here, or here but not in
 // the table, fails TestRouteTable.
 var routeClasses = map[string]class{
-	"GET /api/v1/admin/tenants":                           classAdmin,
-	"POST /api/v1/admin/tenants":                          classAdmin,
-	"DELETE /api/v1/admin/tenants/{tenant}":               classAdmin,
-	"GET /api/v1/admin/tenants/{tenant}/tokens":           classAdmin,
-	"POST /api/v1/admin/tenants/{tenant}/tokens":          classAdmin,
-	"DELETE /api/v1/admin/tenants/{tenant}/tokens/{hash}": classAdmin,
-	"PUT /api/v1/admin/tenants/{tenant}/zone":             classAdmin,
-	"GET /api/v1/admin/nodes":                             classAdmin,
-	"PATCH /api/v1/admin/nodes/{node}":                    classAdmin,
-	"DELETE /api/v1/admin/nodes/{node}":                   classAdmin,
-	"POST /api/v1/admin/nodes/{node}/drain":               classAdmin,
-	"POST /api/v1/admin/nodes/{node}/undrain":             classAdmin,
-	"GET /api/v1/admin/nodes/{node}/certs":                classAdmin,
-	"GET /api/v1/admin/nodes/{node}/activity":             classAdmin,
-	"GET /api/v1/admin/sandboxes/{id}/activity":           classAdmin,
-	"POST /api/v1/admin/join-tokens":                      classAdmin,
-	"GET /api/v1/admin/join-tokens":                       classAdmin,
-	"DELETE /api/v1/admin/join-tokens/{id}":               classAdmin,
-	"GET /api/v1/admin/ingresses":                         classAdmin,
-	"DELETE /api/v1/admin/ingresses/{name}":               classAdmin,
-	"GET /api/v1/admin/instances":                         classAdmin,
-	"GET /api/v1/admin/service-tokens":                    classAdmin,
-	"DELETE /api/v1/admin/service-tokens/{id}":            classAdmin,
-	"GET /api/v1/tenant":                                  classTenant,
+	"GET /api/v1/admin/projects":                            classAdmin,
+	"POST /api/v1/admin/projects":                           classAdmin,
+	"DELETE /api/v1/admin/projects/{project}":               classAdmin,
+	"GET /api/v1/admin/projects/{project}/tokens":           classAdmin,
+	"POST /api/v1/admin/projects/{project}/tokens":          classAdmin,
+	"DELETE /api/v1/admin/projects/{project}/tokens/{hash}": classAdmin,
+	"PUT /api/v1/admin/projects/{project}/zone":             classAdmin,
+	"GET /api/v1/admin/nodes":                               classAdmin,
+	"PATCH /api/v1/admin/nodes/{node}":                      classAdmin,
+	"DELETE /api/v1/admin/nodes/{node}":                     classAdmin,
+	"POST /api/v1/admin/nodes/{node}/drain":                 classAdmin,
+	"POST /api/v1/admin/nodes/{node}/undrain":               classAdmin,
+	"GET /api/v1/admin/nodes/{node}/certs":                  classAdmin,
+	"GET /api/v1/admin/nodes/{node}/activity":               classAdmin,
+	"GET /api/v1/admin/sandboxes/{id}/activity":             classAdmin,
+	"POST /api/v1/admin/join-tokens":                        classAdmin,
+	"GET /api/v1/admin/join-tokens":                         classAdmin,
+	"DELETE /api/v1/admin/join-tokens/{id}":                 classAdmin,
+	"GET /api/v1/admin/ingresses":                           classAdmin,
+	"DELETE /api/v1/admin/ingresses/{name}":                 classAdmin,
+	"GET /api/v1/admin/instances":                           classAdmin,
+	"GET /api/v1/admin/service-tokens":                      classAdmin,
+	"DELETE /api/v1/admin/service-tokens/{id}":              classAdmin,
+	"GET /api/v1/project":                                   classProject,
 
 	// People (ADR 0031).
-	"GET /api/v1/admin/people":                      classAdmin,
-	"POST /api/v1/admin/people/{person}/disable":    classAdmin,
-	"POST /api/v1/admin/people/{person}/enable":     classAdmin,
-	"PUT /api/v1/admin/tenants/{tenant}/limits":     classAdmin,
-	"GET /api/v1/tenant/quota":                      classTenant,
-	"POST /api/v1/tenants":                          classPerson,
-	"GET /api/v1/invitations/{token}":               classPerson,
-	"POST /api/v1/invitations/{token}/accept":       classPerson,
-	"GET /api/v1/tenant/members":                    classTenant,
-	"PUT /api/v1/tenant/members/{person}/grants":    classTenant,
-	"DELETE /api/v1/tenant/members/{person}/grants": classTenant,
-	"POST /api/v1/tenant/leave":                     classTenant,
-	"GET /api/v1/tenant/invitations":                classTenant,
-	"POST /api/v1/tenant/invitations":               classTenant,
-	"DELETE /api/v1/tenant/invitations/{id}":        classTenant,
-	"GET /api/v1/tenant/tokens":                     classTenant,
-	"POST /api/v1/tenant/tokens":                    classTenant,
-	"DELETE /api/v1/tenant/tokens/{hash}":           classTenant,
-	"POST /api/v1/service-certificates":             classService,
+	"GET /api/v1/admin/people":                       classAdmin,
+	"POST /api/v1/admin/people/{person}/disable":     classAdmin,
+	"POST /api/v1/admin/people/{person}/enable":      classAdmin,
+	"PUT /api/v1/admin/projects/{project}/limits":    classAdmin,
+	"GET /api/v1/project/quota":                      classProject,
+	"POST /api/v1/projects":                          classPerson,
+	"GET /api/v1/invitations/{token}":                classPerson,
+	"POST /api/v1/invitations/{token}/accept":        classPerson,
+	"GET /api/v1/project/members":                    classProject,
+	"PUT /api/v1/project/members/{person}/grants":    classProject,
+	"DELETE /api/v1/project/members/{person}/grants": classProject,
+	"POST /api/v1/project/leave":                     classProject,
+	"GET /api/v1/project/invitations":                classProject,
+	"POST /api/v1/project/invitations":               classProject,
+	"DELETE /api/v1/project/invitations/{id}":        classProject,
+	"GET /api/v1/project/tokens":                     classProject,
+	"POST /api/v1/project/tokens":                    classProject,
+	"DELETE /api/v1/project/tokens/{hash}":           classProject,
+	"PUT /api/v1/project/tokens/{hash}/grants":       classProject,
+	"DELETE /api/v1/project/tokens/{hash}/grants":    classProject,
 
-	"GET /api/v1/tools":                           classTenant,
-	"POST /api/v1/sandboxes":                      classTenant,
-	"GET /api/v1/sandboxes":                       classTenant,
-	"GET /api/v1/sandboxes/{id}":                  classTenant,
-	"DELETE /api/v1/sandboxes/{id}":               classTenant,
-	"POST /api/v1/sandboxes/{id}/pause":           classTenant,
-	"POST /api/v1/sandboxes/{id}/resume":          classTenant,
-	"PUT /api/v1/sandboxes/{id}/reaches":          classTenant,
-	"GET /api/v1/sandboxes/{id}/tokens":           classTenant,
-	"POST /api/v1/sandboxes/{id}/tokens":          classTenant,
-	"DELETE /api/v1/sandboxes/{id}/tokens/{hash}": classTenant,
-	"GET /api/v1/sandboxes/{id}/access":           classTenant,
-	"GET /api/v1/sandboxes/{id}/activity":         classTenant,
+	// Integrations (ADR 0056).
+	"GET /api/v1/integrations":                                 classPerson,
+	"GET /api/v1/admin/integrations":                           classAdmin,
+	"PUT /api/v1/admin/integrations/{integration}":             classAdmin,
+	"POST /api/v1/admin/integrations/{integration}/disable":    classAdmin,
+	"POST /api/v1/admin/integrations/{integration}/enable":     classAdmin,
+	"DELETE /api/v1/admin/integrations/{integration}":          classAdmin,
+	"PUT /api/v1/project/integrations/{integration}/grants":    classProject,
+	"DELETE /api/v1/project/integrations/{integration}/grants": classProject,
+	"POST /api/v1/service-certificates":                        classService,
+
+	// Accounts (ADR 0059).
+	"GET /api/v1/admin/accounts":                               classAdmin,
+	"POST /api/v1/admin/accounts":                              classAdmin,
+	"GET /api/v1/admin/accounts/{account}":                     classAdmin,
+	"PATCH /api/v1/admin/accounts/{account}":                   classAdmin,
+	"DELETE /api/v1/admin/accounts/{account}":                  classAdmin,
+	"PUT /api/v1/admin/accounts/{account}/members/{person}":    classAdmin,
+	"DELETE /api/v1/admin/accounts/{account}/members/{person}": classAdmin,
+	"POST /api/v1/admin/projects/{project}/move":               classAdmin,
+	"GET /api/v1/accounts":                                     classPerson,
+	"GET /api/v1/accounts/{account}":                           classPerson,
+	"PUT /api/v1/accounts/{account}/members/{person}":          classPerson,
+	"DELETE /api/v1/accounts/{account}/members/{person}":       classPerson,
+	"GET /api/v1/accounts/{account}/invitations":               classPerson,
+	"POST /api/v1/accounts/{account}/invitations":              classPerson,
+	"DELETE /api/v1/accounts/{account}/invitations/{id}":       classPerson,
+	"GET /api/v1/project/account":                              classProject,
+	"POST /api/v1/project/move":                                classProject,
+
+	"GET /api/v1/tools":                           classProject,
+	"POST /api/v1/sandboxes":                      classProject,
+	"GET /api/v1/sandboxes":                       classProject,
+	"GET /api/v1/sandboxes/{id}":                  classProject,
+	"DELETE /api/v1/sandboxes/{id}":               classProject,
+	"POST /api/v1/sandboxes/{id}/pause":           classProject,
+	"POST /api/v1/sandboxes/{id}/resume":          classProject,
+	"PUT /api/v1/sandboxes/{id}/reaches":          classProject,
+	"GET /api/v1/sandboxes/{id}/tokens":           classProject,
+	"POST /api/v1/sandboxes/{id}/tokens":          classProject,
+	"DELETE /api/v1/sandboxes/{id}/tokens/{hash}": classProject,
+	"GET /api/v1/sandboxes/{id}/access":           classProject,
+	"GET /api/v1/sandboxes/{id}/activity":         classProject,
 
 	"POST /api/v1/sandboxes/{id}/exec":                classSandbox,
 	"GET /api/v1/sandboxes/{id}/files/{path...}":      classSandbox,
@@ -103,57 +134,59 @@ var routeClasses = map[string]class{
 	"/api/v1/sandboxes/{id}/ports/{port}":           classForward,
 	"/fwd/":                                         classForward,
 
-	"POST /api/v1/environments":                                 classTenant,
-	"GET /api/v1/environments":                                  classTenant,
-	"POST /api/v1/environments/plan":                            classTenant,
-	"GET /api/v1/addons":                                        classTenant,
-	"GET /api/v1/environments/{env}":                            classTenant,
-	"PATCH /api/v1/environments/{env}":                          classTenant,
-	"DELETE /api/v1/environments/{env}":                         classTenant,
-	"POST /api/v1/environments/{env}/plan":                      classTenant,
-	"POST /api/v1/environments/{env}/deployments":               classTenant,
-	"GET /api/v1/environments/{env}/deployments":                classTenant,
-	"GET /api/v1/environments/{env}/deployments/{n}":            classTenant,
-	"POST /api/v1/environments/{env}/deployments/{n}/revert":    classTenant,
-	"PUT /api/v1/environments/{env}/objects/{kind}/{name}":      classTenant,
-	"DELETE /api/v1/environments/{env}/objects/{kind}/{name}":   classTenant,
-	"GET /api/v1/environments/{env}/objects/{kind}/{name}/logs": classTenant,
-	"GET /api/v1/environments/{env}/tags":                       classTenant,
-	"GET /api/v1/environments/{env}/tags/{tag}":                 classTenant,
-	"PUT /api/v1/environments/{env}/tags/{tag}":                 classTenant,
-	"DELETE /api/v1/environments/{env}/tags/{tag}":              classTenant,
-	"POST /api/v1/environments/{env}/clone":                     classTenant,
-	"GET /api/v1/environments/{env}/secrets":                    classTenant,
-	"GET /api/v1/environments/{env}/secrets/{name}":             classTenant,
-	"PUT /api/v1/environments/{env}/secrets/{name}":             classTenant,
-	"DELETE /api/v1/environments/{env}/secrets/{name}":          classTenant,
-	"GET /api/v1/environments/{env}/incidents":                  classTenant,
-	"GET /api/v1/environments/{env}/incidents/{id}":             classTenant,
-	"GET /api/v1/environments/{env}/access-logs":                classTenant,
-	"GET /api/v1/environments/{env}/traffic":                    classTenant,
-	"GET /api/v1/environments/{env}/bindings/usage":             classTenant,
-	"GET /api/v1/environments/{env}/identities":                 classTenant,
-	"POST /api/v1/environments/{env}/services/{name}/restart":   classTenant,
-	"POST /api/v1/environments/{env}/jobs/{name}/run":           classTenant,
-	"POST /api/v1/environments/{env}/bindings/{name}/check":     classTenant,
-	"POST /api/v1/environments/{env}/route-tokens":              classTenant,
-	"DELETE /api/v1/environments/{env}/route-tokens":            classTenant,
-	"PUT /api/v1/environments/{env}/public":                     classTenant,
+	"POST /api/v1/environments":                                 classProject,
+	"GET /api/v1/environments":                                  classProject,
+	"POST /api/v1/environments/plan":                            classProject,
+	"GET /api/v1/addons":                                        classProject,
+	"GET /api/v1/environments/{env}":                            classProject,
+	"PATCH /api/v1/environments/{env}":                          classProject,
+	"DELETE /api/v1/environments/{env}":                         classProject,
+	"POST /api/v1/environments/{env}/plan":                      classProject,
+	"POST /api/v1/environments/{env}/deployments":               classProject,
+	"GET /api/v1/environments/{env}/deployments":                classProject,
+	"GET /api/v1/environments/{env}/deployments/{n}":            classProject,
+	"POST /api/v1/environments/{env}/deployments/{n}/revert":    classProject,
+	"PUT /api/v1/environments/{env}/objects/{kind}/{name}":      classProject,
+	"DELETE /api/v1/environments/{env}/objects/{kind}/{name}":   classProject,
+	"GET /api/v1/environments/{env}/objects/{kind}/{name}/logs": classProject,
+	"GET /api/v1/environments/{env}/tags":                       classProject,
+	"GET /api/v1/environments/{env}/tags/{tag}":                 classProject,
+	"PUT /api/v1/environments/{env}/tags/{tag}":                 classProject,
+	"DELETE /api/v1/environments/{env}/tags/{tag}":              classProject,
+	"POST /api/v1/environments/{env}/clone":                     classProject,
+	"GET /api/v1/environments/{env}/secrets":                    classProject,
+	"GET /api/v1/environments/{env}/secrets/{name}":             classProject,
+	"PUT /api/v1/environments/{env}/secrets/{name}":             classProject,
+	"DELETE /api/v1/environments/{env}/secrets/{name}":          classProject,
+	"GET /api/v1/environments/{env}/incidents":                  classProject,
+	"GET /api/v1/environments/{env}/incidents/{id}":             classProject,
+	"GET /api/v1/environments/{env}/access-logs":                classProject,
+	"GET /api/v1/environments/{env}/traffic":                    classProject,
+	"GET /api/v1/environments/{env}/bindings/usage":             classProject,
+	"GET /api/v1/environments/{env}/identities":                 classProject,
+	"POST /api/v1/environments/{env}/services/{name}/restart":   classProject,
+	"POST /api/v1/environments/{env}/jobs/{name}/run":           classProject,
+	"POST /api/v1/environments/{env}/bindings/{name}/check":     classProject,
+	"POST /api/v1/environments/{env}/route-tokens":              classProject,
+	"DELETE /api/v1/environments/{env}/route-tokens":            classProject,
+	"PUT /api/v1/environments/{env}/public":                     classProject,
+	"PUT /api/v1/environments/{env}/protected":                  classProject,
+	"GET /api/v1/environments/{env}/principals":                 classProject,
 	"/api/v1/environments/{env}/http/{path...}":                 classRoute,
 
-	"POST /api/v1/domains":                    classTenant,
-	"GET /api/v1/domains":                     classTenant,
-	"GET /api/v1/domains/{id}":                classTenant,
-	"DELETE /api/v1/domains/{id}":             classTenant,
-	"PUT /api/v1/domains/{id}/environment":    classTenant,
-	"DELETE /api/v1/domains/{id}/environment": classTenant,
-	"POST /api/v1/domains/{id}/check":         classTenant,
-	"POST /api/v1/jobs":                       classTenant,
-	"GET /api/v1/jobs":                        classTenant,
-	"GET /api/v1/jobs/{id}":                   classTenant,
-	"DELETE /api/v1/jobs/{id}":                classTenant,
-	"GET /api/v1/jobs/{id}/logs":              classTenant,
-	"POST /api/v1/jobs/{id}/cancel":           classTenant,
+	"POST /api/v1/domains":                    classProject,
+	"GET /api/v1/domains":                     classProject,
+	"GET /api/v1/domains/{id}":                classProject,
+	"DELETE /api/v1/domains/{id}":             classProject,
+	"PUT /api/v1/domains/{id}/environment":    classProject,
+	"DELETE /api/v1/domains/{id}/environment": classProject,
+	"POST /api/v1/domains/{id}/check":         classProject,
+	"POST /api/v1/jobs":                       classProject,
+	"GET /api/v1/jobs":                        classProject,
+	"GET /api/v1/jobs/{id}":                   classProject,
+	"DELETE /api/v1/jobs/{id}":                classProject,
+	"GET /api/v1/jobs/{id}/logs":              classProject,
+	"POST /api/v1/jobs/{id}/cancel":           classProject,
 
 	"/api/":             classPublic,
 	"GET /healthz":      classPublic,
@@ -165,8 +198,8 @@ var routeClasses = map[string]class{
 	"/":                 classPublic,
 
 	// A sandbox's image credentials (ADR 0025).
-	"PUT /api/v1/sandboxes/{id}/image-credentials":    classTenant,
-	"DELETE /api/v1/sandboxes/{id}/image-credentials": classTenant,
+	"PUT /api/v1/sandboxes/{id}/image-credentials":    classProject,
+	"DELETE /api/v1/sandboxes/{id}/image-credentials": classProject,
 }
 
 // bindingRoutes are the routes that exist only while bindings are on.
@@ -178,38 +211,38 @@ var bindingRoutes = map[string]class{
 	"GET /api/v1/sandboxes/{id}/ssh":                           classSandbox,
 	"DELETE /api/v1/sandboxes/{id}/ssh":                        classSandbox,
 	"POST /api/v1/sandboxes/{id}/ssh/{name}/check":             classSandbox,
-	"POST /api/v1/kube/preflight":                              classTenant,
-	"POST /api/v1/ssh/preflight":                               classTenant,
+	"POST /api/v1/kube/preflight":                              classProject,
+	"POST /api/v1/ssh/preflight":                               classProject,
 	"PUT /api/v1/sandboxes/{id}/http":                          classSandbox,
 	"GET /api/v1/sandboxes/{id}/http":                          classSandbox,
 	"DELETE /api/v1/sandboxes/{id}/http":                       classSandbox,
-	"POST /api/v1/http/preflight":                              classTenant,
-	"GET /api/v1/environments/{env}/credentials":               classTenant,
-	"GET /api/v1/environments/{env}/credentials/{name}":        classTenant,
-	"PUT /api/v1/environments/{env}/credentials/{name}":        classTenant,
-	"DELETE /api/v1/environments/{env}/credentials/{name}":     classTenant,
-	"POST /api/v1/environments/{env}/credentials/{name}/check": classTenant,
-	"GET /api/v1/sandboxes/{id}/credentials":                   classTenant,
-	"PUT /api/v1/sandboxes/{id}/credentials":                   classTenant,
-	"POST /api/v1/environments/{env}/secrets/{name}/check":     classTenant,
-	"GET /api/v1/sandboxes/{id}/secrets":                       classTenant,
-	"PUT /api/v1/sandboxes/{id}/secrets":                       classTenant,
+	"POST /api/v1/http/preflight":                              classProject,
+	"GET /api/v1/environments/{env}/credentials":               classProject,
+	"GET /api/v1/environments/{env}/credentials/{name}":        classProject,
+	"PUT /api/v1/environments/{env}/credentials/{name}":        classProject,
+	"DELETE /api/v1/environments/{env}/credentials/{name}":     classProject,
+	"POST /api/v1/environments/{env}/credentials/{name}/check": classProject,
+	"GET /api/v1/sandboxes/{id}/credentials":                   classProject,
+	"PUT /api/v1/sandboxes/{id}/credentials":                   classProject,
+	"POST /api/v1/environments/{env}/secrets/{name}/check":     classProject,
+	"GET /api/v1/sandboxes/{id}/secrets":                       classProject,
+	"PUT /api/v1/sandboxes/{id}/secrets":                       classProject,
 }
 
 // visitorRouteClasses are the routes that exist only with the visits
 // service (ADR 0054: ferund with --secret-key-file).
 var visitorRouteClasses = map[string]class{
-	"GET /api/v1/providers":                          classTenant,
-	"GET /api/v1/providers/{provider}":               classTenant,
-	"PUT /api/v1/providers/{provider}":               classTenant,
-	"DELETE /api/v1/providers/{provider}":            classTenant,
-	"POST /api/v1/challenges/open":                   classProvider,
-	"POST /api/v1/challenges/accept":                 classProvider,
-	"POST /api/v1/challenges/reject":                 classProvider,
-	"GET /api/v1/visits/{visit}":                     classProvider,
-	"POST /api/v1/visits/end":                        classAuth,
-	"GET /api/v1/oidc-providers/{tenant}/{provider}": classAuth,
-	"GET /api/v1/visit-keys":                         classPublic,
+	"GET /api/v1/providers":                           classProject,
+	"GET /api/v1/providers/{provider}":                classProject,
+	"PUT /api/v1/providers/{provider}":                classProject,
+	"DELETE /api/v1/providers/{provider}":             classProject,
+	"POST /api/v1/challenges/open":                    classProvider,
+	"POST /api/v1/challenges/accept":                  classProvider,
+	"POST /api/v1/challenges/reject":                  classProvider,
+	"GET /api/v1/visits/{visit}":                      classProvider,
+	"POST /api/v1/visits/end":                         classAuth,
+	"GET /api/v1/oidc-providers/{project}/{provider}": classAuth,
+	"GET /api/v1/visit-keys":                          classPublic,
 }
 
 // oidcRoutes exist only with OIDC.
@@ -226,10 +259,10 @@ func concrete(pattern string, id string) (string, string) {
 	if !ok {
 		method, path = http.MethodGet, pattern
 	}
-	r := strings.NewReplacer("{id}", id, "{tenant}", testTenant, "{node}", "n1", "{hash}", "abcdef0123",
+	r := strings.NewReplacer("{id}", id, "{project}", testProject, "{node}", "n1", "{hash}", "abcdef0123",
 		"{pid}", "p1", "{wid}", "w1", "{name}", "k1", "{port}", "3000", "{path...}", "etc/hosts", "{rest...}", "x/y",
 		"{env}", "stage", "{n}", "7", "{kind}", "service", "{tag}", "v1", "{key}", "c1",
-		"{person}", "00000000-0000-4000-8000-000000000001", "{token}", "t0k3n",
+		"{person}", "00000000-0000-4000-8000-000000000001", "{token}", "t0k3n", "{account}", "cc-4711",
 		"{provider}", "fecode", "{visit}", "00000000-0000-4000-8000-0000000000a1")
 	return method, r.Replace(path)
 }
@@ -246,8 +279,8 @@ func classAnswer(t *testing.T, e *env, pattern string, c class) {
 		if got := w.Header().Get("WWW-Authenticate"); got != `Basic realm="ferun"` {
 			t.Fatalf("%s: WWW-Authenticate %q", pattern, got)
 		}
-	case classTenant:
-		expect(t, w, http.StatusUnauthorized, errBody("tenant bearer required"))
+	case classProject:
+		expect(t, w, http.StatusUnauthorized, errBody("project bearer required"))
 		if got := w.Header().Get("WWW-Authenticate"); got != `Bearer realm="ferun"` {
 			t.Fatalf("%s: WWW-Authenticate %q", pattern, got)
 		}
@@ -342,15 +375,15 @@ func TestRouteTable(t *testing.T) {
 			for p := range bindingRoutes {
 				method, path := concrete(p, sandboxID)
 				authz := bearerOf(sbToken)
-				if bindingRoutes[p] == classTenant {
-					authz = bearerOf(e.tenantToken)
+				if bindingRoutes[p] == classProject {
+					authz = bearerOf(e.projectToken)
 				}
 				w := e.do(method, path, authz, nil)
 				expect(t, w, http.StatusNotFound, errBody("no such route: "+method+" "+path))
 			}
 			for p := range visitorRouteClasses {
 				method, path := concrete(p, "")
-				for _, authz := range []string{"", bearerOf(e.tenantToken), bearerOf("feos-auth-x")} {
+				for _, authz := range []string{"", bearerOf(e.projectToken), bearerOf("feos-auth-x")} {
 					w := e.do(method, path, authz, nil)
 					expect(t, w, http.StatusNotFound, errBody("no such route: "+method+" "+path))
 				}
@@ -375,7 +408,7 @@ func TestNoSuchRoute(t *testing.T) {
 		{"GET", "/auth/callback"},
 		{"GET", "/auth/nope"},
 	} {
-		w := e.do(c.method, c.path, bearerOf(e.tenantToken), nil)
+		w := e.do(c.method, c.path, bearerOf(e.projectToken), nil)
 		expect(t, w, http.StatusNotFound, errBody("no such route: "+c.method+" "+c.path))
 		if ct := w.Header().Get("Content-Type"); ct != "application/json" {
 			t.Fatalf("%s %s: Content-Type %q", c.method, c.path, ct)
@@ -431,17 +464,17 @@ func TestBindingRoutes(t *testing.T) {
 	t.Parallel()
 	off := newEnv(t, envOptions{bindings: &fakeBindings{on: false}})
 	id, tok := off.createSandbox()
-	w := off.do("GET", "/api/v1/sandboxes/"+id+"/access", bearerOf(off.tenantToken), nil)
+	w := off.do("GET", "/api/v1/sandboxes/"+id+"/access", bearerOf(off.projectToken), nil)
 	expect(t, w, http.StatusOK, `{"kube":null,"ssh":null,"denies":[]}`+"\n")
 	w = off.do("GET", "/api/v1/sandboxes/"+id+"/access", bearerOf(tok), nil)
-	expect(t, w, http.StatusUnauthorized, errBody("unknown tenant token"))
-	other := off.mintTenantToken(mustTenant(t, off, "other"))
+	expect(t, w, http.StatusUnauthorized, errBody("unknown project token"))
+	other := off.mintProjectToken(mustProject(t, off, "other"))
 	w = off.do("GET", "/api/v1/sandboxes/"+id+"/access", bearerOf(other), nil)
 	expect(t, w, http.StatusNotFound, errBody("unknown sandbox "+id))
 
 	none := newEnv(t, envOptions{})
 	id2, _ := none.createSandbox()
-	w = none.do("GET", "/api/v1/sandboxes/"+id2+"/access", bearerOf(none.tenantToken), nil)
+	w = none.do("GET", "/api/v1/sandboxes/"+id2+"/access", bearerOf(none.projectToken), nil)
 	expect(t, w, http.StatusOK, `{"kube":null,"ssh":null,"denies":[]}`+"\n")
 
 	on := newEnv(t, envOptions{bindings: &fakeBindings{on: true}})
@@ -454,12 +487,12 @@ func TestBindingRoutes(t *testing.T) {
 		{"GET", "/api/v1/sandboxes/" + id3 + "/ssh", bearerOf(tok3), "GetSSH"},
 		{"DELETE", "/api/v1/sandboxes/" + id3 + "/ssh", bearerOf(tok3), "DeleteSSH"},
 		{"POST", "/api/v1/sandboxes/" + id3 + "/ssh/k1/check", bearerOf(tok3), "CheckSSH"},
-		{"POST", "/api/v1/kube/preflight", bearerOf(on.tenantToken), "KubePreflight"},
-		{"POST", "/api/v1/ssh/preflight", bearerOf(on.tenantToken), "SSHPreflight"},
+		{"POST", "/api/v1/kube/preflight", bearerOf(on.projectToken), "KubePreflight"},
+		{"POST", "/api/v1/ssh/preflight", bearerOf(on.projectToken), "SSHPreflight"},
 		{"GET", "/api/v1/sandboxes/" + id3 + "/http", bearerOf(tok3), "GetHTTP"},
 		{"DELETE", "/api/v1/sandboxes/" + id3 + "/http", bearerOf(tok3), "DeleteHTTP"},
-		{"POST", "/api/v1/http/preflight", bearerOf(on.tenantToken), "HTTPPreflight"},
-		{"GET", "/api/v1/sandboxes/" + id3 + "/access", bearerOf(on.tenantToken), "Access"},
+		{"POST", "/api/v1/http/preflight", bearerOf(on.projectToken), "HTTPPreflight"},
+		{"GET", "/api/v1/sandboxes/" + id3 + "/access", bearerOf(on.projectToken), "Access"},
 	} {
 		w := on.do(c.method, c.path, c.authz, nil)
 		expect(t, w, http.StatusOK, c.want)
@@ -468,18 +501,18 @@ func TestBindingRoutes(t *testing.T) {
 	w = on.do("PUT", "/api/v1/sandboxes/"+id3+"/http", bearerOf(tok3), map[string]any{"bindings": []any{}})
 	expect(t, w, http.StatusGone, `{"error":"a sandbox's own HTTP set is gone (ADR 0055): name HTTP secrets of its `+
 		`environment","code":"gone"}`+"\n")
-	// The classes hold: a tenant's token on a set, a sandbox's on a
+	// The classes hold: a project's token on a set, a sandbox's on a
 	// preflight.
-	expect(t, on.do("PUT", "/api/v1/sandboxes/"+id3+"/kube", bearerOf(on.tenantToken), nil), http.StatusNotFound,
+	expect(t, on.do("PUT", "/api/v1/sandboxes/"+id3+"/kube", bearerOf(on.projectToken), nil), http.StatusNotFound,
 		errBody("no such sandbox"))
 	expect(t, on.do("POST", "/api/v1/kube/preflight", bearerOf(tok3), nil), http.StatusUnauthorized,
-		errBody("unknown tenant token"))
+		errBody("unknown project token"))
 }
 
-// mustTenant creates a tenant and returns its name.
-func mustTenant(t *testing.T, e *env, name string) string {
+// mustProject creates a project and returns its name.
+func mustProject(t *testing.T, e *env, name string) string {
 	t.Helper()
-	if _, _, err := e.st.CreateTenant(t.Context(), name); err != nil {
+	if _, _, err := e.st.CreateProject(t.Context(), name); err != nil {
 		t.Fatal(err)
 	}
 	return name

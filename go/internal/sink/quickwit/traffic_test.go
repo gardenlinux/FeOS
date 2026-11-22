@@ -135,7 +135,7 @@ func TestSpanHistogram(t *testing.T) {
 		t.Fatal(err)
 	}
 	since := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC).UnixNano()
-	q := SpanQuery{Tenant: "acme", Environment: "e", Object: "web", Source: "ingress", SinceNs: since,
+	q := SpanQuery{Project: "acme", Environment: "e", Object: "web", Source: "ingress", SinceNs: since,
 		UntilNs: since + int64(time.Hour) - 1}
 	h, err := c.SpanHistogram(context.Background(), "ferun-traces-*", q, time.Minute, true)
 	if err != nil {
@@ -145,7 +145,7 @@ func TestSpanHistogram(t *testing.T) {
 	if want := `{"aggs":{"durations":{"percentiles":{"field":"duration_ns","keyed":false,"percents":[50,95]}},` +
 		`"steps":{"aggs":{"p95":{"percentiles":{"field":"duration_ns","keyed":false,"percents":[95]}}},` +
 		`"date_histogram":{"field":"ts","fixed_interval":"60000ms","min_doc_count":1}}},"count_all":false,` +
-		`"end_timestamp":1793581200,"format":"json","max_hits":0,"query":"tenant:\"acme\" AND environment:\"e\" AND ` +
+		`"end_timestamp":1793581200,"format":"json","max_hits":0,"query":"tenant:\"acme\" AND environment:\"e\" AND ` + // KEEP-TENANT: Quickwit's stored name
 		`object:\"web\" AND source:\"ingress\" AND ts:[2026-11-02T00:00:00.000000000Z TO 2026-11-02T00:59:59.999999999Z]",` +
 		`"start_timestamp":1793577600}`; string(b) != want {
 		t.Errorf("asked\n%s\nwant\n%s", b, want)

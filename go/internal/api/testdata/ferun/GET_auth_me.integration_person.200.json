@@ -1,0 +1,65 @@
+{
+  "method": "GET",
+  "path": "/auth/me",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "response": {
+    "kind": "integration",
+    "integration": {
+      "name": "fecode",
+      "title": "Integration fecode",
+      "url": "https://fecode.example.test",
+      "disabled": false
+    },
+    "named": {
+      "sub": "ada-sub",
+      "known": true,
+      "person": "0199a0b1-0000-7000-8000-000000000001",
+      "email": "ada-sub@example.test",
+      "name": "Person ada-sub"
+    },
+    "projects": [
+      {
+        "project": "acme",
+        "createdAt": "2026-11-21T10:00:00Z",
+        "role": "write",
+        "integrationRole": "write",
+        "personRole": "write",
+        "environments": [
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000002",
+            "name": "box",
+            "role": "write",
+            "integrationRole": "write",
+            "personRole": "write",
+            "protected": false,
+            "plan": true,
+            "delete": true
+          },
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000003",
+            "name": "prod",
+            "role": "admin",
+            "integrationRole": "admin",
+            "personRole": "admin",
+            "protected": true,
+            "plan": true,
+            "delete": true
+          },
+          {
+            "id": "0199a0b1-0000-7000-8000-000000000004",
+            "name": "stage",
+            "role": "write",
+            "integrationRole": "write",
+            "personRole": "write",
+            "protected": false,
+            "plan": true,
+            "delete": true
+          }
+        ]
+      }
+    ],
+    "accounts": []
+  }
+}

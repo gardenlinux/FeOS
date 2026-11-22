@@ -1,0 +1,73 @@
+{
+  "method": "GET",
+  "path": "/api/v1/accounts/cc-4711",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "note": "an account's page for its people and the operators: its people, the projects on it with maker, admins and use, the projects that came and left",
+  "response": {
+    "name": "cc-4711",
+    "title": "Team X",
+    "reference": "CC 4711",
+    "closed": false,
+    "role": "admin",
+    "members": [
+      {
+        "person": "d45927ff-ddce-4f25-b22e-992ff9dfc3d5",
+        "name": "am",
+        "email": "am@example.test",
+        "role": "admin",
+        "disabled": false
+      },
+      {
+        "person": "3c18db3f-9df4-44d5-b670-fd7772eca61c",
+        "name": "dis",
+        "email": "dis@example.test",
+        "role": "member",
+        "disabled": true
+      }
+    ],
+    "projects": [
+      {
+        "name": "teamx",
+        "madeBy": {
+          "person": "d45927ff-ddce-4f25-b22e-992ff9dfc3d5",
+          "name": "am",
+          "email": "am@example.test"
+        },
+        "admins": [
+          {
+            "person": "d45927ff-ddce-4f25-b22e-992ff9dfc3d5",
+            "name": "am",
+            "email": "am@example.test"
+          }
+        ],
+        "since": "2026-11-21T19:52:08Z",
+        "deleting": false,
+        "limits": {},
+        "use": {
+          "sandboxes": 0,
+          "environments": 1,
+          "runningJobs": 0,
+          "vcpus": 0,
+          "memoryMib": 0
+        }
+      }
+    ],
+    "moves": [
+      {
+        "project": "teamx",
+        "from": null,
+        "to": {
+          "name": "cc-4711",
+          "title": "Team X"
+        },
+        "at": "2026-11-21T19:52:08Z",
+        "by": {
+          "principal": "person:d45927ff-ddce-4f25-b22e-992ff9dfc3d5",
+          "name": "am"
+        }
+      }
+    ]
+  }
+}

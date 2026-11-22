@@ -376,7 +376,7 @@ func lostFiles(t *testing.T, dir string) []string {
 
 func testEnv(id string) wire.Env {
 	return wire.Env{
-		ID: id, Tenant: "acme", Name: "prod", Hosts: []string{"prod-acme.apps.test"}, Deployment: 1, Hash: "h-" + id,
+		ID: id, Project: "acme", Name: "prod", Hosts: []string{"prod-acme.apps.test"}, Deployment: 1, Hash: "h-" + id,
 		Routes: []wire.Route{{Name: "web", Path: "/", Service: "web", Port: "http"}},
 		Services: []wire.Service{{Name: "web", Endpoints: []wire.Endpoint{{
 			Instance: "i-" + id, Address: "fd00:1:2:10::5", Node: "n1", Ports: map[string]int{"http": 8080}, GroupVersion: 1,
@@ -1055,7 +1055,7 @@ func TestHeartbeatsRefreshTheCache(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if time.Since(first) < refresh-100*time.Millisecond {
 		if _, at, err := d.loadTable(); err != nil || !at.Equal(first) {
-			t.Errorf("table-v3.json saved at %v (%v) after a heartbeat within the interval; first at %v", at, err, first)
+			t.Errorf("table-v4.json saved at %v (%v) after a heartbeat within the interval; first at %v", at, err, first)
 		}
 	}
 	// One after it writes the cache, though nothing changed.

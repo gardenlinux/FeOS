@@ -49,7 +49,7 @@ type validateCtx struct {
 	volumes   map[string]spec.AddonData
 	blueprint func(typ string) (addons.Blueprint, bool)
 	// zone is the apps zone (Deps.AppsZone); host the environment's first
-	// host (hostsOf), else its default host under its tenant's zone (""
+	// host (hostsOf), else its default host under its project's zone (""
 	// without an environment, or for one never published), public whether
 	// the environment is public.
 	zone, host string
@@ -256,14 +256,14 @@ func (s *Service) resolveImages(ctx context.Context, env *store.Environment, ask
 }
 
 // loadContext reads what a spec names for its validation, and the pins
-// of its normalisation: the tenant's sandboxes its attached services run
+// of its normalisation: the project's sandboxes its attached services run
 // in (the environment each is in, ADR 0035), the prefixes no pod reaches,
 // the environment's secrets (secrets, when not nil, stands in for them:
 // a clone's) and credentials (creds likewise), what its addon volumes
 // hold, the addon types, the images, and its default host under the apps
 // zone. env is nil for a spec without an environment, which has no
 // credentials.
-func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Environment, sp spec.Spec, mode spec.Mode,
+func (s *Service) loadContext(ctx context.Context, project string, env *store.Environment, sp spec.Spec, mode spec.Mode,
 	secrets map[string]spec.SecretInfo, creds map[string]spec.CredentialInfo) (*validateCtx, spec.Pins, error) {
 	vc := &validateCtx{mode: mode, sandboxes: map[string]spec.SandboxInfo{}, secrets: secrets,
 		volumes: map[string]spec.AddonData{}, blueprint: s.d.Blueprint, zone: s.d.AppsZone,
@@ -330,7 +330,7 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 		if err != nil || vc.sandboxes[id.String()].ID != "" {
 			continue
 		}
-		sb, err := s.st.GetOwnSandbox(ctx, tenant, id)
+		sb, err := s.st.GetOwnSandbox(ctx, project, id)
 		if errors.Is(err, store.ErrNoRow) {
 			continue
 		}
@@ -355,7 +355,7 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 
 	// An environment without a deployment has no addon volumes. A clone
 	// plans for one that is not there yet, under an ID that may be
-	// another tenant's environment's (its insert refuses that later):
+	// another project's environment's (its insert refuses that later):
 	// what that one's volumes hold is no business of the clone's.
 	if env != nil && env.Deployment > 0 && len(sp.Addons) > 0 {
 		vols, err := s.st.ListEnvVolumes(ctx, env.ID)
@@ -371,7 +371,7 @@ func (s *Service) loadContext(ctx context.Context, tenant string, env *store.Env
 	}
 
 	if secrets == nil && env != nil {
-		versions, err := s.st.TenantSecretVersions(ctx, env.ID)
+		versions, err := s.st.ProjectSecretVersions(ctx, env.ID)
 		if err != nil {
 			return nil, pins, fmt.Errorf("secrets: %w", err)
 		}
@@ -477,13 +477,15 @@ func nonNilImages(images map[string]string) map[string]string {
 	return images
 }
 
-// plan parses, validates and normalises raw for the environment env and
-// diffs it against deployment base (nil: the current one). secrets and
+// plan parses raw (written in format), validates and normalises it for
+// the environment env and diffs it against deployment base (nil: the
+// current one). secrets and
 // creds, when not nil, stand in for the environment's secrets and
 // credentials. stored: raw is a stored deployment's spec (a revert's, a
 // clone's of its source's), whose bindings stated in it are accepted.
-func (s *Service) plan(ctx context.Context, tenant string, env store.Environment, raw []byte, base *int, mode spec.Mode,
-	secrets map[string]spec.SecretInfo, creds map[string]spec.CredentialInfo, stored bool) (planned, error) {
+func (s *Service) plan(ctx context.Context, project string, env store.Environment, raw []byte, format spec.Format,
+	base *int, mode spec.Mode, secrets map[string]spec.SecretInfo, creds map[string]spec.CredentialInfo, stored bool) (
+	planned, error) {
 	p := planned{base: env.Deployment, current: env.Deployment}
 	if base != nil {
 		if *base < 0 || *base > env.Deployment {
@@ -498,12 +500,12 @@ func (s *Service) plan(ctx context.Context, tenant string, env store.Environment
 		}
 		p.currentSpec = cur
 	}
-	sp, fs := spec.Parse(raw)
+	sp, fs := spec.ParseAs(raw, format)
 	if spec.HasErrors(fs) {
 		p.findings = fs
 		return p, nil
 	}
-	vc, pins, err := s.loadContext(ctx, tenant, &env, sp, mode, secrets, creds)
+	vc, pins, err := s.loadContext(ctx, project, &env, sp, mode, secrets, creds)
 	if err != nil {
 		return planned{}, err
 	}
@@ -514,7 +516,7 @@ func (s *Service) plan(ctx context.Context, tenant string, env store.Environment
 	if secrets == nil && vc.bindingsOn && !spec.HasErrors(fs) {
 		fs = append(fs, s.bindingValueFindings(ctx, env.ID, norm)...)
 	}
-	qfs, err := s.quotaFindings(ctx, tenant, env.ID, p.currentSpec, &norm)
+	qfs, err := s.quotaFindings(ctx, project, env.ID, p.currentSpec, &norm)
 	if err != nil {
 		return planned{}, err
 	}
@@ -542,6 +544,7 @@ func (s *Service) plan(ctx context.Context, tenant string, env store.Environment
 // applyArgs are what an apply makes a deployment of.
 type applyArgs struct {
 	raw             []byte
+	format          spec.Format
 	base            int
 	author, message string
 	annotations     map[string]string
@@ -555,15 +558,15 @@ type applyArgs struct {
 var errReplan = errors.New("the current deployment changed since the plan")
 
 // apply plans raw (ModeApply: an image that cannot be resolved is an
-// error), refuses error findings, and in one transaction (the tenant FOR
+// error), refuses error findings, and in one transaction (the project FOR
 // SHARE, the environment FOR UPDATE) answers the current deployment
 // unchanged when the spec equals it and it did not fail, refuses a base
 // that is not the current deployment, inserts the next deployment waiting,
 // replaces the older waiting and deploying ones and wakes the
 // controller.
-func (s *Service) apply(ctx context.Context, tenant, ref string, a applyArgs) (ApplyAnswer, error) {
+func (s *Service) apply(ctx context.Context, project, ref string, a applyArgs) (ApplyAnswer, error) {
 	for range 3 {
-		ans, err := s.applyOnce(ctx, tenant, ref, a)
+		ans, err := s.applyOnce(ctx, project, ref, a)
 		if !errors.Is(err, errReplan) {
 			return ans, err
 		}
@@ -571,15 +574,15 @@ func (s *Service) apply(ctx context.Context, tenant, ref string, a applyArgs) (A
 	return ApplyAnswer{}, errors.New("the environment keeps getting new deployments; try again")
 }
 
-func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs) (ApplyAnswer, error) {
-	env, err := resolveEnv(ctx, s.st, tenant, ref, store.NoLock)
+func (s *Service) applyOnce(ctx context.Context, project, ref string, a applyArgs) (ApplyAnswer, error) {
+	env, err := resolveEnv(ctx, s.st, project, ref, store.NoLock)
 	if err != nil {
 		return ApplyAnswer{}, err
 	}
 	if env.Deleting {
 		return ApplyAnswer{}, errDeleting(env.Name)
 	}
-	p, err := s.plan(ctx, tenant, env, a.raw, nil, spec.ModeApply, nil, nil, a.origin == model.OriginRevert)
+	p, err := s.plan(ctx, project, env, a.raw, a.format, nil, spec.ModeApply, nil, nil, a.origin == model.OriginRevert)
 	if err != nil {
 		return ApplyAnswer{}, err
 	}
@@ -595,7 +598,7 @@ func (s *Service) applyOnce(ctx context.Context, tenant, ref string, a applyArgs
 	}
 	var ans ApplyAnswer
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
-		t, err := lockQuota(ctx, tx, tenant)
+		t, err := lockQuota(ctx, tx, project)
 		if err != nil {
 			return err
 		}
@@ -688,7 +691,7 @@ func checkPins(ctx context.Context, tx *store.Store, envID uuid.UUID, pins map[s
 	if len(pins) == 0 {
 		return nil
 	}
-	versions, err := tx.TenantSecretVersions(ctx, envID)
+	versions, err := tx.ProjectSecretVersions(ctx, envID)
 	if err != nil {
 		return fmt.Errorf("secrets: %w", err)
 	}
@@ -828,19 +831,19 @@ func withObject(current []byte, kind, name string, object json.RawMessage) ([]by
 	return b, had, nil
 }
 
-// quotaFindings are a plan's findings of the tenant's limits (ADR 0031):
+// quotaFindings are a plan's findings of the project's limits (ADR 0031):
 // an error when the deployment of next in place of the environment's
 // current one would bring its vCPUs or memory past them.
-func (s *Service) quotaFindings(ctx context.Context, tenant string, env uuid.UUID, current, next *spec.Spec) (
+func (s *Service) quotaFindings(ctx context.Context, project string, env uuid.UUID, current, next *spec.Spec) (
 	[]spec.Finding, error) {
-	t, err := s.st.GetTenant(ctx, tenant)
+	t, err := s.st.GetProject(ctx, project)
 	if errors.Is(err, store.ErrNoRow) || (err == nil && t.Limits.VCPUs == nil && t.Limits.MemoryMiB == nil) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("tenant %s: %w", tenant, err)
+		return nil, fmt.Errorf("project %s: %w", project, err)
 	}
-	others, err := quota.Of(ctx, s.st, tenant, env)
+	others, err := quota.Of(ctx, s.st, project, env)
 	if err != nil {
 		return nil, err
 	}
@@ -877,7 +880,8 @@ func (s *Service) envCredentials(ctx context.Context, st *store.Store, env uuid.
 	for name, vs := range versions {
 		info := spec.CredentialInfo{Versions: map[int]spec.CredentialTemplate{}}
 		for _, v := range vs {
-			info.Versions[v.Version] = spec.CredentialTemplate{Upstream: v.Upstream, Mode: v.Mode}
+			info.Versions[v.Version] = spec.CredentialTemplate{Upstream: v.Upstream, Mode: v.Mode,
+				ForwardedHost: v.ForwardedHost}
 			info.Latest = max(info.Latest, v.Version)
 		}
 		out[name] = info

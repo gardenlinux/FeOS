@@ -15,7 +15,7 @@ import (
 // 0032 puts every sandbox and job into an environment (ADR 0035): a
 // sandbox that an environment's attached service names into the most
 // recent such environment, every other one and every job into the
-// tenant's environment "sandboxes", made with its group default (a tenant
+// project's environment "sandboxes", made with its group default (a project
 // that has one keeps it, and a limit of environments grows by the one
 // made); instances are marked so; all are in default,
 // with log labels of their environment, and a sandbox with a pod is to be
@@ -103,7 +103,7 @@ func TestSandboxesInEnvironmentsMigration(t *testing.T) {
 	// Named by dev and preview: the more recent, preview; moved once.
 	if r := read("wsa00000001"); r.env != preview || r.instance || !slices.Equal(r.groups, inDefault) || !r.pending ||
 		r.labels["ferun.environment"] != preview || r.labels["ferun.kind"] != "sandbox" ||
-		r.labels["ferun.object"] != "wsa00000001" || r.labels["ferun.tenant"] != "acme" {
+		r.labels["ferun.object"] != "wsa00000001" || r.labels["ferun.tenant"] != "acme" { // KEEP-TENANT: the label key of 0032
 		t.Fatalf("wsa00000001 %+v", r)
 	}
 	// Named by an environment being deleted only: sandboxes; hibernated,
@@ -149,7 +149,7 @@ func TestSandboxesInEnvironmentsMigration(t *testing.T) {
 	if *limits["acme"] != 4 || *limits["beta"] != 2 || *limits["idle"] != 1 || limits["free"] != nil {
 		t.Fatalf("limits acme %d beta %d idle %d free %v", *limits["acme"], *limits["beta"], *limits["idle"], limits["free"])
 	}
-	// A tenant with neither sandboxes nor jobs gets no environment.
+	// A project with neither sandboxes nor jobs gets no environment.
 	var idle int
 	if err := d.Pool.QueryRow(ctx, "SELECT count(*) FROM environments WHERE owner = 'idle'").Scan(&idle); err != nil ||
 		idle != 0 {

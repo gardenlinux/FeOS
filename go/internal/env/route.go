@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -72,9 +73,11 @@ func routeToken(r *http.Request) (tok string, creds []string, header bool) {
 }
 
 // ferunBearer reports whether a request's Authorization, any of its
-// values, carries a FeRun credential as its bearer token, a tenant's
-// token or a sandbox's (the scheme in any case): one the door refuses to
-// pass on to an upstream.
+// values, carries a FeRun credential as its bearer token, a project's
+// token, a sandbox's (whether or not it is good now) or an integration's
+// (the scheme in any case): one the door refuses to pass on to an upstream. An integration's is a JWT whose
+// issuer and subject, read without its signature, are a registered
+// integration's (ADR 0056); any other JWT is the upstream's affair.
 func (s *Service) ferunBearer(ctx context.Context, r *http.Request) (bool, error) {
 	for _, v := range r.Header.Values("Authorization") {
 		scheme, tok, _ := strings.Cut(strings.TrimSpace(v), " ")
@@ -83,20 +86,51 @@ func (s *Service) ferunBearer(ctx context.Context, r *http.Request) (bool, error
 			continue
 		}
 		hash := store.HashToken(tok)
-		switch _, err := s.st.ResolveTenantToken(ctx, hash); {
+		switch _, err := s.st.ResolveProjectToken(ctx, hash); {
 		case err == nil:
 			return true, nil
 		case !errors.Is(err, model.ErrUnknownToken):
 			return false, err
 		}
-		switch _, _, err := s.st.ResolveSandboxToken(ctx, hash); {
+		// Any sandbox token, also one its integration's access no longer
+		// backs (ADR 0056): that access can come back, and the token with it.
+		switch _, err := s.st.GetSandboxToken(ctx, hash); {
 		case err == nil:
 			return true, nil
-		case !errors.Is(err, model.ErrUnknownToken):
+		case !errors.Is(err, store.ErrNoRow):
 			return false, err
+		}
+		if iss, sub, ok := jwtSubject(tok); ok {
+			switch _, err := s.st.IntegrationBySubject(ctx, iss, sub); {
+			case err == nil:
+				return true, nil
+			case !errors.Is(err, store.ErrNoRow):
+				return false, err
+			}
 		}
 	}
 	return false, nil
+}
+
+// jwtSubject reads the iss and sub of a JWT's payload without checking
+// its signature; ok false for anything that is not a JWT with both.
+func jwtSubject(tok string) (iss, sub string, ok bool) {
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		return "", "", false
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", "", false
+	}
+	var c struct {
+		Iss string `json:"iss"`
+		Sub string `json:"sub"`
+	}
+	if json.Unmarshal(payload, &c) != nil || c.Iss == "" || c.Sub == "" {
+		return "", "", false
+	}
+	return c.Iss, c.Sub, true
 }
 
 // routePath is the path the route door forwards: the request's path
@@ -155,9 +189,9 @@ func rawOf(path, raw string) string {
 // ServeRoute is the route door, ANY
 // /api/v1/environments/{env}/http/{path...}, an auth class of its own: a
 // route token of the environment in X-FeRun-Route-Token, else as Bearer
-// (401 "route token required"; a tenant token is refused the same way),
+// (401 "route token required"; a project token is refused the same way),
 // which stops here (from X-FeRun-Route-Token, the client's Authorization
-// goes on to the upstream, unless its bearer token is a tenant's or a
+// goes on to the upstream, unless its bearer token is a project's or a
 // sandbox's: 401 the same way, and nothing is forwarded), the longest
 // segment-aware
 // prefix match over the routes of the deployed deployment (the latest when
@@ -331,7 +365,7 @@ func (s *Service) ServeRoute(w http.ResponseWriter, r *http.Request) {
 // (FeCode replaces a lost workspace sandbox so) is routed to, as the
 // controller starts the service there anew. Otherwise refusal says why
 // not: a sandbox ID is free again once its sandbox is deleted, and
-// another tenant may take it, which the spec validated at apply never
+// another project may take it, which the spec validated at apply never
 // sees.
 func (s *Service) attachedSandbox(ctx context.Context, e store.Environment, service string) (podid.ID, string, error) {
 	a, err := s.st.GetAttached(ctx, e.ID, service)
@@ -346,7 +380,7 @@ func (s *Service) attachedSandbox(ctx context.Context, e store.Environment, serv
 		return "", "", fmt.Errorf("sandbox %s: %w", a.SandboxID, err)
 	}
 	if err != nil || sb.Owner != e.Owner || sb.EnvironmentID != e.ID || !sb.IsOwn() {
-		return "", fmt.Sprintf("sandbox %s of service %s is gone or not this tenant's", a.SandboxID, service), nil
+		return "", fmt.Sprintf("sandbox %s of service %s is gone or not this project's", a.SandboxID, service), nil
 	}
 	return sb.ID, "", nil
 }

@@ -9,67 +9,67 @@ import (
 )
 
 // Zones are the platform's zones of default hosts (ADR 0021, ADR 0031):
-// the apps zone (--apps-zone) with the tenants that own its plain labels
-// (--apps-zone-owners), and the tenant zone (--tenant-zone), where the
-// tenants that people make get their hosts. "" switches a zone off. A
-// tenant's zone (tenants.zone) is "" for the apps zone, else the name of
+// the apps zone (--apps-zone) with the projects that own its plain labels
+// (--apps-zone-owners), and the project zone (--project-zone), where the
+// projects that people make get their hosts. "" switches a zone off. A
+// project's zone (projects.zone) is "" for the apps zone, else the name of
 // its zone.
 type Zones struct {
 	Apps       string
 	AppsOwners []string
-	Tenant     string
+	Project    string
 }
 
-// Of is the zone a tenant whose tenants.zone is zone has its default hosts
-// under: the apps zone for "" (or the apps zone's name), the tenant zone
+// Of is the zone a project whose projects.zone is zone has its default hosts
+// under: the apps zone for "" (or the apps zone's name), the project zone
 // for its name, and "" for any other zone, one the platform does not serve
-// (any more), whose hosts are off until an operator moves the tenant.
+// (any more), whose hosts are off until an operator moves the project.
 func (z Zones) Of(zone string) string {
 	switch {
 	case zone == "" || zone == z.Apps:
 		return z.Apps
-	case zone == z.Tenant:
-		return z.Tenant
+	case zone == z.Project:
+		return z.Project
 	}
 	return ""
 }
 
-// ForNewTenant is tenants.zone of a new tenant: the tenant zone for one a
+// ForNewProject is projects.zone of a new project: the project zone for one a
 // person makes (byPerson), while the platform has one; "", the apps zone,
-// for one an operator makes, and for every tenant without a tenant zone.
-func (z Zones) ForNewTenant(byPerson bool) string {
+// for one an operator makes, and for every project without a project zone.
+func (z Zones) ForNewProject(byPerson bool) string {
 	if byPerson {
-		return z.Tenant
+		return z.Project
 	}
 	return ""
 }
 
-// Column is what tenants.zone holds for a zone an operator names, given
-// by its name: "" for the apps zone, the tenant zone's name for it; ok is
+// Column is what projects.zone holds for a zone an operator names, given
+// by its name: "" for the apps zone, the project zone's name for it; ok is
 // false for any other name, a zone the platform does not serve.
 func (z Zones) Column(name string) (zone string, ok bool) {
 	name = strings.ToLower(strings.TrimSuffix(name, "."))
 	switch {
 	case z.Apps != "" && name == z.Apps:
 		return "", true
-	case z.Tenant != "" && name == z.Tenant:
-		return z.Tenant, true
+	case z.Project != "" && name == z.Project:
+		return z.Project, true
 	}
 	return "", false
 }
 
-// PlainLabels reports whether tenant, whose tenants.zone is zone, may
+// PlainLabels reports whether project, whose projects.zone is zone, may
 // choose a plain label (PlainHostLabel): it owns the apps zone and its
-// hosts are there. The tenant zone has no owners, so nobody chooses a
+// hosts are there. The project zone has no owners, so nobody chooses a
 // plain label in it.
-func (z Zones) PlainLabels(tenant, zone string) bool {
-	return z.Apps != "" && z.Of(zone) == z.Apps && slices.Contains(z.AppsOwners, tenant)
+func (z Zones) PlainLabels(project, zone string) bool {
+	return z.Apps != "" && z.Of(zone) == z.Apps && slices.Contains(z.AppsOwners, project)
 }
 
 // Names are the zones the platform serves, the apps zone first.
 func (z Zones) Names() []string {
 	var out []string
-	for _, n := range []string{z.Apps, z.Tenant} {
+	for _, n := range []string{z.Apps, z.Project} {
 		if n != "" {
 			out = append(out, n)
 		}

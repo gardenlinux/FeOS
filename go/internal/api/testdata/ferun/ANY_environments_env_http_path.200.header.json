@@ -16,5 +16,5 @@
     "Authorization": "Bearer <the client's own token>",
     "Host": "expensa-stage.boxed.fecode.dev"
   },
-  "note": "the route door with the route token in X-FeRun-Route-Token: forwarded as the bearer form is, X-FeRun-Route-Token and Proxy-Authorization stripped, the client's Authorization passed to the service unchanged; a tenant token is refused in either header"
+  "note": "the route door with the route token in X-FeRun-Route-Token: forwarded as the bearer form is, X-FeRun-Route-Token and Proxy-Authorization stripped, the client's Authorization passed to the service unchanged; a project token is refused in either header"
 }

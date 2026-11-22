@@ -298,7 +298,7 @@ describe("the bindings' use and the workloads' identities, as ferund answers the
   });
   it("finds a workload's identity and the certificate that ends first", () => {
     const api = workloadOf(ids, 'service', 'api');
-    expect(api.spiffeId).toBe('spiffe://run.fecore.dev/tenant/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/service/api');
+    expect(api.spiffeId).toBe('spiffe://run.fecore.dev/project/fecode/env/2f0c6d1e-5b0a-4c55-9d43-0d1b7a3e8f21/service/api');
     expect(soonestCert(api.pods)).toMatchObject({ pod: 'd7r2m4k9pqs', notAfter: '2026-11-20T09:15:00Z', node: 'node-a' });
     expect(workloadOf(ids, 'job', 'migrate').pods).toEqual([]);
     expect(soonestCert([])).toBe(null);

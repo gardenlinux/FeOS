@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -18,8 +19,11 @@ import (
 	"github.com/gardenlinux/feos/go/internal/activity"
 	"github.com/google/uuid"
 
+	fapi "github.com/gardenlinux/feos/go/ferun/api"
+
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
+	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/oidc"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -33,7 +37,7 @@ import (
 // marked admin. A sign-in under way lives in auth_logins, so that it may
 // complete on another instance than it began on. The provider's
 // back-channel logout ends the sessions of its sid. Machine credentials
-// (tenant and sandbox tokens, /mcp) are not touched by any of it.
+// (project and sandbox tokens, /mcp) are not touched by any of it.
 
 // loginCookieAge is the life of the ferun_login cookie, the sign-in's
 // limit.
@@ -61,66 +65,146 @@ func (s *server) authConfig(w http.ResponseWriter, _ *http.Request) error {
 	}{s.oidc != nil, len(s.cfg.AdminUsers) > 0})
 }
 
-// meTenant is a tenant of /auth/me: the person's role on it ("" with
-// grants on environments alone) and their grants on its environments.
-type meTenant struct {
-	Tenant       string          `json:"tenant"`
-	Role         string          `json:"role"`
-	Environments []meEnvironment `json:"environments"`
-}
-
-type meEnvironment struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Role string `json:"role"`
-}
-
-// myTenants lists a session's tenants: an operator's are every tenant, as
-// admin; a person's those of their grants.
-func (s *server) myTenants(r *http.Request, sess store.UISession) ([]meTenant, error) {
-	out := []meTenant{}
-	if sess.Admin {
-		names, err := s.st.LiveTenantNames(r.Context())
-		if err != nil {
-			return nil, internalf("tenants: %v", err)
+// meProjects answers /auth/me's projects of a caller: for each project the
+// principal it is there (its grants, the named person's, the project's
+// protected environments), its effective role, and every environment of
+// it the caller reads with its effective role, whether it may plan
+// against it and delete it, all by auth.Project's one rule, which every
+// check uses too (the contract's §2.2). A project the caller does not see
+// is left out, and so is one no longer there. Each says when it was made
+// (a name made again is another project). The projects come sorted by
+// name; integration says to answer an integration's own roles beside.
+func (s *server) meProjects(r *http.Request, ps []auth.Project, integration bool) ([]fapi.MeProject, error) {
+	out := []fapi.MeProject{}
+	if len(ps) == 0 {
+		return out, nil
+	}
+	names := make([]string, len(ps))
+	for i, p := range ps {
+		names[i] = p.Name
+	}
+	envs, err := s.st.ProjectEnvironments(r.Context(), names)
+	if err != nil {
+		return nil, internalf("environments: %v", err)
+	}
+	created, err := s.st.ProjectsCreated(r.Context(), names)
+	if err != nil {
+		return nil, internalf("projects: %v", err)
+	}
+	byProject := map[string][]store.EnvName{}
+	for _, e := range envs {
+		byProject[e.Project] = append(byProject[e.Project], e)
+	}
+	for _, t := range ps {
+		for _, e := range byProject[t.Name] {
+			if e.Protected && !e.Deleting {
+				if t.Protected == nil {
+					t.Protected = map[uuid.UUID]bool{}
+				}
+				t.Protected[e.ID] = true
+			}
 		}
+		at, there := created[t.Name]
+		if !t.Visible() || !there {
+			continue
+		}
+		mp := fapi.MeProject{Project: t.Name, CreatedAt: at, Role: t.ProjectRole().String(), Environments: []fapi.MeEnvironment{}}
+		if integration {
+			mp.IntegrationRole = t.Role.String()
+			if t.Named != nil {
+				mp.PersonRole = t.Named.Project.String()
+			}
+		}
+		for _, e := range byProject[t.Name] {
+			role := t.EnvRole(e.ID)
+			if role < auth.RoleRead {
+				continue
+			}
+			me := fapi.MeEnvironment{ID: e.ID.String(), Name: e.Name, Role: role.String(), Protected: t.Protected[e.ID],
+				Plan: t.PlanRole(e.ID) >= auth.RoleWrite, Delete: t.MayDelete(e.ID)}
+			if integration {
+				me.IntegrationRole = t.OwnEnvRole(e.ID).String()
+				if t.Named != nil {
+					me.PersonRole = t.PersonEnvRole(e.ID).String()
+				}
+			}
+			mp.Environments = append(mp.Environments, me)
+		}
+		out = append(out, mp)
+	}
+	return out, nil
+}
+
+// grantsByProject groups grants of one principal by project, in their
+// order (by project).
+func grantsByProject(gs []store.PersonProjectGrant) ([]string, map[string]auth.Grants) {
+	var order []string
+	out := map[string]auth.Grants{}
+	for _, g := range gs {
+		cur, ok := out[g.Project]
+		if !ok {
+			order = append(order, g.Project)
+		}
+		role, _ := auth.ParseRole(g.Role)
+		if g.EnvironmentID == uuid.Nil {
+			cur.Project = max(cur.Project, role)
+		} else {
+			if cur.Envs == nil {
+				cur.Envs = map[uuid.UUID]auth.Role{}
+			}
+			cur.Envs[g.EnvironmentID] = max(cur.Envs[g.EnvironmentID], role)
+		}
+		out[g.Project] = cur
+	}
+	return order, out
+}
+
+// sessionProjects are a session's principals in its projects: an
+// operator's every live project, as admin; a person's those of their
+// grants.
+func (s *server) sessionProjects(r *http.Request, sess store.UISession) ([]auth.Project, error) {
+	p := sessionPrincipal(sess)
+	if sess.Admin {
+		names, err := s.st.LiveProjectNames(r.Context())
+		if err != nil {
+			return nil, internalf("projects: %v", err)
+		}
+		out := make([]auth.Project, 0, len(names))
 		for _, n := range names {
-			out = append(out, meTenant{Tenant: n, Role: auth.RoleAdmin.String(), Environments: []meEnvironment{}})
+			out = append(out, auth.Project{Name: n, Principal: p, Role: auth.RoleAdmin})
 		}
 		return out, nil
 	}
 	if sess.PersonID == uuid.Nil {
-		return out, nil
+		return nil, nil
 	}
 	gs, err := s.st.PersonGrants(r.Context(), sess.PersonID)
 	if err != nil {
 		return nil, internalf("grants: %v", err)
 	}
-	for _, g := range gs {
-		if len(out) == 0 || out[len(out)-1].Tenant != g.Tenant {
-			out = append(out, meTenant{Tenant: g.Tenant, Environments: []meEnvironment{}})
-		}
-		t := &out[len(out)-1]
-		if g.EnvironmentID == uuid.Nil {
-			t.Role = g.Role
-		} else {
-			t.Environments = append(t.Environments, meEnvironment{ID: g.EnvironmentID.String(), Name: g.EnvironmentName,
-				Role: g.Role})
-		}
+	order, by := grantsByProject(gs)
+	out := make([]auth.Project, 0, len(order))
+	for _, n := range order {
+		out = append(out, auth.Project{Name: n, Principal: p, Role: by[n].Project, Envs: by[n].Envs})
 	}
 	return out, nil
 }
 
-// authMe is GET /auth/me: who is signed in, whether an operator, and the
-// person's tenants with their roles. Basic credentials that pass win, as
-// on the admin routes; then the session.
+// authMe is GET /auth/me (the contract's §2.3): who asks, by the
+// credential, and the projects it reaches with its effective roles.
+// Basic credentials that pass win, as on the admin routes; then a bearer
+// (an integration's, with the person it names, or a project token); then
+// the session. FeRun-Project is not read.
 func (s *server) authMe(w http.ResponseWriter, r *http.Request) error {
 	if a, present, err := s.basicAdmin(r); present && err == nil {
-		return writeJSON(w, http.StatusOK, struct {
-			Username string `json:"username"`
-			Admin    bool   `json:"admin"`
-			Method   string `json:"method"`
-		}{a.User, true, a.Method})
+		return writeJSON(w, http.StatusOK, fapi.Me{Kind: "basic", Username: a.User, Admin: true, Method: a.Method,
+			Projects: []fapi.MeProject{}, Accounts: []fapi.MeAccount{}})
+	}
+	if tok := bearer(r); tok != "" {
+		if isJWT(tok) {
+			return s.integrationMe(w, r, tok)
+		}
+		return s.tokenMe(w, r, tok)
 	}
 	sess, ok, err := s.session(r)
 	if err != nil {
@@ -129,7 +213,21 @@ func (s *server) authMe(w http.ResponseWriter, r *http.Request) error {
 	if !ok {
 		return apierr.New(http.StatusUnauthorized, "not signed in")
 	}
-	tenants, err := s.myTenants(r, sess)
+	if _, sent, _ := personNamed(r); sent {
+		return errPersonHeaderRefused()
+	}
+	ps, err := s.sessionProjects(r, sess)
+	if err != nil {
+		return err
+	}
+	projects, err := s.meProjects(r, ps, false)
+	if err != nil {
+		return err
+	}
+	if err := s.fillProjectAccounts(r.Context(), projects); err != nil {
+		return err
+	}
+	accounts, err := s.myAccounts(r.Context(), sess)
 	if err != nil {
 		return err
 	}
@@ -137,17 +235,109 @@ func (s *server) authMe(w http.ResponseWriter, r *http.Request) error {
 	if sess.PersonID != uuid.Nil {
 		person = sess.PersonID.String()
 	}
-	return writeJSON(w, http.StatusOK, struct {
-		Sub      string     `json:"sub"`
-		Person   string     `json:"person"`
-		Email    string     `json:"email"`
-		Name     string     `json:"name"`
-		Username string     `json:"username"`
-		Picture  string     `json:"picture"`
-		Admin    bool       `json:"admin"`
-		Method   string     `json:"method"`
-		Tenants  []meTenant `json:"tenants"`
-	}{sess.Sub, person, sess.Email, sess.Name, sess.Username, sess.Picture, sess.Admin, auth.AdminOIDC, tenants})
+	me := fapi.Me{Kind: "session", Sub: sess.Sub, Person: person, Email: sess.Email, Name: sess.Name,
+		Username: sess.Username, Picture: sess.Picture, Admin: sess.Admin, Method: auth.AdminOIDC, Projects: projects,
+		Accounts: accounts}
+	return writeJSON(w, http.StatusOK, me)
+}
+
+// tokenMe is /auth/me for a project token: its own grant, and its project
+// with the roles of all its grants.
+func (s *server) tokenMe(w http.ResponseWriter, r *http.Request, tok string) error {
+	ctx := r.Context()
+	hash := store.HashToken(tok)
+	name, roles, err := s.st.TokenAccess(ctx, hash)
+	if errors.Is(err, model.ErrUnknownToken) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`"`)
+		return apierr.New(http.StatusUnauthorized, "unknown project token")
+	}
+	if err != nil {
+		return fmt.Errorf("token lookup: %w", err)
+	}
+	if _, sent, _ := personNamed(r); sent {
+		return errPersonHeaderRefused()
+	}
+	own, err := s.st.GetProjectToken(ctx, name, hash)
+	if err != nil {
+		return fmt.Errorf("token lookup: %w", err)
+	}
+	t := auth.Project{Name: name, Principal: auth.Principal{TokenHash: hash}}
+	grantRoles(&t, roles)
+	projects, err := s.meProjects(r, []auth.Project{t}, false)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, fapi.Me{Kind: "token",
+		Token:    &fapi.MeToken{Label: own.Label, Role: own.Role, Environment: idOrEmpty(own.EnvironmentID)},
+		Projects: projects, Accounts: []fapi.MeAccount{}})
+}
+
+// integrationMe is /auth/me for an integration (ADR 0056): itself, the
+// person it names, and the projects that grant it with their roles; with
+// a person named, those in which both hold a role, with the lower of
+// both and each side's own. A disabled integration reaches none and learns
+// no more of a person it names than the subject it sent, and one naming a
+// person FeRun does not know or who is disabled reaches none.
+func (s *server) integrationMe(w http.ResponseWriter, r *http.Request, tok string) error {
+	ctx := r.Context()
+	in, err := s.integrationOf(w, r, tok)
+	if err != nil {
+		return err
+	}
+	sub, sent, err := personNamed(r)
+	if err != nil {
+		return err
+	}
+	me := fapi.Me{Kind: "integration",
+		Integration: &fapi.MeIntegration{Name: in.Name, Title: in.Title, URL: in.URL, Disabled: in.Disabled()},
+		Projects:    []fapi.MeProject{}, Accounts: []fapi.MeAccount{}}
+	var person *store.Person
+	if sent {
+		me.Named = &fapi.MeNamed{Sub: sub}
+	}
+	// A disabled integration learns nothing of the person it names.
+	if sent && !in.Disabled() {
+		p, err := s.st.PersonBySubject(ctx, in.Issuer, sub)
+		if err != nil && !isNoRow(err) {
+			return fmt.Errorf("person %s: %w", sub, err)
+		}
+		if err == nil && !p.Disabled() {
+			person = &p
+			me.Named = &fapi.MeNamed{Sub: sub, Known: true, Person: p.ID.String(), Email: p.Email, Name: p.Name}
+		}
+	}
+	if in.Disabled() || (sent && person == nil) {
+		return writeJSON(w, http.StatusOK, me)
+	}
+	gs, err := s.st.IntegrationGrants(ctx, in.ID)
+	if err != nil {
+		return fmt.Errorf("grants: %w", err)
+	}
+	order, by := grantsByProject(gs)
+	var theirs map[string]auth.Grants
+	if person != nil {
+		pgs, err := s.st.PersonGrants(ctx, person.ID)
+		if err != nil {
+			return fmt.Errorf("grants: %w", err)
+		}
+		_, theirs = grantsByProject(pgs)
+	}
+	ps := make([]auth.Project, 0, len(order))
+	for _, n := range order {
+		t := auth.Project{Name: n, Principal: auth.Principal{Integration: in.ID}, Role: by[n].Project, Envs: by[n].Envs}
+		if person != nil {
+			g, ok := theirs[n]
+			if !ok {
+				continue
+			}
+			t.Named, t.Principal.For = &auth.NamedPerson{Sub: sub, Grants: g}, person.ID
+		}
+		ps = append(ps, t)
+	}
+	if me.Projects, err = s.meProjects(r, ps, true); err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, me)
 }
 
 // randomToken returns 32 random bytes, base64url without padding.

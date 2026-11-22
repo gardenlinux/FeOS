@@ -35,11 +35,11 @@ const (
 // user: an environment's services and jobs and its sandboxes (ferun.kind).
 var egressKinds = []string{"service", "job", "sandbox"}
 
-// EgressQuery is a read of the requests of a tenant's environment's pods
+// EgressQuery is a read of the requests of a project's environment's pods
 // through their HTTP bindings in [SinceNs, UntilNs), Unix ns.
 type EgressQuery struct {
-	Tenant, Environment string
-	SinceNs, UntilNs    int64
+	Project, Environment string
+	SinceNs, UntilNs     int64
 }
 
 // Egress is the answer of a read: per binding that had a request in the
@@ -105,7 +105,7 @@ func egressBinding(spanName string) (string, bool) {
 // read: a span is there at most a commit (5 s) after it came, and a pod
 // sends it once the request's answer ended.
 func (t *Traces) Egress(ctx context.Context, q EgressQuery) (Egress, error) {
-	base := quickwit.SpanQuery{Tenant: q.Tenant, Environment: q.Environment, Source: SourceEgress, SinceNs: q.SinceNs,
+	base := quickwit.SpanQuery{Project: q.Project, Environment: q.Environment, Source: SourceEgress, SinceNs: q.SinceNs,
 		UntilNs: q.UntilNs - 1}
 	type read struct {
 		q      quickwit.SpanQuery
@@ -241,11 +241,11 @@ const egressMessageWindow = 10 * time.Minute
 // error.message of the pod's egress record of the request (sink.md, A
 // pod's egress records), found in the log index by the request's trace
 // and span; "" when it is not there.
-func (s *Store) egressMessage(ctx context.Context, tenant, env string, p *EgressProblem) (string, error) {
+func (s *Store) egressMessage(ctx context.Context, project, env string, p *EgressProblem) (string, error) {
 	if p.TraceID == "" || p.SpanID == "" {
 		return "", nil
 	}
-	docs, err := s.index.Search(ctx, s.indexPattern(), quickwit.Query{Tenant: tenant, Environment: env,
+	docs, err := s.index.Search(ctx, s.indexPattern(), quickwit.Query{Project: project, Environment: env,
 		Source: SourceEgress, Trace: p.TraceID, SinceNs: p.TsNs - int64(egressMessageWindow),
 		UntilNs: p.TsNs + int64(egressMessageWindow), Order: quickwit.NewestFirst, Max: 100})
 	if err != nil {
@@ -268,8 +268,8 @@ func (s *Store) egressMessage(ctx context.Context, tenant, env string, p *Egress
 // parseEgressQuery reads the parameters of /api/v1/egress: environment,
 // since and until (RFC 3339 or Unix ns), the range [since, until) at
 // most 7 days.
-func parseEgressQuery(v url.Values, tenant string) (EgressQuery, error) {
-	q := EgressQuery{Tenant: tenant, Environment: v.Get("environment")}
+func parseEgressQuery(v url.Values, project string) (EgressQuery, error) {
+	q := EgressQuery{Project: project, Environment: v.Get("environment")}
 	if q.Environment == "" {
 		return q, fmt.Errorf("environment is required")
 	}
@@ -302,7 +302,7 @@ func parseEgressQuery(v url.Values, tenant string) (EgressQuery, error) {
 // problems that are feos-authn's refusals; a message that cannot be read
 // is left empty.
 func (a *api) egress(w http.ResponseWriter, r *http.Request, acc Access) {
-	q, err := parseEgressQuery(r.URL.Query(), acc.Tenant)
+	q, err := parseEgressQuery(r.URL.Query(), acc.Project)
 	if err != nil {
 		apierr.Write(w, apierr.New(http.StatusBadRequest, "%s", err.Error()))
 		return
@@ -321,7 +321,7 @@ func (a *api) egress(w http.ResponseWriter, r *http.Request, acc Access) {
 		if p == nil || p.Code == "" {
 			continue
 		}
-		if p.Message, err = a.store.egressMessage(r.Context(), q.Tenant, q.Environment, p); err != nil {
+		if p.Message, err = a.store.egressMessage(r.Context(), q.Project, q.Environment, p); err != nil {
 			if r.Context().Err() != nil {
 				return
 			}

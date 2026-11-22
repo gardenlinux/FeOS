@@ -55,8 +55,8 @@ func TestParseDefaultsAndEnv(t *testing.T) {
 	if c.StateDir != "/var/lib/ferun-ingress" || c.JoinTokenFile != "" || c.MeshDevice != "ferun-mesh" ||
 		c.MeshPort != 51820 || c.MeshMTU != 0 || c.WakeHold != 2*time.Minute || c.PendingHold != 10*time.Second ||
 		c.MaxHeld != 1024 || c.UpstreamDialTimeout != 3*time.Second || c.UpstreamIdleTimeout != 4*time.Second ||
-		c.MaxHeldPerTenant != 256 || c.MaxHeldPerEnv != 128 || c.MaxInflight != 2048 ||
-		c.MaxInflightPerTenant != 512 || c.MaxInflightPerEnv != 256 ||
+		c.MaxHeldPerProject != 256 || c.MaxHeldPerEnv != 128 || c.MaxInflight != 2048 ||
+		c.MaxInflightPerProject != 512 || c.MaxInflightPerEnv != 256 ||
 		c.UpstreamWaitTimeout != 10*time.Second || c.MemoryLimit != 0 ||
 		c.MaxRequestBody != 64<<20 || c.MaxConnsPerEndpoint != 256 || c.ShutdownDelay != 10*time.Second ||
 		c.ShutdownGrace != 40*time.Second || c.LogLevel != slog.LevelInfo || c.LogFormat != LogFormatJSON ||
@@ -74,9 +74,9 @@ func TestParseDefaultsAndEnv(t *testing.T) {
 	// writes it: bytes.
 	env["FERUN_INGRESS_MEMORY_LIMIT"] = "536870912"
 	env["FERUN_INGRESS_MAX_INFLIGHT_PER_ENV"] = "64"
-	env["FERUN_INGRESS_MAX_HELD_PER_TENANT"] = "32"
+	env["FERUN_INGRESS_MAX_HELD_PER_PROJECT"] = "32"
 	c, err = Parse([]string{"--shutdown-delay", "5s", "--name", "ferun-ingress-1", "--log-format", "text",
-		"--max-held-per-env", "8", "--max-inflight", "100", "--max-inflight-per-tenant", "80",
+		"--max-held-per-env", "8", "--max-inflight", "100", "--max-inflight-per-project", "80",
 		"--upstream-wait-timeout", "5s"}, getenvOf(env))
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestParseDefaultsAndEnv(t *testing.T) {
 	if c.ShutdownDelay != 5*time.Second || c.Name != "ferun-ingress-1" || c.MaxRequestBody != 1<<30 ||
 		c.LogLevel != slog.LevelDebug || c.LogFormat != LogFormatText || c.MeshMTU != 1380 ||
 		c.MemoryLimit != 512<<20 || c.MaxInflightPerEnv != 64 || c.MaxHeldPerEnv != 8 || c.MaxInflight != 100 ||
-		c.MaxInflightPerTenant != 80 || c.MaxHeldPerTenant != 32 || c.UpstreamWaitTimeout != 5*time.Second {
+		c.MaxInflightPerProject != 80 || c.MaxHeldPerProject != 32 || c.UpstreamWaitTimeout != 5*time.Second {
 		t.Fatalf("flags over variables %+v", c)
 	}
 	if EnvName("upstream-dial-timeout") != "FERUN_INGRESS_UPSTREAM_DIAL_TIMEOUT" {
@@ -130,22 +130,22 @@ func TestParseRequired(t *testing.T) {
 	}
 }
 
-// The tenant zone's certificate (ADR 0031) is optional, its two files go
-// together, from the flags or FERUN_INGRESS_TENANT_ZONE_TLS_*.
-func TestParseTenantZoneTLS(t *testing.T) {
+// The project zone's certificate (ADR 0031) is optional, its two files go
+// together, from the flags or FERUN_INGRESS_PROJECT_ZONE_TLS_*.
+func TestParseProjectZoneTLS(t *testing.T) {
 	t.Parallel()
 	c, err := Parse(nil, getenvOf(requiredEnv()))
-	if err != nil || c.TenantZoneTLSCert != "" || c.TenantZoneTLSKey != "" {
-		t.Fatalf("default %q %q %v", c.TenantZoneTLSCert, c.TenantZoneTLSKey, err)
+	if err != nil || c.ProjectZoneTLSCert != "" || c.ProjectZoneTLSKey != "" {
+		t.Fatalf("default %q %q %v", c.ProjectZoneTLSCert, c.ProjectZoneTLSKey, err)
 	}
 	env := requiredEnv()
-	env["FERUN_INGRESS_TENANT_ZONE_TLS_CERT"] = "/tenant-tls/tls.crt"
-	env["FERUN_INGRESS_TENANT_ZONE_TLS_KEY"] = "/tenant-tls/tls.key"
-	if c, err = Parse(nil, getenvOf(env)); err != nil || c.TenantZoneTLSCert != "/tenant-tls/tls.crt" ||
-		c.TenantZoneTLSKey != "/tenant-tls/tls.key" {
-		t.Fatalf("from the variables %q %q %v", c.TenantZoneTLSCert, c.TenantZoneTLSKey, err)
+	env["FERUN_INGRESS_PROJECT_ZONE_TLS_CERT"] = "/project-tls/tls.crt"
+	env["FERUN_INGRESS_PROJECT_ZONE_TLS_KEY"] = "/project-tls/tls.key"
+	if c, err = Parse(nil, getenvOf(env)); err != nil || c.ProjectZoneTLSCert != "/project-tls/tls.crt" ||
+		c.ProjectZoneTLSKey != "/project-tls/tls.key" {
+		t.Fatalf("from the variables %q %q %v", c.ProjectZoneTLSCert, c.ProjectZoneTLSKey, err)
 	}
-	for _, args := range [][]string{{"--tenant-zone-tls-cert", "/a.crt"}, {"--tenant-zone-tls-key", "/a.key"}} {
+	for _, args := range [][]string{{"--project-zone-tls-cert", "/a.crt"}, {"--project-zone-tls-key", "/a.key"}} {
 		if _, err := Parse(args, getenvOf(requiredEnv())); err == nil || !strings.Contains(err.Error(), "go together") {
 			t.Errorf("%v: %v", args, err)
 		}
@@ -220,7 +220,7 @@ func TestParseSizesAndDurations(t *testing.T) {
 	for _, args := range [][]string{
 		{"--max-held", "0"}, {"--max-conns-per-endpoint", "0"}, {"--mesh-port", "0"}, {"--mesh-port", "70000"},
 		{"--max-held-per-env", "0"}, {"--max-inflight", "0"}, {"--max-inflight-per-env", "-1"}, {"--memory-limit", "-1"},
-		{"--max-held-per-tenant", "0"}, {"--max-inflight-per-tenant", "0"},
+		{"--max-held-per-project", "0"}, {"--max-inflight-per-project", "0"},
 		{"--upstream-wait-timeout", "2s"}, {"--upstream-dial-timeout", "11s"},
 		{"--mesh-mtu", "1000"}, {"--mesh-device", "a-device-name-too-long"}, {"--mesh-device", "a/b"},
 		{"--mesh-endpoint", "0.0.0.0:51820"}, {"--mesh-endpoint", "10.0.0.1"}, {"--name", "Ferun_Ingress"},

@@ -51,19 +51,19 @@ import (
 // Refusals, stream ends, broken connections and sequence gaps can be
 // injected.
 type FakeControlPlane struct {
-	iss        *pki.Issuer
-	td         string
-	appsZone   string
-	tenantZone string
-	podNetwork netip.Prefix
-	lis        net.Listener
-	addr       string
-	tlsCfg     *tls.Config
-	join       *grpc.Server
-	ingress    *grpc.Server
-	joinLis    *fakeListener
-	ingressLis *fakeListener
-	wg         sync.WaitGroup
+	iss         *pki.Issuer
+	td          string
+	appsZone    string
+	projectZone string
+	podNetwork  netip.Prefix
+	lis         net.Listener
+	addr        string
+	tlsCfg      *tls.Config
+	join        *grpc.Server
+	ingress     *grpc.Server
+	joinLis     *fakeListener
+	ingressLis  *fakeListener
+	wg          sync.WaitGroup
 
 	mu         sync.Mutex
 	closed     bool
@@ -100,8 +100,8 @@ type FakeConfig struct {
 	TrustDomain string
 	// AppsZone is the zone Hello and Self answer. Default "apps.test".
 	AppsZone string
-	// TenantZone is the tenant zone Hello and Self answer; "": none.
-	TenantZone string
+	// ProjectZone is the project zone Hello and Self answer; "": none.
+	ProjectZone string
 	// PodNetwork is the cluster's ULA. Default fd00:1:2::/48.
 	PodNetwork netip.Prefix
 	// CertTTL is the lifetime of issued certificates. Default 1 h.
@@ -175,28 +175,28 @@ func NewFakeControlPlane(dir string, cfg FakeConfig) (*FakeControlPlane, error) 
 		return nil, err
 	}
 	f := &FakeControlPlane{
-		iss:        iss,
-		td:         cfg.TrustDomain,
-		appsZone:   cfg.AppsZone,
-		tenantZone: cfg.TenantZone,
-		podNetwork: cfg.PodNetwork.Masked(),
-		lis:        lis,
-		addr:       lis.Addr().String(),
-		joinLis:    newFakeListener(lis.Addr()),
-		ingressLis: newFakeListener(lis.Addr()),
-		conns:      map[*fakeConn]struct{}{},
-		tokens:     map[string]*fakeToken{},
-		certTTL:    cfg.CertTTL,
-		partBytes:  wire.PartBytes,
-		refused:    map[string]string{},
-		holdRefuse: map[string]string{},
-		keys:       map[string][]byte{},
-		retired:    map[string][]byte{},
-		subnets:    map[string]int{},
-		helloed:    map[string]bool{},
-		admitted:   map[string]uint64{},
-		envs:       map[string]wire.Env{},
-		streams:    map[*fakeStream]struct{}{},
+		iss:         iss,
+		td:          cfg.TrustDomain,
+		appsZone:    cfg.AppsZone,
+		projectZone: cfg.ProjectZone,
+		podNetwork:  cfg.PodNetwork.Masked(),
+		lis:         lis,
+		addr:        lis.Addr().String(),
+		joinLis:     newFakeListener(lis.Addr()),
+		ingressLis:  newFakeListener(lis.Addr()),
+		conns:       map[*fakeConn]struct{}{},
+		tokens:      map[string]*fakeToken{},
+		certTTL:     cfg.CertTTL,
+		partBytes:   wire.PartBytes,
+		refused:     map[string]string{},
+		holdRefuse:  map[string]string{},
+		keys:        map[string][]byte{},
+		retired:     map[string][]byte{},
+		subnets:     map[string]int{},
+		helloed:     map[string]bool{},
+		admitted:    map[string]uint64{},
+		envs:        map[string]wire.Env{},
+		streams:     map[*fakeStream]struct{}{},
 	}
 	f.tlsCfg = &tls.Config{
 		MinVersion:   tls.VersionTLS13,
@@ -652,7 +652,7 @@ func (f *FakeControlPlane) issueLocked(csr []byte, name string) (wire.Certificat
 }
 
 func (f *FakeControlPlane) selfLocked(name string) wire.Self {
-	s := wire.Self{Name: name, AppsZone: f.appsZone, TenantZone: f.tenantZone, AdmittedVersion: f.admitted[name]}
+	s := wire.Self{Name: name, AppsZone: f.appsZone, ProjectZone: f.projectZone, AdmittedVersion: f.admitted[name]}
 	if sub, ok := f.subnets[name]; ok {
 		s.Address = mesh.HostAddress(mesh.NodePrefix(f.podNetwork, sub)).String()
 	}
@@ -810,13 +810,13 @@ func (s *fakeService) Hello(ctx context.Context, req *wire.HelloRequest) (*wire.
 	f.helloed[p.conn] = true
 	prefix := mesh.NodePrefix(f.podNetwork, sub)
 	return &wire.HelloResponse{
-		Name:       p.name,
-		PodNetwork: f.podNetwork.String(),
-		Prefix:     prefix.String(),
-		Address:    mesh.HostAddress(prefix).String(),
-		AppsZone:   f.appsZone,
-		TenantZone: f.tenantZone,
-		Instance:   "fake",
+		Name:        p.name,
+		PodNetwork:  f.podNetwork.String(),
+		Prefix:      prefix.String(),
+		Address:     mesh.HostAddress(prefix).String(),
+		AppsZone:    f.appsZone,
+		ProjectZone: f.projectZone,
+		Instance:    "fake",
 	}, nil
 }
 

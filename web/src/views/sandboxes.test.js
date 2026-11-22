@@ -84,7 +84,7 @@ describe('the list', () => {
     expect(filterSandboxes(null, 'x')).toEqual([]);
   });
 
-  it('names an owner only when it is not the tenant', () => {
+  it('names an owner only when it is not the project', () => {
     expect(ownerShown(SB, 'kino')).toBe('');
     expect(ownerShown({ ...SB, owner: 'review-bot' }, 'kino')).toBe('review-bot');
   });

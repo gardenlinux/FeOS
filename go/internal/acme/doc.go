@@ -3,7 +3,7 @@
 
 // Package acme is ferund's ACME client (ADR 0021, "Certificates: ferund
 // is the ACME client"): it obtains and renews the certificates of
-// tenants' domains over HTTP-01, through the ingress's table, and a
+// projects' domains over HTTP-01, through the ingress's table, and a
 // wildcard's over DNS-01 in the platform's ACME zone (ADR 0045,
 // dns01.go), with golang.org/x/crypto/acme.
 //

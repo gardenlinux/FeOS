@@ -18,16 +18,16 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// visTenantProvider is a provider of kind tenant at url.
-func visTenantProvider(tenant, name, url string) store.AccessProvider {
-	return store.AccessProvider{Tenant: tenant, Name: name, Kind: model.ProviderKindTenant, URL: url}
+// visProjectProvider is a provider of kind project at url.
+func visProjectProvider(project, name, url string) store.AccessProvider {
+	return store.AccessProvider{Project: project, Name: name, Kind: model.ProviderKindProject, URL: url}
 }
 
 // visVisit inserts an open visit of env's of kind kind (a person of its
 // own for ferun) and returns it.
 func visVisit(t *testing.T, s *store.Store, env store.Environment, provider, kind, session string) store.Visit {
 	t.Helper()
-	n := store.NewVisit{ID: uuid.New(), EnvID: env.ID, Tenant: env.Owner, Provider: provider, ProviderKind: kind,
+	n := store.NewVisit{ID: uuid.New(), EnvID: env.ID, Project: env.Owner, Provider: provider, ProviderKind: kind,
 		Host: "h.apps.test", Subject: "u-1", Session: session, MaxVisit: 12 * time.Hour}
 	if kind == model.ProviderKindFerun {
 		p, err := s.UpsertPerson(bg, "https://id.test/", "s-"+n.ID.String(), "", "")
@@ -52,35 +52,35 @@ func visEnd(t *testing.T, s *store.Store, id uuid.UUID) string {
 
 func TestAccessProviders(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
-	mkTenant(t, s, "other")
-	p, err := s.InsertAccessProvider(bg, visTenantProvider("acme", "fecode", "https://fecode.dev/api/v1/visit"))
-	if err != nil || p.Kind != "tenant" || p.URL != "https://fecode.dev/api/v1/visit" || string(p.Rule) != "{}" ||
+	mkProject(t, s, "acme")
+	mkProject(t, s, "other")
+	p, err := s.InsertAccessProvider(bg, visProjectProvider("acme", "fecode", "https://fecode.dev/api/v1/visit"))
+	if err != nil || p.Kind != "project" || p.URL != "https://fecode.dev/api/v1/visit" || string(p.Rule) != "{}" ||
 		p.CreatedAt.IsZero() {
 		t.Fatalf("insert %+v %v", p, err)
 	}
-	if _, err := s.InsertAccessProvider(bg, visTenantProvider("acme", "fecode", "https://x.example/")); !errors.Is(err,
+	if _, err := s.InsertAccessProvider(bg, visProjectProvider("acme", "fecode", "https://x.example/")); !errors.Is(err,
 		store.ErrExists) {
 		t.Fatalf("again: %v", err)
 	}
-	if _, err := s.InsertAccessProvider(bg, visTenantProvider("nope", "fecode", "https://x.example/")); !errors.Is(err,
+	if _, err := s.InsertAccessProvider(bg, visProjectProvider("nope", "fecode", "https://x.example/")); !errors.Is(err,
 		store.ErrNoRow) {
-		t.Fatalf("unknown tenant: %v", err)
+		t.Fatalf("unknown project: %v", err)
 	}
 	// The database refuses ferun, and a kind without its fields.
-	if _, err := s.InsertAccessProvider(bg, visTenantProvider("acme", "ferun", "https://x.example/")); err == nil {
+	if _, err := s.InsertAccessProvider(bg, visProjectProvider("acme", "ferun", "https://x.example/")); err == nil {
 		t.Fatal("made a provider ferun")
 	}
-	if _, err := s.InsertAccessProvider(bg, visTenantProvider("acme", "nourl", "")); err == nil {
-		t.Fatal("made a tenant provider without a url")
+	if _, err := s.InsertAccessProvider(bg, visProjectProvider("acme", "nourl", "")); err == nil {
+		t.Fatal("made a project provider without a url")
 	}
-	oidc := store.AccessProvider{Tenant: "acme", Name: "sso", Kind: model.ProviderKindOIDC,
+	oidc := store.AccessProvider{Project: "acme", Name: "sso", Kind: model.ProviderKindOIDC,
 		Issuer: "https://login.example/", ClientID: "c", ClientSecretSealed: []byte{1, 2, 3},
 		Rule: json.RawMessage(`{"domains": ["example.com"]}`), MadeBy: "token:x"}
 	if _, err := s.InsertAccessProvider(bg, oidc); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.InsertAccessProvider(bg, visTenantProvider("other", "fecode", "https://o.example/")); err != nil {
+	if _, err := s.InsertAccessProvider(bg, visProjectProvider("other", "fecode", "https://o.example/")); err != nil {
 		t.Fatal(err)
 	}
 	list, err := s.ListAccessProviders(bg, "acme")
@@ -111,10 +111,10 @@ func TestAccessProviders(t *testing.T) {
 	if _, _, err := s.SetEnvironmentAccess(bg, prod.ID, model.AccessVisitors, "nope"); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("a missing provider: %v", err)
 	}
-	// Another tenant's provider of the same name is no provider of acme's.
+	// Another project's provider of the same name is no provider of acme's.
 	other := mkEnv(t, s, "other", "web")
 	if _, _, err := s.SetEnvironmentAccess(bg, other.ID, model.AccessVisitors, "sso"); !errors.Is(err, store.ErrNoRow) {
-		t.Fatalf("a provider of another tenant: %v", err)
+		t.Fatalf("a provider of another project: %v", err)
 	}
 	if ok, err := s.DeleteAccessProvider(bg, "acme", "fecode"); !errors.Is(err, store.ErrInUse) || ok {
 		t.Fatalf("delete a named provider: %v %v", ok, err)
@@ -142,7 +142,7 @@ func TestAccessProviders(t *testing.T) {
 		t.Fatalf("update %+v %v", up, err)
 	}
 	expectPayload(t, ch, store.IngressEnvPayload(stage.ID))
-	if _, err := s.UpdateAccessProvider(bg, visTenantProvider("acme", "nope", "https://x.example/")); !errors.Is(err,
+	if _, err := s.UpdateAccessProvider(bg, visProjectProvider("acme", "nope", "https://x.example/")); !errors.Is(err,
 		store.ErrNoRow) {
 		t.Fatalf("update unknown: %v", err)
 	}
@@ -163,8 +163,8 @@ func TestAccessProviders(t *testing.T) {
 // nothing.
 func TestEnvironmentAccess(t *testing.T) {
 	s, d := newStore(t)
-	mkTenant(t, s, "acme")
-	_, err := s.InsertAccessProvider(bg, visTenantProvider("acme", "fecode", "https://fecode.dev/api/v1/visit"))
+	mkProject(t, s, "acme")
+	_, err := s.InsertAccessProvider(bg, visProjectProvider("acme", "fecode", "https://fecode.dev/api/v1/visit"))
 	must(t, err)
 	e := mkEnv(t, s, "acme", "stage")
 	if e.Access != model.AccessAnyone || e.AccessProvider != "" {
@@ -215,7 +215,7 @@ func TestEnvironmentAccess(t *testing.T) {
 	if r := visEnd(t, s, v1.ID); r != model.VisitProviderChanged {
 		t.Fatalf("visit after the change %q", r)
 	}
-	v2 := visVisit(t, s, got, "fecode", model.ProviderKindTenant, "s-1")
+	v2 := visVisit(t, s, got, "fecode", model.ProviderKindProject, "s-1")
 	// To anyone: the visit ends too.
 	if _, _, err := s.SetEnvironmentAccess(bg, e.ID, model.AccessAnyone, ""); err != nil {
 		t.Fatal(err)
@@ -227,7 +227,7 @@ func TestEnvironmentAccess(t *testing.T) {
 	if _, _, err := s.SetEnvironmentAccess(bg, e.ID, model.AccessVisitors, "fecode"); err != nil {
 		t.Fatal(err)
 	}
-	v3 := visVisit(t, s, got, "fecode", model.ProviderKindTenant, "")
+	v3 := visVisit(t, s, got, "fecode", model.ProviderKindProject, "")
 	got, err = s.SetEnvironmentPublic(bg, e.ID, false)
 	if err != nil || got.Public || got.Access != model.AccessVisitors || got.AccessProvider != "fecode" {
 		t.Fatalf("unpublish %+v %v", got, err)
@@ -243,12 +243,12 @@ func TestEnvironmentAccess(t *testing.T) {
 
 func TestPersonMayVisit(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
-	mkTenant(t, s, "other")
+	mkProject(t, s, "acme")
+	mkProject(t, s, "other")
 	stage := mkEnv(t, s, "acme", "stage")
 	prod := mkEnv(t, s, "acme", "prod")
 	const iss = "https://id.test/"
-	tenantWide, err := s.UpsertPerson(bg, iss, "tenant-wide", "", "")
+	projectWide, err := s.UpsertPerson(bg, iss, "project-wide", "", "")
 	must(t, err)
 	onStage, err := s.UpsertPerson(bg, iss, "on-stage", "", "")
 	must(t, err)
@@ -257,10 +257,10 @@ func TestPersonMayVisit(t *testing.T) {
 	elsewhere, err := s.UpsertPerson(bg, iss, "elsewhere", "", "")
 	must(t, err)
 	for _, g := range []store.Grant{
-		{TenantID: "acme", PersonID: tenantWide.ID, Role: "read"},
-		{TenantID: "acme", PersonID: onStage.ID, EnvironmentID: stage.ID, Role: "read"},
-		{TenantID: "acme", PersonID: disabled.ID, Role: "admin"},
-		{TenantID: "other", PersonID: elsewhere.ID, Role: "admin"},
+		{ProjectID: "acme", PersonID: projectWide.ID, Role: "read"},
+		{ProjectID: "acme", PersonID: onStage.ID, EnvironmentID: stage.ID, Role: "read"},
+		{ProjectID: "acme", PersonID: disabled.ID, Role: "admin"},
+		{ProjectID: "other", PersonID: elsewhere.ID, Role: "admin"},
 	} {
 		_, err := s.PutGrant(bg, g)
 		must(t, err)
@@ -272,8 +272,8 @@ func TestPersonMayVisit(t *testing.T) {
 		env  uuid.UUID
 		want bool
 	}{
-		{"tenant-wide", stage.ID, true},
-		{"tenant-wide", prod.ID, true},
+		{"project-wide", stage.ID, true},
+		{"project-wide", prod.ID, true},
 		{"on-stage", stage.ID, true},
 		{"on-stage", prod.ID, false},
 		{"disabled", stage.ID, false},
@@ -291,7 +291,7 @@ func TestPersonMayVisit(t *testing.T) {
 		}
 	}
 	// Another issuer's sub is someone else; nobody is made.
-	if _, ok, err := s.PersonMayVisit(bg, "https://other.test/", "tenant-wide", "acme", stage.ID); err != nil || ok {
+	if _, ok, err := s.PersonMayVisit(bg, "https://other.test/", "project-wide", "acme", stage.ID); err != nil || ok {
 		t.Fatalf("another issuer: %v %v", ok, err)
 	}
 	var n int
@@ -302,41 +302,41 @@ func TestPersonMayVisit(t *testing.T) {
 	if ok, err := s.PersonMayVisitByID(bg, disabled.ID, "acme", stage.ID); err != nil || ok {
 		t.Fatalf("disabled by ID: %v %v", ok, err)
 	}
-	// A tenant being deleted admits nobody.
-	_, err = s.MarkTenantDeleting(bg, "acme")
+	// A project being deleted admits nobody.
+	_, err = s.MarkProjectDeleting(bg, "acme")
 	must(t, err)
-	if _, ok, err := s.PersonMayVisit(bg, iss, "tenant-wide", "acme", stage.ID); err != nil || ok {
-		t.Fatalf("deleting tenant: %v %v", ok, err)
+	if _, ok, err := s.PersonMayVisit(bg, iss, "project-wide", "acme", stage.ID); err != nil || ok {
+		t.Fatalf("deleting project: %v %v", ok, err)
 	}
 }
 
 func TestVisits(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	e := mkEnv(t, s, "acme", "stage")
 
 	// The end: the provider's, at most MaxVisit away.
 	soon := time.Now().Add(time.Hour)
-	v, err := s.InsertVisit(bg, store.NewVisit{ID: uuid.New(), EnvID: e.ID, Tenant: "acme", Provider: "fecode",
-		ProviderKind: model.ProviderKindTenant, Host: "h", Subject: "u", Email: "a@example.com", Session: "s",
+	v, err := s.InsertVisit(bg, store.NewVisit{ID: uuid.New(), EnvID: e.ID, Project: "acme", Provider: "fecode",
+		ProviderKind: model.ProviderKindProject, Host: "h", Subject: "u", Email: "a@example.com", Session: "s",
 		EndsAt: soon, MaxVisit: 12 * time.Hour})
 	if err != nil || v.EndsAt.Sub(soon).Abs() > time.Millisecond || !v.Open() || v.Binding != "" ||
 		v.AskedAt.IsZero() || v.Now.IsZero() || v.Email != "a@example.com" {
 		t.Fatalf("insert %+v %v", v, err)
 	}
-	far, err := s.InsertVisit(bg, store.NewVisit{ID: uuid.New(), EnvID: e.ID, Tenant: "acme", Provider: "fecode",
-		ProviderKind: model.ProviderKindTenant, Host: "h", Subject: "u", EndsAt: time.Now().Add(48 * time.Hour),
+	far, err := s.InsertVisit(bg, store.NewVisit{ID: uuid.New(), EnvID: e.ID, Project: "acme", Provider: "fecode",
+		ProviderKind: model.ProviderKindProject, Host: "h", Subject: "u", EndsAt: time.Now().Add(48 * time.Hour),
 		MaxVisit: 12 * time.Hour})
 	if err != nil || far.EndsAt.Sub(far.CreatedAt) != 12*time.Hour {
 		t.Fatalf("capped %v %v", far.EndsAt.Sub(far.CreatedAt), err)
 	}
-	none, err := s.InsertVisit(bg, store.NewVisit{ID: uuid.New(), EnvID: e.ID, Tenant: "acme", Provider: "fecode",
-		ProviderKind: model.ProviderKindTenant, Host: "h", Subject: "u", MaxVisit: 12 * time.Hour})
+	none, err := s.InsertVisit(bg, store.NewVisit{ID: uuid.New(), EnvID: e.ID, Project: "acme", Provider: "fecode",
+		ProviderKind: model.ProviderKindProject, Host: "h", Subject: "u", MaxVisit: 12 * time.Hour})
 	if err != nil || none.EndsAt.Sub(none.CreatedAt) != 12*time.Hour {
 		t.Fatalf("no end %v %v", none.EndsAt.Sub(none.CreatedAt), err)
 	}
 	// A visit of kind ferun names its person; the database says so.
-	if _, err := s.InsertVisit(bg, store.NewVisit{ID: uuid.New(), EnvID: e.ID, Tenant: "acme", Provider: "ferun",
+	if _, err := s.InsertVisit(bg, store.NewVisit{ID: uuid.New(), EnvID: e.ID, Project: "acme", Provider: "ferun",
 		ProviderKind: model.ProviderKindFerun, Host: "h", Subject: "u", MaxVisit: time.Hour}); err == nil {
 		t.Fatal("a ferun visit without its person")
 	}
@@ -399,8 +399,8 @@ func TestVisits(t *testing.T) {
 
 func TestVisitSessions(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
-	mkTenant(t, s, "other")
+	mkProject(t, s, "acme")
+	mkProject(t, s, "other")
 	e := mkEnv(t, s, "acme", "stage")
 	o := mkEnv(t, s, "other", "stage")
 	f1 := visVisit(t, s, e, "ferun", model.ProviderKindFerun, "sid")
@@ -408,7 +408,7 @@ func TestVisitSessions(t *testing.T) {
 	f3 := visVisit(t, s, o, "ferun", model.ProviderKindFerun, "other-sid")
 	o1 := visVisit(t, s, e, "sso", model.ProviderKindOIDC, "sid")
 	o2 := visVisit(t, s, o, "sso", model.ProviderKindOIDC, "sid")
-	t1 := visVisit(t, s, e, "fecode", model.ProviderKindTenant, "sid")
+	t1 := visVisit(t, s, e, "fecode", model.ProviderKindProject, "sid")
 	if _, err := s.EndSessionVisits(bg, model.ProviderKindFerun, "", "", "", model.VisitBackchannelLogout); err == nil {
 		t.Fatal("ended the visits of no session")
 	}
@@ -438,9 +438,9 @@ func TestVisitSessions(t *testing.T) {
 
 func TestVisitAnswers(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	e := mkEnv(t, s, "acme", "stage")
-	v := visVisit(t, s, e, "fecode", model.ProviderKindTenant, "")
+	v := visVisit(t, s, e, "fecode", model.ProviderKindProject, "")
 	const bnd = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
 	const cid = "CCCCCCCCCCCCCCCCCCCCCC"
 	n := store.NewVisitAnswer{ChallengeID: cid, EnvID: e.ID, Host: "h", Outcome: "accepted", VisitID: v.ID,
@@ -489,14 +489,14 @@ func TestVisitAnswers(t *testing.T) {
 
 func TestSweepVisits(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	e := mkEnv(t, s, "acme", "stage")
-	live := visVisit(t, s, e, "fecode", model.ProviderKindTenant, "")
-	past := visVisit(t, s, e, "fecode", model.ProviderKindTenant, "")
+	live := visVisit(t, s, e, "fecode", model.ProviderKindProject, "")
+	past := visVisit(t, s, e, "fecode", model.ProviderKindProject, "")
 	exec(t, s, "UPDATE visits SET ends_at = now() - interval '1 minute' WHERE id = $1", past.ID)
-	old := visVisit(t, s, e, "fecode", model.ProviderKindTenant, "")
+	old := visVisit(t, s, e, "fecode", model.ProviderKindProject, "")
 	exec(t, s, `UPDATE visits SET ended_at = now() - interval '25 hours', end_reason = 'signed_out' WHERE id = $1`, old.ID)
-	oldOpen := visVisit(t, s, e, "fecode", model.ProviderKindTenant, "")
+	oldOpen := visVisit(t, s, e, "fecode", model.ProviderKindProject, "")
 	exec(t, s, `UPDATE visits SET created_at = now() - interval '40 hours', ends_at = now() - interval '28 hours'
 		WHERE id = $1`, oldOpen.ID)
 	for i, exp := range []string{"now() - interval '2 hours'", "now() - interval '10 minutes'"} {

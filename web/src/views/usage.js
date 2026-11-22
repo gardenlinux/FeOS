@@ -1,16 +1,16 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// The tenant's use against its limits, in words (ADR 0031, "Quotas per
-// tenant"; control-plane.md, Quotas; go/internal/store/quotas.go,
-// TenantUse): what counts towards each limit, and where the booked vCPUs
+// The project's use against its limits, in words (ADR 0031, "Quotas per
+// project"; control-plane.md, Quotas; go/internal/store/quotas.go,
+// ProjectUse): what counts towards each limit, and where the booked vCPUs
 // and memory are. Pure, for the tests.
 
 // COUNTS say what counts towards each limit, by QUOTA_ITEMS' key.
 export const COUNTS = {
-  sandboxes: 'The tenant\'s own sandboxes in every state, running, paused or hibernated. Not an environment\'s instances, not a job\'s pod.',
+  sandboxes: 'The project\'s own sandboxes in every state, running, paused or hibernated. Not an environment\'s instances, not a job\'s pod.',
   environments: 'Environments not being deleted.',
-  runningJobs: 'The tenant\'s jobs that have not ended: queued or running. Environments\' own jobs do not count.',
+  runningJobs: 'The project\'s jobs that have not ended: queued or running. Environments\' own jobs do not count.',
   vcpus: 'Booked by every sandbox in every state, the replicas of the environments\' image services by their current deployments, their addons\' plans, and the jobs that have not ended. An attached service runs in a sandbox, which counts already; environments\' own jobs do not count.',
   memoryMib: 'Booked by the same as the vCPUs: sandboxes in every state, image services\' replicas, addons, jobs that have not ended.',
 };

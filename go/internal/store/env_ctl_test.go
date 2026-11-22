@@ -18,7 +18,7 @@ import (
 // The environment controller's queries.
 func TestEnvCtlQueries(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	mkNode(t, s, "n1")
 	env := mkEnv(t, s, "acme", "stage")
 	other := mkEnv(t, s, "acme", "prod")

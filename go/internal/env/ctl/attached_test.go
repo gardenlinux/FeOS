@@ -51,11 +51,11 @@ func hostProcesses(n *testnode.Node, root string) {
 	})
 }
 
-// sandbox makes a sandbox of the tenant in its environment dev, with the
+// sandbox makes a sandbox of the project in its environment dev, with the
 // template the API gives it (in default), and brings it up.
 func (h *harness) sandbox() store.Sandbox {
 	h.t.Helper()
-	return h.sandboxAs(testTenant, podid.Mint())
+	return h.sandboxAs(testProject, podid.Mint())
 }
 
 // sandboxAs makes a sandbox of owner in its environment dev (ADR 0035)
@@ -329,11 +329,11 @@ func hostProcessesCounting(n *testnode.Node, root string) *startLog {
 }
 
 // An attached service's sandbox deleted and its ID taken by another
-// tenant's sandbox: the service fails ("gone or not this
-// tenant's"); nothing starts in the new sandbox, it is given no names of
+// project's sandbox: the service fails ("gone or not this
+// project's"); nothing starts in the new sandbox, it is given no names of
 // the environment, it joins no group of the environment and its own group
 // reaches none; its logs and restarts answer ErrNotRunning.
-func TestAttachedSandboxReusedByAnotherTenant(t *testing.T) {
+func TestAttachedSandboxReusedByAnotherProject(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 is not installed; the process scripts need it")
 	}
@@ -350,12 +350,12 @@ func TestAttachedSandboxReusedByAnotherTenant(t *testing.T) {
 		t.Fatalf("attached %+v %v", a, err)
 	}
 
-	// The tenant deletes its sandbox; another tenant takes its ID.
-	if _, _, err := h.eng.Delete(bg, testTenant, sb.ID); err != nil {
+	// The project deletes its sandbox; another project takes its ID.
+	if _, _, err := h.eng.Delete(bg, testProject, sb.ID); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, 30*time.Second, "the sandbox's pod gone", func() bool { return h.pod("n1", sb.ID) == nil })
-	if _, _, err := h.st.CreateTenant(bg, "t2"); err != nil {
+	if _, _, err := h.st.CreateProject(bg, "t2"); err != nil {
 		t.Fatal(err)
 	}
 	before := starts.count(sb.ID)
@@ -363,9 +363,9 @@ func TestAttachedSandboxReusedByAnotherTenant(t *testing.T) {
 	eventually(t, 30*time.Second, "the service failed", func() bool {
 		b, err := h.st.GetAttached(bg, env.ID, "web")
 		return err == nil && b.Phase == model.PhaseFailed && b.ProcessID == "" &&
-			b.Detail == fmt.Sprintf("sandbox %s is gone or not this tenant's", sb.ID)
+			b.Detail == fmt.Sprintf("sandbox %s is gone or not this project's", sb.ID)
 	})
-	never(t, 3*time.Second, "something happened in the other tenant's sandbox", func() bool {
+	never(t, 3*time.Second, "something happened in the other project's sandbox", func() bool {
 		_, named := n1.Resolve(sb.ID, "web")
 		_, api := n1.Resolve(sb.ID, "api")
 		return starts.count(sb.ID) != before || named || api
@@ -394,7 +394,7 @@ func TestAttachedSandboxReusedByAnotherTenant(t *testing.T) {
 		t.Errorf("a restart in the gone sandbox: %v", err)
 	}
 	if starts.count(sb.ID) != before {
-		t.Error("a process started in the other tenant's sandbox")
+		t.Error("a process started in the other project's sandbox")
 	}
 }
 
@@ -689,7 +689,7 @@ func TestAttachedGoesFromSleepingSandbox(t *testing.T) {
 		return resolves(n1, sb.ID, "web")
 	})
 
-	// Its environment deleted while its sandbox is paused (as a tenant's
+	// Its environment deleted while its sandbox is paused (as a project's
 	// deletion does; the API refuses it while the environment has
 	// sandboxes, ADR 0035): the service goes first, the environment once
 	// its sandbox has gone too.
@@ -714,7 +714,7 @@ func TestAttachedGoesFromSleepingSandbox(t *testing.T) {
 	if _, err := h.st.GetEnvironment(bg, stage.ID); err != nil {
 		t.Fatalf("the environment went before its sandbox: %v", err)
 	}
-	if _, _, err := h.eng.Delete(bg, testTenant, box.ID); err != nil {
+	if _, _, err := h.eng.Delete(bg, testProject, box.ID); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, 60*time.Second, "the environment deleted", func() bool {

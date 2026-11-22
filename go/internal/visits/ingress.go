@@ -64,7 +64,7 @@ func environmentOf(ctx context.Context, q *store.Store, v store.Visit) (store.En
 
 // token signs the visit's next token from its row v, read at v.Now: for
 // TokenLifetime, never past the visit's end, and for a provider of kind
-// tenant never more than TokenLifetime past its last ask (S14).
+// project never more than TokenLifetime past its last ask (S14).
 func (s *Service) token(ctx context.Context, v store.Visit) (string, error) {
 	keys, err := s.Keys(ctx)
 	if err != nil {
@@ -74,7 +74,7 @@ func (s *Service) token(ctx context.Context, v store.Visit) (string, error) {
 	if v.EndsAt.Before(exp) {
 		exp = v.EndsAt
 	}
-	if asked := v.AskedAt.Add(visit.TokenLifetime); v.ProviderKind == model.ProviderKindTenant && asked.Before(exp) {
+	if asked := v.AskedAt.Add(visit.TokenLifetime); v.ProviderKind == model.ProviderKindProject && asked.Before(exp) {
 		exp = asked
 	}
 	return keys.SignToken(visit.Token{Subject: v.Subject, Env: v.EnvID.String(), Visit: v.ID.String(), Host: v.Host,
@@ -213,7 +213,7 @@ func (s *Service) end(ctx context.Context, v store.Visit, reason string) (string
 // secret: OutcomeEnded with reason unknown when the cookie holds no visit;
 // with the visit's end reason when it ended, or ends now (its time, its
 // environment unpublished or guarded otherwise, or its provider's no);
-// else OutcomeRenewed. A provider of kind tenant is asked at most every
+// else OutcomeRenewed. A provider of kind project is asked at most every
 // visit.AskEvery per visit, never inside a transaction, and its failure to
 // answer keeps the visit; kind ferun looks the grant up at every renewal;
 // kind oidc is asked nothing. A malformed token or secret is ErrInvalid.
@@ -258,7 +258,7 @@ func (s *Service) Renew(ctx context.Context, req wire.RenewVisitRequest) (wire.R
 	}
 	no, endCtx := false, ctx
 	switch v.ProviderKind {
-	case model.ProviderKindTenant:
+	case model.ProviderKindProject:
 		// The claim uses up the ask for the next visit.AskEvery: it, the
 		// provider's row, the call and the end its no brings run detached
 		// from the ingress's call, so that an ask claimed is an ask made
@@ -271,10 +271,10 @@ func (s *Service) Renew(ctx context.Context, req wire.RenewVisitRequest) (wire.R
 			return wire.RenewVisitResponse{}, fmt.Errorf("claim an ask: %w", err)
 		}
 		if claimed {
-			no, endCtx = s.askTenant(dctx, v) == verdictNo, dctx
+			no, endCtx = s.askProject(dctx, v) == verdictNo, dctx
 		}
 	case model.ProviderKindFerun:
-		ok, err := s.st.PersonMayVisitByID(ctx, v.PersonID, v.Tenant, v.EnvID)
+		ok, err := s.st.PersonMayVisitByID(ctx, v.PersonID, v.Project, v.EnvID)
 		if err != nil {
 			return wire.RenewVisitResponse{}, fmt.Errorf("look up a grant: %w", err)
 		}
@@ -354,13 +354,13 @@ const (
 // visit.AskTimeout: the provider's row before it and the end after it.
 const askGrace = 2 * time.Second
 
-// askTenant asks a visit's provider of kind tenant whether it still
+// askProject asks a visit's provider of kind project whether it still
 // vouches for the visit (§1.9), the call bounded by visit.AskTimeout. Its
 // caller passes a context detached from the ingress's call.
-func (s *Service) askTenant(ctx context.Context, v store.Visit) verdict {
-	p, err := s.st.GetAccessProvider(ctx, v.Tenant, v.Provider)
-	if err != nil || p.Kind != model.ProviderKindTenant {
-		s.rl.warn("ask:"+v.Tenant+"/"+v.Provider, "cannot read a visit's provider", "tenant", v.Tenant,
+func (s *Service) askProject(ctx context.Context, v store.Visit) verdict {
+	p, err := s.st.GetAccessProvider(ctx, v.Project, v.Provider)
+	if err != nil || p.Kind != model.ProviderKindProject {
+		s.rl.warn("ask:"+v.Project+"/"+v.Provider, "cannot read a visit's provider", "project", v.Project,
 			"provider", v.Provider, "err", err)
 		return verdictNone
 	}
@@ -368,10 +368,10 @@ func (s *Service) askTenant(ctx context.Context, v store.Visit) verdict {
 	defer cancel()
 	start := time.Now()
 	got, err := s.ask(ctx, p.URL, v.ID)
-	s.log.Debug("a provider asked", "tenant", v.Tenant, "provider", v.Provider, "visit", v.ID, "verdict", int(got),
+	s.log.Debug("a provider asked", "project", v.Project, "provider", v.Provider, "visit", v.ID, "verdict", int(got),
 		"took", time.Since(start), "err", err)
 	if err != nil {
-		s.rl.warn("ask:"+v.Tenant+"/"+v.Provider, "a provider did not answer", "tenant", v.Tenant,
+		s.rl.warn("ask:"+v.Project+"/"+v.Provider, "a provider did not answer", "project", v.Project,
 			"provider", v.Provider, "err", err)
 	}
 	return got

@@ -1,0 +1,16 @@
+{
+  "method": "GET",
+  "path": "/api/v1/invitations/{token}",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "note": "an account's invitation, to the signed-in person who holds its link",
+  "response": {
+    "account": {
+      "name": "cc-4711",
+      "title": "Team X"
+    },
+    "role": "member",
+    "expiresAt": "2026-11-28T19:52:08Z"
+  }
+}

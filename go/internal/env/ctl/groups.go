@@ -30,12 +30,12 @@ import (
 // ingress's (ADR 0021):
 //
 //   - env-<env id>, the set of all the pods of an environment: its
-//     instances, its sandboxes and its tenants' jobs' pods. No in rules;
+//     instances, its sandboxes and its projects' jobs' pods. No in rules;
 //     its one rule is out to itself, the implied rule: a pod may send to
 //     every pod of its environment, and the receiver's groups decide;
 //   - wl-…, a workload's membership (ADR 0034, revised; workloads.go):
 //     an object's pods (wl-<hash>), a sandbox's pod (wl-s-<id>) or a
-//     tenant's job's (wl-j-<id>). Its in rules are what references it, by
+//     project's job's (wl-j-<id>). Its in rules are what references it, by
 //     the callers' memberships on the ports named, and the sandboxes and
 //     jobs whose reaches name it; its out rules its egress. Its members
 //     are the pods whose template names it (an attached service is its
@@ -125,7 +125,7 @@ func sameContent(a, b *networkv1.SecurityGroup) bool {
 		slices.Equal(members(a.GetMembers()), members(b.GetMembers()))
 }
 
-// hashVersion is a tenant's or an ing group's version: from its content,
+// hashVersion is a project's or an ing group's version: from its content,
 // so that equal content has an equal version on every node.
 func hashVersion(g *networkv1.SecurityGroup) uint64 {
 	c := proto.Clone(g).(*networkv1.SecurityGroup)

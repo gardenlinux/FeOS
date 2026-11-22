@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// The ask (ADR 0054): ferund's question to a provider of kind tenant at a
+// The ask (ADR 0054): ferund's question to a provider of kind project at a
 // renewal, whether a visit still holds. ferund signs it with the token key
 // for the provider's address and the visit, and the provider answers only
 // a question ferund signed, against the key ferund publishes at GET

@@ -30,7 +30,7 @@
 # up from the headless service ferun-sink-ingest (its --sink-endpoint
 # ferun-sink-ingest.ferun.svc.cluster.local:4317) and hands each node:
 # feosd runs on the hosts, which neither resolve the cluster's names nor
-# reach its ClusterIPs. Tenants read at https://run.${DOMAIN}/api/v1/logs
+# reach its ClusterIPs. Projects read at https://run.${DOMAIN}/api/v1/logs
 # and /api/v1/log-streams, and their traces at /api/v1/jaeger (the
 # HTTPRoute below, traces.md); ferund reads at
 # http://ferun-sink.ferun.svc:8080 (its --sink-url).
@@ -181,7 +181,7 @@ spec:
       port: 4317
       targetPort: ingest
 ---
-# The tenants' reads at https://run.<DOMAIN>, beside ferund's route
+# The projects' reads at https://run.<DOMAIN>, beside ferund's route
 # (../ferun/route.yaml): the longer path prefixes win over its catch-all.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

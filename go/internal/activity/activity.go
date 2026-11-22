@@ -257,7 +257,7 @@ func detailJSON(d map[string]any) json.RawMessage {
 type Event struct {
 	TsNs      int64    // producer time; 0: now
 	SandboxID podid.ID // "": none (a node-scoped row)
-	TenantID  string
+	ProjectID string
 	Node      string
 
 	Kind         string
@@ -321,7 +321,7 @@ func (r *Recorder) Row(e Event) store.ActivityRow {
 	return store.ActivityRow{
 		TsNs:            ts,
 		SandboxID:       e.SandboxID,
-		TenantID:        Clean(e.TenantID),
+		ProjectID:       Clean(e.ProjectID),
 		Node:            Clean(e.Node),
 		InstanceID:      r.instanceID,
 		Source:          store.SourceFerund,

@@ -10,7 +10,7 @@ calling, and the tools run in a sandbox per conversation, which FeRun's
 control plane `ferund` provides. The backend is an ordinary client of
 ferund's public API, the same one any other agent uses:
 
-- **Provisioning**, with a FeRun tenant token: `POST /api/v1/sandboxes`
+- **Provisioning**, with a FeRun project token: `POST /api/v1/sandboxes`
   with `{"image"}` and no `sandboxId`: ferund mints the ID (ADR 0019) and
   answers it (`status.sandboxId`) with the sandbox's first `token`. A
   sandbox the backend has no session for (after a restart) gets a new
@@ -82,9 +82,9 @@ The backend reads its environment:
 |----------------------|-------------------------------|---------|
 | `OPENAI_API_KEY`     | Secret `fechat-backend`       | API key of the LLM gateway |
 | `OPENAI_BASE_URL`    | Secret `fechat-backend`       | the gateway's OpenAI-compatible base URL, ending in `/v1` |
-| `FERUN_TOKEN`        | Secret `fechat-backend`       | a FeRun tenant token, for provisioning |
+| `FERUN_TOKEN`        | Secret `fechat-backend`       | a FeRun project token, for provisioning |
 | `FERUN_URL`          | the deployment                | ferund's base URL, default `http://ferund.ferun.svc.cluster.local:8100` |
-| `FERUN_ENVIRONMENT`  | the deployment                | the tenant's environment the conversations' sandboxes are in (FeRun ADR 0035), by name or ID; required: `sandboxes` |
+| `FERUN_ENVIRONMENT`  | the deployment                | the project's environment the conversations' sandboxes are in (FeRun ADR 0035), by name or ID; required: `sandboxes` |
 | `OIDC_ISSUER`        | the deployment                | the IdP, `https://id.fecode.dev/`; unset, the chat is open to everybody (development only) |
 | `OIDC_CLIENT_ID`     | Secret `oidc-client-fechat`   | FeChat's client there |
 | `OIDC_CLIENT_SECRET` | Secret `oidc-client-fechat`   | |
@@ -118,13 +118,13 @@ kubectl -n fechat create secret docker-registry oci-pull \
 ```sh
 OPENAI_API_KEY=<API key of the LLM gateway>
 OPENAI_BASE_URL=<https://gateway.example/v1>
-FERUN_TOKEN=<FeRun tenant token>
+FERUN_TOKEN=<FeRun project token>
 SESSION_SECRET=<32 random bytes or more, e.g. openssl rand -hex 32>
 ```
 
-With the deployments of `deploy/`, the tenant token is ferund's bootstrap
+With the deployments of `deploy/`, the project token is ferund's bootstrap
 token (`FERUN_BOOTSTRAP_TOKEN`, see [`deploy/k3s/README.md`](../deploy/k3s/README.md)).
-Every sandbox is in an environment of the tenant (FeRun ADR 0035); make
+Every sandbox is in an environment of the project (FeRun ADR 0035); make
 FeChat's once, with that token:
 
 ```sh

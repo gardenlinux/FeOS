@@ -64,7 +64,7 @@ func (m *memIndex) Indexes(_ context.Context, prefix string) ([]string, error) {
 
 func matches(d *quickwit.Doc, q *quickwit.Query) bool {
 	eq := func(want, got string) bool { return want == "" || want == got }
-	if !eq(q.Tenant, d.Tenant) || !eq(q.Environment, d.Environment) || !eq(q.Kind, d.Kind) || !eq(q.Object, d.Object) ||
+	if !eq(q.Project, d.Project) || !eq(q.Environment, d.Environment) || !eq(q.Kind, d.Kind) || !eq(q.Object, d.Object) ||
 		!eq(q.Instance, d.Instance) || !eq(q.Container, d.Container) || !eq(q.Job, d.Job) || !eq(q.Stream, d.Stream) ||
 		!eq(q.Source, d.Source) || !eq(q.IOStream, d.IOStream) || !eq(q.Trace, d.TraceID) {
 		return false
@@ -143,14 +143,14 @@ func (m *memIndex) add(id string, docs ...quickwit.Doc) {
 	m.docs[id] = append(m.docs[id], docs...)
 }
 
-// count is how many documents of tenant the indexes hold.
-func (m *memIndex) count(tenant string) int {
+// count is how many documents of project the indexes hold.
+func (m *memIndex) count(project string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	n := 0
 	for _, docs := range m.docs {
 		for _, d := range docs {
-			if d.Tenant == tenant {
+			if d.Project == project {
 				n++
 			}
 		}

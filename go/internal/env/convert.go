@@ -58,23 +58,23 @@ const (
 // (Convert…), with Version the HTTP secret's version made or found and
 // Why the reason of a skip or a failure. It carries no value.
 type Conversion struct {
-	EnvID       uuid.UUID
-	Tenant, Env string
-	Deployment  int
-	Binding     string
-	Upstream    string
-	Mode        string
-	Kind        string
-	Outcome     string
-	Version     int
-	Why         string
+	EnvID        uuid.UUID
+	Project, Env string
+	Deployment   int
+	Binding      string
+	Upstream     string
+	Mode         string
+	Kind         string
+	Outcome      string
+	Version      int
+	Why          string
 }
 
 // String is the conversion as a line of the command's output, never a
 // value.
 func (c Conversion) String() string {
 	s := fmt.Sprintf("environment %s/%s (%s) deployment %d: binding %s, upstream %s, mode %s, credential %s: %s",
-		c.Tenant, c.Env, c.EnvID, c.Deployment, c.Binding, c.Upstream, c.Mode, c.Kind, c.Outcome)
+		c.Project, c.Env, c.EnvID, c.Deployment, c.Binding, c.Upstream, c.Mode, c.Kind, c.Outcome)
 	if c.Version > 0 {
 		s += fmt.Sprintf(" HTTP secret %s version %d", c.Binding, c.Version)
 	} else if c.Outcome == ConvertWould {
@@ -120,7 +120,7 @@ func ConvertBindings(ctx context.Context, st *store.Store, open SecretOpener, w 
 		for _, name := range slices.Sorted(maps.Keys(sp.Bindings)) {
 			b := sp.Bindings[name]
 			up, mode := spec.BindingTemplate(b)
-			c := Conversion{EnvID: e.ID, Tenant: e.Owner, Env: e.Name, Deployment: e.Deployment, Binding: name,
+			c := Conversion{EnvID: e.ID, Project: e.Owner, Env: e.Name, Deployment: e.Deployment, Binding: name,
 				Upstream: up, Mode: mode}
 			if b.Credential != nil {
 				c.Kind = b.Credential.Kind

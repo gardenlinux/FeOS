@@ -17,7 +17,7 @@ import (
 )
 
 // This file is the typed access to the domains (migration 0012, ADR
-// 0021): a tenant's claims on names, for internal/domains.
+// 0021): a project's claims on names, for internal/domains.
 //
 // The writes the ingress's table follows send ferun_ingress themselves:
 // UpdateDomain "env:<id>" of the environment before and after when the
@@ -46,7 +46,7 @@ type DomainFound struct {
 // Domain is a row of domains. Zero times and uuid.Nil are NULL.
 type Domain struct {
 	ID        uuid.UUID
-	Owner     string // the tenant
+	Owner     string // the project
 	Name      string // lowercase A-labels, no trailing dot
 	Labels    map[string]string
 	Token     string // the TXT record's value

@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// Package domains is the core of a tenant's domains in ferund (ADR 0021):
+// Package domains is the core of a project's domains in ferund (ADR 0021):
 // claims on names, proven by a TXT record of the claim's token at
 // <--domain-challenge-label>.<name>, bound to an environment of the
-// tenant, routed to the edge by a CNAME to --edge-name or by A and AAAA
+// project, routed to the edge by a CNAME to --edge-name or by A and AAAA
 // records of the edge's addresses, and checked for as long as they live.
 // A claim may be a wildcard, *.<name> (ADR 0045): its TXT record stands
 // beside <name>, its routing is a fresh name below it resolving to the

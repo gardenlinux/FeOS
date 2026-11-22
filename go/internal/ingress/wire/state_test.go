@@ -12,7 +12,7 @@ import (
 
 func env(id, hash string) Env {
 	return Env{
-		ID: id, Tenant: "acme", Name: id, Hosts: []string{id + ".apps.test"}, Hash: hash,
+		ID: id, Project: "acme", Name: id, Hosts: []string{id + ".apps.test"}, Hash: hash,
 		Routes: []Route{{Name: "web", Path: "/", Service: "web", Port: "http"}},
 		Services: []Service{{Name: "web", Endpoints: []Endpoint{{
 			Instance: "i-" + id, Address: "fd00::1", Node: "n1", Ports: map[string]int{"http": 8080},

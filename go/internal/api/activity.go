@@ -117,13 +117,13 @@ func (s *server) sandboxActivity(w http.ResponseWriter, r *http.Request) error {
 		})
 }
 
-// tenantSandboxActivity is GET /api/v1/sandboxes/{id}/activity: the
-// activity of one of the tenant's sandboxes for the readers of its
+// projectSandboxActivity is GET /api/v1/sandboxes/{id}/activity: the
+// activity of one of the project's sandboxes for the readers of its
 // environment (ADR 0031), with the admin route's parameters and answer
 // but without what is the fleet's: a placement names the node it chose
 // and no other node's verdict, and a node's overbooking is left out. An
 // operator reads it whole. A deleted sandbox's log is the admin route's.
-func (s *server) tenantSandboxActivity(w http.ResponseWriter, r *http.Request) error {
+func (s *server) projectSandboxActivity(w http.ResponseWriter, r *http.Request) error {
 	sb, err := s.owned(r)
 	if err != nil {
 		return err
@@ -132,7 +132,7 @@ func (s *server) tenantSandboxActivity(w http.ResponseWriter, r *http.Request) e
 	if err != nil {
 		return err
 	}
-	t, _ := auth.TenantFrom(r.Context())
+	t, _ := auth.ProjectFrom(r.Context())
 	whole := t.Principal.Operator
 	if !whole {
 		q.SkipKinds = fleetKinds
@@ -157,7 +157,7 @@ func (s *server) tenantSandboxActivity(w http.ResponseWriter, r *http.Request) e
 // not of the sandbox: a node's overbooking, with its booked capacity.
 var fleetKinds = []string{activity.KindOverbooked}
 
-// withoutFleet is a row as a tenant reads it: a placement without its
+// withoutFleet is a row as a project reads it: a placement without its
 // candidates, every node's verdict on the pod with that node's room. A
 // detail that does not parse is left out whole.
 func withoutFleet(a store.ActivityRow) store.ActivityRow {

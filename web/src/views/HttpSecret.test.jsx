@@ -65,26 +65,26 @@ describe('Definition', () => {
 
 describe("an environment's HTTP secrets", () => {
   it('has no list of its own: the list is the Secrets view\'s (EnvSecrets.test.jsx)', () => {
-    expect(html(<HttpSecrets tenant="kino" env="prod" sel="" ec={WRITE} navigate={nav} />)).toBe('');
+    expect(html(<HttpSecrets project="kino" env="prod" sel="" ec={WRITE} navigate={nav} />)).toBe('');
   });
 
   it("a new one's form: the API first, back to the environment's secrets", () => {
-    const out = html(<HttpSecrets tenant="kino" env="prod" sel="new" ec={WRITE} navigate={nav} />);
+    const out = html(<HttpSecrets project="kino" env="prod" sel="new" ec={WRITE} navigate={nav} />);
     expect(out).toContain('New HTTP secret');
     expect(out).toContain('</svg> secrets</button>');
-    expect(out).toContain('href="/tenants/kino/environments/prod/secrets">Cancel</a>');
+    expect(out).toContain('href="/projects/kino/environments/prod/secrets">Cancel</a>');
     expect(out).toContain('A service gets it by a variable that references its URL');
     expect(out).toContain('An HTTP API the platform calls with the key');
     expect(out).toMatch(/<button type="submit" class="primary">/);
     // The API (upstream, how it is called) comes before its credential.
     expect(out.indexOf('how the code calls it')).toBeLessThan(out.indexOf('<legend>credential'));
     expect(out).not.toMatch(/>Credential</);
-    const ro = html(<HttpSecrets tenant="kino" env="prod" sel="new" ec={READ} navigate={nav} />);
+    const ro = html(<HttpSecrets project="kino" env="prod" sel="new" ec={READ} navigate={nav} />);
     expect(ro).toMatch(/<button type="submit" class="primary" disabled="" title="needs write on this environment">/);
   });
 
   it("a new version's form keeps the secret fields it leaves empty, its mode's change too", () => {
-    const out = html(<HttpSecretForm tenant="kino" env="prod" cred={github} ec={WRITE} navigate={nav} />);
+    const out = html(<HttpSecretForm project="kino" env="prod" cred={github} ec={WRITE} navigate={nav} />);
     expect(out).toContain('Edit HTTP secret');
     expect(out).toContain('version 3 → 4');
     expect(out).toContain('set — leave empty to keep');
@@ -109,24 +109,24 @@ describe("an environment's HTTP secrets", () => {
 
 describe("a sandbox's HTTP secrets", () => {
   it('names the HTTP secrets of its environment, each at the latest, and offers the others', () => {
-    const out = html(<SandboxHttpList tenant="kino" env="prod" names={['models']} all={ACCESS_HTTP} write why={undefined} navigate={nav} />);
-    const t = text(<SandboxHttpList tenant="kino" env="prod" names={['models']} all={ACCESS_HTTP} write why={undefined} navigate={nav} />);
+    const out = html(<SandboxHttpList project="kino" env="prod" names={['models']} all={ACCESS_HTTP} write why={undefined} navigate={nav} />);
+    const t = text(<SandboxHttpList project="kino" env="prod" names={['models']} all={ACCESS_HTTP} write why={undefined} navigate={nav} />);
     expect(t).toContain('models https://models.example http://models/ v1 · the latest Remove');
-    expect(out).toContain('href="/tenants/kino/environments/prod/secrets/http/models"');
+    expect(out).toContain('href="/projects/kino/environments/prod/secrets/http/models"');
     expect(out).toContain('<option value="erp">erp · https://api.vendor.example</option>');
     expect(out).not.toContain('<option value="models">');
     expect(t).toContain("the environment's secrets →");
-    expect(text(<SandboxHttpList tenant="kino" env="prod" names={[]} all={[]} write navigate={nav} />))
+    expect(text(<SandboxHttpList project="kino" env="prod" names={[]} all={[]} write navigate={nav} />))
       .toContain('It names no HTTP secret. the environment has no HTTP secret yet');
   });
 
   it("a new sandbox's form picks them", () => {
-    const out = html(<HttpSecretChoice tenant="kino" env="prod" list={ACCESS_HTTP} value={['erp']} onChange={nav} navigate={nav} />);
+    const out = html(<HttpSecretChoice project="kino" env="prod" list={ACCESS_HTTP} value={['erp']} onChange={nav} navigate={nav} />);
     expect(out).toContain('<legend>HTTP secrets <span class="muted">· optional</span></legend>');
     expect(out).toMatch(/<input type="checkbox" checked=""\/><span><b class="mono">erp<\/b>/);
     expect(out).toContain('The sandbox gets each at its latest version');
-    const none = html(<HttpSecretChoice tenant="kino" env="prod" list={[]} value={[]} onChange={nav} navigate={nav} />);
+    const none = html(<HttpSecretChoice project="kino" env="prod" list={[]} value={[]} onChange={nav} navigate={nav} />);
     expect(none).toContain('The environment has no HTTP secret yet.');
-    expect(none).toContain('href="/tenants/kino/environments/prod/secrets/http/new"');
+    expect(none).toContain('href="/projects/kino/environments/prod/secrets/http/new"');
   });
 });

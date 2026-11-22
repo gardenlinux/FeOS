@@ -65,7 +65,7 @@ func specsOf(m map[int]*spec.Spec) SpecFunc {
 var envID = uuid.MustParse("0b1f6b54-3c6e-4d2f-9d7b-5d1c0e7c9a11")
 
 func baseEnv(deployment, deployed int, instances ...Instance) EnvRows {
-	return EnvRows{ID: envID, Tenant: "acme", Name: "web", HostLabel: "web-acme", Deployment: deployment, Deployed: deployed,
+	return EnvRows{ID: envID, Project: "acme", Name: "web", HostLabel: "web-acme", Deployment: deployment, Deployed: deployed,
 		CreatedAt: time.Unix(1700000000, 0), Instances: instances}
 }
 
@@ -114,7 +114,7 @@ func TestBuildEnvRoutes(t *testing.T) {
 	if len(got.Services) != 1 || got.Services[0].Name != "web" || got.Services[0].Idle {
 		t.Fatalf("services %+v", got.Services)
 	}
-	if got.ID != envID.String() || got.Tenant != "acme" || got.Name != "web" {
+	if got.ID != envID.String() || got.Project != "acme" || got.Name != "web" {
 		t.Fatalf("env %+v", got)
 	}
 
@@ -409,7 +409,7 @@ func TestBuildEnvTooLarge(t *testing.T) {
 	huge := routesSpec(spec.MaxRoutes, 20000)
 	_, _, err := BuildEnv(model.Zones{Apps: "apps.example"}, baseEnv(1, 0), specsOf(map[int]*spec.Spec{1: huge}))
 	if !errors.Is(err, ErrTooLarge) || errors.Is(err, ErrSpec) || !unroutable(err) ||
-		!strings.Contains(err.Error(), "web of tenant acme") {
+		!strings.Contains(err.Error(), "web of project acme") {
 		t.Fatalf("huge: %v", err)
 	}
 	if !unroutable(fmt.Errorf("x: %w", ErrSpec)) || unroutable(errors.New("read")) {
@@ -458,13 +458,13 @@ func TestGroup(t *testing.T) {
 	}
 	got := Group(rows)
 	want := []EnvRows{
-		{ID: a, Tenant: "acme", Name: "a", HostLabel: "a-acme", Deployment: 2, Deployed: 1, CreatedAt: at, Instances: []Instance{
+		{ID: a, Project: "acme", Name: "a", HostLabel: "a-acme", Deployment: 2, Deployed: 1, CreatedAt: at, Instances: []Instance{
 			{ID: "a0000000001", Service: "web", Deployment: 1, Phase: model.PhaseReady, ClientState: model.StateRunning,
 				Address: "fd00::1", Node: "n1", IngressPorts: []int{80}, GroupVersion: 5, Idle: true},
 			{ID: "a0000000002", Service: "web", Replica: 1, Deployment: 2, Phase: model.PhaseStarting,
 				ClientState: model.StateCreating, Op: "create"},
 		}},
-		{ID: b, Tenant: "acme", Name: "b", HostLabel: "b-acme", Deployment: 1, CreatedAt: at},
+		{ID: b, Project: "acme", Name: "b", HostLabel: "b-acme", Deployment: 1, CreatedAt: at},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v\nwant %+v", got, want)
@@ -491,12 +491,12 @@ func TestBuildMesh(t *testing.T) {
 	}
 }
 
-// A default host is in its tenant's zone (ADR 0031): the apps zone for
-// none, the tenant zone for its name, and none for a zone the platform
+// A default host is in its project's zone (ADR 0031): the apps zone for
+// none, the project zone for its name, and none for a zone the platform
 // does not serve.
 func TestBuildEnvZones(t *testing.T) {
 	specs := specsOf(map[int]*spec.Spec{1: deployment1()})
-	zones := model.Zones{Apps: "apps.example", Tenant: "apps.run.example"}
+	zones := model.Zones{Apps: "apps.example", Project: "apps.run.example"}
 	for zone, want := range map[string][]string{
 		"": {"web-acme.apps.example"}, "apps.run.example": {"web-acme.apps.run.example"}, "old.example": {},
 	} {

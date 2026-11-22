@@ -89,11 +89,61 @@ export function applyPins(spec, images) {
   return { spec: out, unresolved: [...unresolved].sort(), supported: true };
 }
 
+// expectationOf is what a pin says its code expects of the secret (ADR
+// 0058): {type, mode, forwardedHost}, each only when the pin writes it;
+// {} for none.
+export function expectationOf(ref) {
+  const out = {};
+  if (!isObject(ref)) return out;
+  if (ref.type === 'value' || ref.type === 'http') out.type = ref.type;
+  if (ref.mode === 'name' || ref.mode === 'intercept') out.mode = ref.mode;
+  if (typeof ref.forwardedHost === 'boolean') out.forwardedHost = ref.forwardedHost;
+  return out;
+}
+
+// expectationWords say an expectation for the secret's row: "a value",
+// "an HTTP secret in the intercept mode", "… in the name mode, the host
+// forwarded"; '' for none.
+export function expectationWords(e) {
+  if (!e || Object.keys(e).length === 0) return '';
+  if (e.type === 'value') return 'a value';
+  let s = 'an HTTP secret';
+  if (e.mode) s += ` in the ${e.mode} mode`;
+  if (typeof e.forwardedHost === 'boolean') s += e.forwardedHost ? ', the host forwarded' : ', the host not forwarded';
+  return s;
+}
+
+// newSecretQuery is the query of the new HTTP secret's page that offers
+// the secret as the spec expects it: its name, mode and forwarded host.
+export function newSecretQuery(name, e) {
+  const q = new URLSearchParams();
+  q.set('name', name);
+  if (e && e.mode) q.set('mode', e.mode);
+  if (e && typeof e.forwardedHost === 'boolean') q.set('forwardedHost', e.forwardedHost ? '1' : '0');
+  return '?' + q.toString();
+}
+
+// offeredSecret is what the new HTTP secret's page takes from its query
+// (newSecretQuery): {name, mode, forwardedHost}, each only when given and
+// well formed; the intercept mode forwards no host.
+export function offeredSecret(search) {
+  const q = new URLSearchParams(search || '');
+  const out = {};
+  const name = q.get('name');
+  if (name && /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(name)) out.name = name;
+  const mode = q.get('mode');
+  if (mode === 'name' || mode === 'intercept') out.mode = mode;
+  const fh = q.get('forwardedHost');
+  if ((fh === '1' || fh === '0') && out.mode !== 'intercept') out.forwardedHost = fh === '1';
+  return out;
+}
+
 // secretPins are the secrets a draft knows with their pins against the
 // environment's list (GET …/secrets, both kinds): {name, type (http or
-// value, ADR 0055: the list's, else the draft's reference with a key or
-// its pin's type), pinned (0: the latest at apply), latest (0: the
-// environment has none), newer, missing}. pending names those whose
+// value, ADR 0055: the list's, else the pin's written type, the draft's
+// reference with a key), pinned (0: the latest at apply), latest (0: the
+// environment has none), newer, missing, expect (what the spec's code
+// expects of it, ADR 0058: expectationOf)}. pending names those whose
 // values wait in memory (a new environment).
 export function secretPins(spec, names, list, pending = new Set()) {
   const latest = new Map((list || []).map((s) => [s.name, s.version]));
@@ -103,14 +153,18 @@ export function secretPins(spec, names, list, pending = new Set()) {
     const ref = spec && isObject(spec.secrets) && isObject(spec.secrets[name]) ? spec.secrets[name] : null;
     const pinned = ref && Number.isInteger(ref.version) ? ref.version : 0;
     const l = latest.get(name) || 0;
-    const type = types.get(name) || (http.has(name) ? 'http' : 'value');
-    return { name, type, pinned, latest: l, newer: pinned > 0 && l > pinned, missing: !l && !pending.has(name) };
+    const expect = expectationOf(ref);
+    const type = types.get(name) || expect.type || (http.has(name) ? 'http' : 'value');
+    return { name, type, pinned, latest: l, newer: pinned > 0 && l > pinned, missing: !l && !pending.has(name), expect };
   });
 }
 
-// pinSecret pins secret name to version (0: the latest at apply): the
-// version alone, an HTTP secret's too (the apply writes its upstream and
-// mode beside it).
+// pinSecret pins secret name to version (0: the latest at apply). The pin
+// keeps what the code expects of the secret, its type, mode and forwarded
+// host (ADR 0058), and leaves its upstream, which is the version's (the
+// apply writes it, and the mode, beside the version).
 export function pinSecret(spec, name, version) {
-  return setObject(spec, 'secrets', name, version > 0 ? { version } : {});
+  const ref = spec && isObject(spec.secrets) && isObject(spec.secrets[name]) ? spec.secrets[name] : {};
+  const out = version > 0 ? { version } : {};
+  return setObject(spec, 'secrets', name, { ...out, ...expectationOf(ref) });
 }

@@ -20,38 +20,38 @@ import (
 	"github.com/gardenlinux/feos/go/internal/sink/quickwit"
 )
 
-// accessFerund answers GET /api/v1/tenant as ferund does for its
-// readers: "Bearer all" holds read on the tenant, "Bearer writer" write,
+// accessFerund answers GET /api/v1/project as ferund does for its
+// readers: "Bearer all" holds read on the project, "Bearer writer" write,
 // "Bearer e1" and the session "s" (in acme) read on the environment e1,
 // "Bearer none" nothing.
 func accessFerund(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != pathTenant {
+	if r.URL.Path != pathProject {
 		http.NotFound(w, r)
 		return
 	}
 	who := r.Header.Get("Authorization")
 	if c, err := r.Cookie(auth.SessionCookie); who == "" && err == nil {
-		who = "session " + c.Value + " " + r.Header.Get("FeRun-Tenant")
+		who = "session " + c.Value + " " + r.Header.Get("FeRun-Project")
 	}
 	switch who {
 	case "Bearer all":
-		_, _ = io.WriteString(w, `{"tenant":"acme","role":"read","environments":[]}`)
+		_, _ = io.WriteString(w, `{"project":"acme","role":"read","environments":[]}`)
 	case "Bearer writer":
-		_, _ = io.WriteString(w, `{"tenant":"acme","role":"write","environments":[]}`)
+		_, _ = io.WriteString(w, `{"project":"acme","role":"write","environments":[]}`)
 	case "Bearer e1", "session s acme":
-		_, _ = io.WriteString(w, `{"tenant":"acme","role":"","environments":["e1"]}`)
+		_, _ = io.WriteString(w, `{"project":"acme","role":"","environments":["e1"]}`)
 	case "Bearer none":
-		_, _ = io.WriteString(w, `{"tenant":"acme","role":"","environments":[]}`)
+		_, _ = io.WriteString(w, `{"project":"acme","role":"","environments":[]}`)
 	default:
 		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = io.WriteString(w, `{"error":"unknown tenant token"}`)
+		_, _ = io.WriteString(w, `{"error":"unknown project token"}`)
 	}
 }
 
 // A reader of environments only (a person's grant on one, or a token of
 // its scope) reads the streams and spans of those environments, none of
 // no environment, and no other's traffic; a session reaches the sink by
-// its cookie and FeRun-Tenant, and its changes need the CSRF header and
+// its cookie and FeRun-Project, and its changes need the CSRF header and
 // the same origin (ADR 0031).
 func TestReaderAccess(t *testing.T) {
 	s, _, _ := newTestStore(t, testConfig())
@@ -63,7 +63,7 @@ func TestReaderAccess(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.Ingest(ctx, batch(StreamKey{"pj", "main", "l"}, Labels{Tenant: "acme", Job: "j1", Attrs: map[string]string{}},
+	if err := s.Ingest(ctx, batch(StreamKey{"pj", "main", "l"}, Labels{Project: "acme", Job: "j1", Attrs: map[string]string{}},
 		lines(0, base, 2, text))); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestReaderAccess(t *testing.T) {
 	defer ferund.Close()
 	ready := make(chan struct{})
 	close(ready)
-	srv := httptest.NewServer(newAPI(s, tr, NewTenants(ferund.URL, nil, time.Minute), ready, dbtest.Logger(t)))
+	srv := httptest.NewServer(newAPI(s, tr, NewProjects(ferund.URL, nil, time.Minute), ready, dbtest.Logger(t)))
 	defer srv.Close()
 
 	type as struct {
@@ -97,7 +97,7 @@ func TestReaderAccess(t *testing.T) {
 		}
 		if who.session != "" {
 			r.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: who.session})
-			r.Header.Set("FeRun-Tenant", "acme")
+			r.Header.Set("FeRun-Project", "acme")
 		}
 		for k, v := range who.header {
 			r.Header[k] = v
@@ -171,20 +171,20 @@ func TestReaderAccess(t *testing.T) {
 		within []string
 		want   bool
 	}{{"e1", nil, true}, {"", nil, true}, {"e1", []string{"e1"}, true}, {"e2", []string{"e1"}, false}, {"", []string{"e1"}, false}} {
-		if got := selects("acme", Selector{Within: c.within}, &quickwit.Doc{Tenant: "acme", Environment: c.env}); got != c.want {
+		if got := selects("acme", Selector{Within: c.within}, &quickwit.Doc{Project: "acme", Environment: c.env}); got != c.want {
 			t.Errorf("a follow's line of %q within %v: %v", c.env, c.within, got)
 		}
 	}
 
-	// A session without its tenant is asked to name it (here under the
+	// A session without its project is asked to name it (here under the
 	// cookie's old name, which the sink takes for one release).
 	r, _ := http.NewRequest("GET", srv.URL+"/api/v1/log-streams?environment=e1", nil)
 	r.AddCookie(&http.Cookie{Name: auth.OldSessionCookie, Value: "s"})
 	if resp, err := http.DefaultClient.Do(r); err != nil || resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("a session without FeRun-Tenant: %v %v", resp, err)
+		t.Errorf("a session without FeRun-Project: %v %v", resp, err)
 	}
 
-	// Deleting streams needs write on the tenant; a session's delete the
+	// Deleting streams needs write on the project; a session's delete the
 	// CSRF header and the same origin first.
 	del := "/api/v1/log-streams?environment=e2"
 	for _, c := range []struct {
@@ -193,7 +193,7 @@ func TestReaderAccess(t *testing.T) {
 		code int
 		want string
 	}{
-		{"e1", e1, 403, `"code":"role_required","role":"write","scope":"tenant"`},
+		{"e1", e1, 403, `"code":"role_required","role":"write","scope":"project"`},
 		{"all", all, 403, `"code":"role_required"`},
 		{"a session without the header", sess, 403, "missing X-Requested-With header"},
 		{"a session of another origin", as{session: "s", header: http.Header{"X-Requested-With": {"ferun"},

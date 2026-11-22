@@ -46,5 +46,5 @@
 //   - Loops are the leader's policies: the down sweep, lost grace, idle
 //     pause, hibernate-after, drain, repair, tombstone processing, the
 //     release and takeover of stale ops, and the clean-up of holds and
-//     tenants.
+//     projects.
 package sandbox

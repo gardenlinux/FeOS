@@ -471,7 +471,7 @@ mod tests {
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::{Path, PathBuf};
 
-    const SPIFFE: &str = "spiffe://run.example/tenant/acme/env/prod/service/api";
+    const SPIFFE: &str = "spiffe://run.example/project/acme/env/prod/service/api";
 
     /// A CertificateVerify input of the client.
     fn cv_input(hash: &[u8]) -> Vec<u8> {
@@ -655,7 +655,7 @@ mod tests {
         let e = Identity::from_relayed(&good, &other).unwrap_err();
         assert!(e.contains("another key"), "{e}");
         let mut wrong_id = good.clone();
-        wrong_id["spiffeId"] = "spiffe://run.example/tenant/evil".into();
+        wrong_id["spiffeId"] = "spiffe://run.example/project/evil".into();
         let e = Identity::from_relayed(&wrong_id, &keys).unwrap_err();
         assert!(e.contains("does not carry"), "{e}");
         let mut no_bundle = good.clone();
@@ -710,7 +710,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn two_pods_handshake_through_feid_with_their_keys_in_feos_authn() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        const WEB: &str = "spiffe://run.example/tenant/acme/env/prod/service/web";
+        const WEB: &str = "spiffe://run.example/project/acme/env/prod/service/web";
         let pki = IdentityPki::new();
         let (web, api) = (pod(IDENTITY_WAIT).await, pod(IDENTITY_WAIT).await);
         web.feosd

@@ -191,7 +191,7 @@ type heldToken struct {
 // newResolver returns a resolver that reaches registries over https only,
 // without a proxy, and dials only IPv4 addresses outside deny: the
 // destination rule of bindings and preflights (--deny-prefix), since an
-// image names its registry and the tenant names the image. Every
+// image names its registry and the project names the image. Every
 // connection is judged on the address actually dialled, to a registry,
 // to the target of a redirect and to a token realm alike, so that a name
 // that resolves to an internal address, at once or a moment later, is

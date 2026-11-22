@@ -20,14 +20,14 @@ FERUN_ROLLOUT_GRACE ?= 8m
 # The zone of public environments' default hosts, served by ferun-ingress
 # (config.env.example); set empty, no host is served.
 APPS_ZONE ?= $(if $(DOMAIN),apps.$(DOMAIN))
-# The tenants that own the apps zone's plain names, ferund's
+# The projects that own the apps zone's plain names, ferund's
 # --apps-zone-owners (config.env.example); empty, none does.
 APPS_ZONE_OWNERS ?=
-# The zone of the default hosts of the tenants people make, ferund's
-# --tenant-zone (ADR 0031, config.env.example); empty, none.
-TENANT_ZONE ?=
-TENANT_ZONE_TLS_CERT = $(if $(TENANT_ZONE),/etc/ferun-ingress/tenant-tls/tls.crt)
-TENANT_ZONE_TLS_KEY = $(if $(TENANT_ZONE),/etc/ferun-ingress/tenant-tls/tls.key)
+# The zone of the default hosts of the projects people make, ferund's
+# --project-zone (ADR 0031, config.env.example); empty, none.
+PROJECT_ZONE ?=
+PROJECT_ZONE_TLS_CERT = $(if $(PROJECT_ZONE),/etc/ferun-ingress/project-tls/tls.crt)
+PROJECT_ZONE_TLS_KEY = $(if $(PROJECT_ZONE),/etc/ferun-ingress/project-tls/tls.key)
 EDGE_NAME ?= $(if $(DOMAIN),edge.$(DOMAIN))
 DOMAIN_CHALLENGE_LABEL ?= _ferun-challenge
 ACME_PROFILE ?= shortlived
@@ -55,13 +55,13 @@ SINK_IMAGE ?= $(PLATFORM_REGISTRY)/ferun-sink:$(TAG)
 # which reach it, and the private blocks an issuer may be in
 # (config.env.example). VISITOR_AUTH_URL is ferund's --visitor-auth-url,
 # https://<AUTH_HOST> once ferun-auth runs; empty, ferund serves providers
-# of kind tenant alone.
+# of kind project alone.
 AUTH_HOST ?= $(if $(DOMAIN),auth.$(DOMAIN))
 AUTH_IMAGE ?= $(PLATFORM_REGISTRY)/ferund:$(TAG)
 GATEWAY_PODS_NAMESPACE ?= envoy-gateway-system
 AUTH_ALLOW_PREFIXES ?=
 VISITOR_AUTH_URL ?=
-export DOMAIN REGISTRY PLATFORM_REGISTRY SINK_IMAGE OIDC_ISSUER WORKER_POOL NODE_NAME_PREFIX FERUN_NODES_IP FERUN_ROLLOUT_GRACE FECHAT_MODEL APPS_ZONE APPS_ZONE_OWNERS TENANT_ZONE TENANT_ZONE_TLS_CERT TENANT_ZONE_TLS_KEY NODE_CIDR DENY_PREFIXES FERUN_DENY_PREFIX GATEWAY_NAMESPACE GATEWAY_NAME EDGE_NAME EDGE_ADDRESSES DOMAIN_CHALLENGE_LABEL ACME_DIRECTORY ACME_EMAIL ACME_PROFILE ACME_ZONE ACME_ZONE_ROUTE53_ID AUTH_HOST AUTH_IMAGE GATEWAY_PODS_NAMESPACE AUTH_ALLOW_PREFIXES VISITOR_AUTH_URL
+export DOMAIN REGISTRY PLATFORM_REGISTRY SINK_IMAGE OIDC_ISSUER WORKER_POOL NODE_NAME_PREFIX FERUN_NODES_IP FERUN_ROLLOUT_GRACE FECHAT_MODEL APPS_ZONE APPS_ZONE_OWNERS PROJECT_ZONE PROJECT_ZONE_TLS_CERT PROJECT_ZONE_TLS_KEY NODE_CIDR DENY_PREFIXES FERUN_DENY_PREFIX GATEWAY_NAMESPACE GATEWAY_NAME EDGE_NAME EDGE_ADDRESSES DOMAIN_CHALLENGE_LABEL ACME_DIRECTORY ACME_EMAIL ACME_PROFILE ACME_ZONE ACME_ZONE_ROUTE53_ID AUTH_HOST AUTH_IMAGE GATEWAY_PODS_NAMESPACE AUTH_ALLOW_PREFIXES VISITOR_AUTH_URL
 DOCKER ?= docker
 PACKAGES_DIR ?= $(REPO_ROOT)/target/packages
 CONTEXT := $(REPO_ROOT)/target/gardener/feos-node
@@ -154,7 +154,7 @@ $(MANIFESTS)/feos-k8s.yaml: FORCE
 # switches ferund's hosts off.
 $(MANIFESTS)/ferun.yaml: REGISTRY = $(PLATFORM_REGISTRY)
 $(MANIFESTS)/ferun.yaml: FORCE
-	$(call render,DOMAIN REGISTRY OIDC_ISSUER FERUN_NODES_IP FERUN_ROLLOUT_GRACE FERUN_DENY_PREFIX GATEWAY_NAMESPACE GATEWAY_NAME,kubectl kustomize --load-restrictor LoadRestrictionsNone ferun,APPS_ZONE APPS_ZONE_OWNERS TENANT_ZONE EDGE_NAME EDGE_ADDRESSES DOMAIN_CHALLENGE_LABEL ACME_DIRECTORY ACME_EMAIL ACME_PROFILE ACME_ZONE ACME_ZONE_ROUTE53_ID VISITOR_AUTH_URL)
+	$(call render,DOMAIN REGISTRY OIDC_ISSUER FERUN_NODES_IP FERUN_ROLLOUT_GRACE FERUN_DENY_PREFIX GATEWAY_NAMESPACE GATEWAY_NAME,kubectl kustomize --load-restrictor LoadRestrictionsNone ferun,APPS_ZONE APPS_ZONE_OWNERS PROJECT_ZONE EDGE_NAME EDGE_ADDRESSES DOMAIN_CHALLENGE_LABEL ACME_DIRECTORY ACME_EMAIL ACME_PROFILE ACME_ZONE ACME_ZONE_ROUTE53_ID VISITOR_AUTH_URL)
 
 # Once, when ferund moves from the StatefulSet postgres to ferun-db
 # (README.md): ferun-db created from a copy of postgres-0's database.
@@ -172,10 +172,10 @@ $(MANIFESTS)/registry.yaml: FORCE
 	$(call render,DOMAIN GATEWAY_NAMESPACE GATEWAY_NAME,cat registry/registry.yaml)
 
 # Only with an apps zone: without one there is nothing to serve. The
-# tenant zone's certificate only with TENANT_ZONE.
+# project zone's certificate only with PROJECT_ZONE.
 $(MANIFESTS)/ferun-ingress.yaml: REGISTRY = $(PLATFORM_REGISTRY)
 $(MANIFESTS)/ferun-ingress.yaml: FORCE
-	$(call render,DOMAIN REGISTRY FERUN_NODES_IP APPS_ZONE NODE_CIDR,$(call cat-yaml,ferun-ingress/ferun-ingress.yaml $(if $(TENANT_ZONE),ferun-ingress/tenant-zone.yaml)),TENANT_ZONE TENANT_ZONE_TLS_CERT TENANT_ZONE_TLS_KEY)
+	$(call render,DOMAIN REGISTRY FERUN_NODES_IP APPS_ZONE NODE_CIDR,$(call cat-yaml,ferun-ingress/ferun-ingress.yaml $(if $(PROJECT_ZONE),ferun-ingress/project-zone.yaml)),PROJECT_ZONE PROJECT_ZONE_TLS_CERT PROJECT_ZONE_TLS_KEY)
 
 $(MANIFESTS)/ferun-sink.yaml: FORCE
 	$(call render,DOMAIN SINK_IMAGE GATEWAY_NAMESPACE GATEWAY_NAME,cat ferun-sink/ferun-sink.yaml)

@@ -103,17 +103,17 @@ type HelloRequest struct {
 
 // HelloResponse is the ingress's place on the pods' mesh: the cluster's
 // ULA (PodNetwork), its /64 (Prefix) and its address in it, the zones of
-// environments' default hosts (the apps zone, and the tenant zone of the
-// tenants people make, ADR 0031; "": none) and the ID of the ferund
+// environments' default hosts (the apps zone, and the project zone of the
+// projects people make, ADR 0031; "": none) and the ID of the ferund
 // instance that answered.
 type HelloResponse struct {
-	Name       string `json:"name"`
-	PodNetwork string `json:"podNetwork"`
-	Prefix     string `json:"prefix"`
-	Address    string `json:"address"`
-	AppsZone   string `json:"appsZone"`
-	TenantZone string `json:"tenantZone,omitempty"`
-	Instance   string `json:"instance"`
+	Name        string `json:"name"`
+	PodNetwork  string `json:"podNetwork"`
+	Prefix      string `json:"prefix"`
+	Address     string `json:"address"`
+	AppsZone    string `json:"appsZone"`
+	ProjectZone string `json:"projectZone,omitempty"`
+	Instance    string `json:"instance"`
 }
 
 // SyncRequest opens the Sync stream. It has no fields yet.
@@ -203,7 +203,7 @@ type Self struct {
 	Name            string `json:"name"`
 	Address         string `json:"address"`
 	AppsZone        string `json:"appsZone"`
-	TenantZone      string `json:"tenantZone,omitempty"`
+	ProjectZone     string `json:"projectZone,omitempty"`
 	AdmittedVersion uint64 `json:"admittedVersion"`
 }
 
@@ -213,14 +213,14 @@ type Self struct {
 // when it changed.
 //
 // Domains are the hosts of the environment that have a certificate of
-// their own (a tenant's domains, ADR 0021); each one's name is in Hosts
+// their own (a project's domains, ADR 0021); each one's name is in Hosts
 // too. The default host under the apps zone has none: it takes the
 // ingress's wildcard.
 type Env struct {
-	ID     string   `json:"id"`
-	Tenant string   `json:"tenant"`
-	Name   string   `json:"name"`
-	Hosts  []string `json:"hosts"`
+	ID      string   `json:"id"`
+	Project string   `json:"project"`
+	Name    string   `json:"name"`
+	Hosts   []string `json:"hosts"`
 	// Deployment is its routing deployment's number. The ingress does
 	// not read it; it is in the hash, which so changed once with its key
 	// (ADR 0018, "The deployments' word").
@@ -238,7 +238,7 @@ type Env struct {
 	// token's prv must equal it.
 	Provider string `json:"provider,omitempty"`
 	// SignIn is where a navigation without a visit is sent, with
-	// "challenge=<sealed>" added to its query: the tenant's service, or
+	// "challenge=<sealed>" added to its query: the project's service, or
 	// ferun-auth's /visit. "" with AccessVisitors: nobody can sign in.
 	SignIn string `json:"signIn,omitempty"`
 }

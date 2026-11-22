@@ -36,7 +36,7 @@ import (
 
 // The names of the tests' world.
 const (
-	testTenant   = "acme"
+	testProject  = "acme"
 	testInstance = "i1"
 	testAdmin    = "admin"
 	testPassword = "s3cret"
@@ -89,11 +89,11 @@ type env struct {
 	conns *fakeConns
 	// envs is the fake environments service, when no other is given.
 	envs *fakeEnvs
-	// tenantJobs is the fake tenant jobs service.
-	tenantJobs *fakeTenantJobs
-	// tenantToken is a token of testTenant.
-	tenantToken string
-	// box is testTenant's environment "box", where createSandbox makes
+	// projectJobs is the fake project jobs service.
+	projectJobs *fakeProjectJobs
+	// projectToken is a token of testProject.
+	projectToken string
+	// box is testProject's environment "box", where createSandbox makes
 	// its sandboxes (ADR 0035).
 	box uuid.UUID
 }
@@ -152,27 +152,27 @@ func newEnv(t *testing.T, o envOptions) *env {
 	} else {
 		deps.Domains = fakeDomains{}
 	}
-	e.tenantJobs = &fakeTenantJobs{}
-	deps.TenantJobs = e.tenantJobs
+	e.projectJobs = &fakeProjectJobs{}
+	deps.ProjectJobs = e.projectJobs
 	e.srv = newServer(cfg, deps)
 	e.h = e.srv.mux
-	if _, _, err := st.CreateTenant(context.Background(), testTenant); err != nil {
+	if _, _, err := st.CreateProject(context.Background(), testProject); err != nil {
 		t.Fatal(err)
 	}
-	e.box = e.mkEnv(testTenant, "box")
+	e.box = e.mkEnv(testProject, "box")
 	if o.db == nil {
-		e.tenantToken = e.mintTenantToken(testTenant)
+		e.projectToken = e.mintProjectToken(testProject)
 	}
 	return e
 }
 
-// mkEnv is tenant's environment name, inserted when it has none.
-func (e *env) mkEnv(tenant, name string) uuid.UUID {
+// mkEnv is project's environment name, inserted when it has none.
+func (e *env) mkEnv(project, name string) uuid.UUID {
 	e.t.Helper()
 	ctx := context.Background()
-	row, err := e.st.LockEnvironmentByName(ctx, tenant, name, store.NoLock)
+	row, err := e.st.LockEnvironmentByName(ctx, project, name, store.NoLock)
 	if errors.Is(err, store.ErrNoRow) {
-		row, err = e.st.InsertEnvironment(ctx, store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: name})
+		row, err = e.st.InsertEnvironment(ctx, store.NewEnvironment{ID: uuid.New(), Owner: project, Name: name})
 	}
 	if err != nil {
 		e.t.Fatal(err)
@@ -180,14 +180,14 @@ func (e *env) mkEnv(tenant, name string) uuid.UUID {
 	return row.ID
 }
 
-// mintTenantToken stores a new token of tenant and returns it.
-func (e *env) mintTenantToken(tenant string) string {
+// mintProjectToken stores a new token of project and returns it.
+func (e *env) mintProjectToken(project string) string {
 	e.t.Helper()
-	tok, hash, err := mintTenantToken()
+	tok, hash, err := mintProjectToken()
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	if _, err := e.st.CreateTenantToken(context.Background(), hash, tenant, "test"); err != nil {
+	if _, err := e.st.CreateProjectToken(context.Background(), hash, project, "test"); err != nil {
 		e.t.Fatal(err)
 	}
 	return tok
@@ -279,11 +279,11 @@ func decode[T any](t *testing.T, w *httptest.ResponseRecorder) T {
 	return v
 }
 
-// createSandbox creates a sandbox of the env's tenant in its environment
+// createSandbox creates a sandbox of the env's project in its environment
 // box over REST and returns the ID ferund minted and the token.
 func (e *env) createSandbox() (string, string) {
 	e.t.Helper()
-	w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.tenantToken), map[string]any{"environment": "box"})
+	w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.projectToken), map[string]any{"environment": "box"})
 	expect(e.t, w, http.StatusCreated, "")
 	out := decode[struct {
 		Status struct {
@@ -337,12 +337,12 @@ func (f *fakeEngine) Delete(ctx context.Context, owner string, id podid.ID) (sto
 	return row, row.Node != "", err
 }
 
-func (f *fakeEngine) DeleteTenant(ctx context.Context, tenant string) (bool, error) {
-	ok, err := f.st.MarkTenantDeleting(ctx, tenant)
+func (f *fakeEngine) DeleteProject(ctx context.Context, project string) (bool, error) {
+	ok, err := f.st.MarkProjectDeleting(ctx, project)
 	if !ok || err != nil {
 		return ok, err
 	}
-	_, err = f.st.DeleteTenantIfEmpty(ctx, tenant)
+	_, err = f.st.DeleteProjectIfEmpty(ctx, project)
 	return true, err
 }
 
@@ -474,19 +474,19 @@ func (b *fakeBindings) Access(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (b *fakeBindings) ListCredentials(w http.ResponseWriter, _ *http.Request, env bindings.Env) {
-	b.answer(w, "ListCredentials "+env.Tenant+"/"+env.Name+"/"+env.ID.String())
+	b.answer(w, "ListCredentials "+env.Project+"/"+env.Name+"/"+env.ID.String())
 }
 func (b *fakeBindings) GetCredential(w http.ResponseWriter, _ *http.Request, env bindings.Env) {
-	b.answer(w, "GetCredential "+env.Tenant+"/"+env.Name+"/"+env.ID.String())
+	b.answer(w, "GetCredential "+env.Project+"/"+env.Name+"/"+env.ID.String())
 }
 func (b *fakeBindings) PutCredential(w http.ResponseWriter, _ *http.Request, env bindings.Env) {
-	b.answer(w, "PutCredential "+env.Tenant+"/"+env.Name+"/"+env.ID.String())
+	b.answer(w, "PutCredential "+env.Project+"/"+env.Name+"/"+env.ID.String())
 }
 func (b *fakeBindings) DeleteCredential(w http.ResponseWriter, _ *http.Request, env bindings.Env) {
-	b.answer(w, "DeleteCredential "+env.Tenant+"/"+env.Name+"/"+env.ID.String())
+	b.answer(w, "DeleteCredential "+env.Project+"/"+env.Name+"/"+env.ID.String())
 }
 func (b *fakeBindings) CheckCredential(w http.ResponseWriter, _ *http.Request, env bindings.Env) {
-	b.answer(w, "CheckCredential "+env.Tenant+"/"+env.Name+"/"+env.ID.String())
+	b.answer(w, "CheckCredential "+env.Project+"/"+env.Name+"/"+env.ID.String())
 }
 func (b *fakeBindings) SandboxCredentialNames(context.Context, podid.ID) ([]string, error) {
 	return []string{}, nil
@@ -498,7 +498,7 @@ func (b *fakeBindings) SetSandboxCredentials(context.Context, string, uuid.UUID,
 	return nil
 }
 func (b *fakeBindings) CheckSecret(w http.ResponseWriter, _ *http.Request, env bindings.Env) {
-	b.answer(w, "CheckSecret "+env.Tenant+"/"+env.Name+"/"+env.ID.String())
+	b.answer(w, "CheckSecret "+env.Project+"/"+env.Name+"/"+env.ID.String())
 }
 func (b *fakeBindings) CheckSandboxSecrets(context.Context, uuid.UUID, []string) error { return nil }
 func (b *fakeBindings) SetSandboxSecrets(context.Context, string, uuid.UUID, podid.ID, []string) error {
@@ -513,11 +513,11 @@ func (fakeWatches) Update(w http.ResponseWriter, _ *http.Request) { _, _ = w.Wri
 func (fakeWatches) Events(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("Events")) }
 func (fakeWatches) Delete(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("Delete")) }
 
-// newTenantRequest is a request made as tenant, past the tenant class.
-func newTenantRequest(t *testing.T, method, path, tenant string) *http.Request {
+// newProjectRequest is a request made as project, past the project class.
+func newProjectRequest(t *testing.T, method, path, project string) *http.Request {
 	t.Helper()
 	r := httptest.NewRequest(method, path, nil)
-	return r.WithContext(auth.WithTenant(r.Context(), auth.Tenant{Name: tenant}))
+	return r.WithContext(auth.WithProject(r.Context(), auth.Project{Name: project}))
 }
 
 func recorder() *httptest.ResponseRecorder { return httptest.NewRecorder() }

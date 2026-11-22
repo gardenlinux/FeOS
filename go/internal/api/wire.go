@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
+	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -48,7 +50,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) error {
 	return nil
 }
 
-// rfc3339 renders a time as the API does for sandboxes, tokens, tenants
+// rfc3339 renders a time as the API does for sandboxes, tokens, projects
 // and the other row times: RFC 3339 in seconds, UTC; "" for the zero time.
 func rfc3339(t time.Time) string {
 	if t.IsZero() {
@@ -89,6 +91,55 @@ func decodeJSON(r *http.Request, v any) (map[string]json.RawMessage, error) {
 		return nil, apierr.New(http.StatusBadRequest, "invalid request body: %v", err)
 	}
 	return sent, nil
+}
+
+// specBody reads the body of a route that takes a spec (plan, plan
+// without an environment, apply, clone; ADR 0057): with a YAML content
+// type (application/yaml, application/x-yaml, text/yaml; any charset,
+// the body UTF-8) the body is the spec document, returned as doc with
+// spec.FormatYAML, and the envelope's other fields are the caller's to
+// read from the query; with any other content type, or none, it is the
+// JSON envelope as before, decoded into v (decodeJSON), and doc is nil.
+func specBody(r *http.Request, v any) (spec.Format, []byte, error) {
+	if !isYAML(r.Header.Get("Content-Type")) {
+		_, err := decodeJSON(r, v)
+		return spec.FormatJSON, nil, err
+	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+	if err != nil {
+		return spec.FormatYAML, nil, apierr.New(http.StatusBadRequest, "read body: %v", err)
+	}
+	if len(raw) > maxBody {
+		return spec.FormatYAML, nil, apierr.New(http.StatusRequestEntityTooLarge, "request body larger than %d bytes",
+			maxBody)
+	}
+	return spec.FormatYAML, raw, nil
+}
+
+// isYAML reports whether a Content-Type names YAML.
+func isYAML(contentType string) bool {
+	mt, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	switch mt {
+	case "application/yaml", "application/x-yaml", "text/yaml":
+		return true
+	}
+	return false
+}
+
+// queryIntPtr reads an optional integer query parameter; nil when the
+// query does not have it.
+func queryIntPtr(r *http.Request, name string) (*int, error) {
+	if !r.URL.Query().Has(name) {
+		return nil, nil
+	}
+	n, err := queryInt(r, name)
+	if err != nil {
+		return nil, err
+	}
+	return &n, nil
 }
 
 // queryInt reads an optional integer query parameter.

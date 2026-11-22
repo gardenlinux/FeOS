@@ -60,7 +60,7 @@ should sleep as a scaled-to-zero service does.
   environment owner's and is no environment's pod. A sandbox deleted and
   created again under the same ID is a new incarnation, in which the
   service starts anew, its restarts and checks counted from zero; a
-  sandbox that another tenant holds is never the service's, and the
+  sandbox that another project holds is never the service's, and the
   service fails rather than start, route or reach there.
 - A service that goes, removed, moved to another sandbox or with its
   environment deleted, has its process stopped first, a sleeping sandbox

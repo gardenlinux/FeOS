@@ -111,17 +111,17 @@ patches:
                 env:
                   - name: FERUN_APPS_ZONE
                     value: '${APPS_ZONE}'
-                  # The tenants that own the apps zone's plain names: each
+                  # The projects that own the apps zone's plain names: each
                   # may choose a host label without "--" (ADR 0021); empty,
                   # none does. FeCode's installation: fecode.
                   - name: FERUN_APPS_ZONE_OWNERS
                     value: '${APPS_ZONE_OWNERS}'
-                  # The zone of the default hosts of the tenants people make
+                  # The zone of the default hosts of the projects people make
                   # (ADR 0031), served by ferun-ingress with its own
-                  # wildcard (../ferun-ingress/tenant-zone.yaml); empty,
-                  # every tenant's hosts are under the apps zone.
-                  - name: FERUN_TENANT_ZONE
-                    value: '${TENANT_ZONE}'
+                  # wildcard (../ferun-ingress/project-zone.yaml); empty,
+                  # every project's hosts are under the apps zone.
+                  - name: FERUN_PROJECT_ZONE
+                    value: '${PROJECT_ZONE}'
                   - name: FERUN_EDGE_NAME
                     value: '${EDGE_NAME}'
                   - name: FERUN_EDGE_ADDRESS
@@ -150,7 +150,7 @@ patches:
                   # ferun-auth (../ferun-auth, ADR 0054), where a visitor of
                   # a provider of kind ferun or oidc signs in:
                   # https://<AUTH_HOST>, set once ferun-auth runs. Empty,
-                  # ferund serves providers of kind tenant alone and refuses
+                  # ferund serves providers of kind project alone and refuses
                   # a publish that asks for another.
                   - name: FERUN_VISITOR_AUTH_URL
                     value: '${VISITOR_AUTH_URL}'

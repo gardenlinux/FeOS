@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -12,64 +13,72 @@ import (
 
 	"github.com/google/uuid"
 
+	fapi "github.com/gardenlinux/feos/go/ferun/api"
+
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// This file is ADR 0031's "People make tenants and invite each other":
-// the tenants people make, a tenant's members and their grants,
-// invitations, the tenant's tokens as its admins mint them, leaving a
-// tenant, and the operators' switch of a person.
+// This file is ADR 0031's "People make projects and invite each other":
+// the projects people make, a project's members and their grants,
+// invitations, the project's tokens as its admins mint them, leaving a
+// project, and the operators' switch of a person.
 
-// The values of Config.TenantCreation (--tenant-creation).
+// The values of Config.ProjectCreation (--project-creation).
 const (
-	TenantCreationPeople    = "people"
-	TenantCreationOperators = "operators"
+	ProjectCreationPeople    = "people"
+	ProjectCreationOperators = "operators"
 )
 
 // invitationTTL is how long an invitation's link can be used.
 const invitationTTL = 7 * 24 * time.Hour
 
-// fixedReservedTenantNames are the names no tenant made by a person may
-// have, beside Config.ReservedTenantNames.
-var fixedReservedTenantNames = []string{store.OperatorTenant, "admin", "api", "www"}
+// fixedReservedProjectNames are the names no project made by a person may
+// have, beside Config.ReservedProjectNames.
+var fixedReservedProjectNames = []string{store.OperatorProject, "admin", "api", "www"}
 
 // CodeLastAdmin is the code of a 409 for a change that would leave a
-// tenant without an admin.
+// project without an admin.
 const CodeLastAdmin = "last_admin"
 
-// CodeReservedName is the code of a 422 for a tenant name the platform
+// CodeReservedName is the code of a 422 for a project name the platform
 // keeps.
 const CodeReservedName = "reserved_name"
 
-// memberRoutes adds the routes of people in tenants.
+// memberRoutes adds the routes of people in projects.
 func (s *server) memberRoutes(operator func(string, apiHandler), person func(string, apiHandler),
-	tenant func(need, string, apiHandler)) {
+	project func(need, string, apiHandler)) {
 	operator("GET /api/v1/admin/people", s.listPeople)
 	operator("POST /api/v1/admin/people/{person}/disable", s.setPersonDisabled(true))
 	operator("POST /api/v1/admin/people/{person}/enable", s.setPersonDisabled(false))
 
-	person("POST /api/v1/tenants", s.createPersonTenant)
+	person("POST /api/v1/projects", s.createPersonProject)
 	person("GET /api/v1/invitations/{token}", s.previewInvitation)
 	person("POST /api/v1/invitations/{token}/accept", s.acceptInvitation)
 
-	// Members see each other in their tenant; a grant is changed by an
-	// admin of its scope (the tenant, or the body's or query's
-	// environment), which the handler checks.
-	byScope := need{role: admin, scope: scopeHandler}
-	tenant(member, "GET /api/v1/tenant/members", s.listMembers)
-	tenant(byScope, "PUT /api/v1/tenant/members/{person}/grants", s.putMemberGrant)
-	tenant(byScope, "DELETE /api/v1/tenant/members/{person}/grants", s.deleteMemberGrant)
-	tenant(member, "POST /api/v1/tenant/leave", s.leaveTenant)
+	// Members see each other in their project; a grant is changed by an
+	// admin of its scope (the project, or the body's or query's
+	// environment), which the handler checks. An integration changes no
+	// principal of a project (ADR 0056): members, invitations and tokens
+	// refuse it whatever its role; it reads the members and leaves.
+	grantor := noIntegration(byScope(admin))
+	project(member, "GET /api/v1/project/members", s.listMembers)
+	project(grantor, "PUT /api/v1/project/members/{person}/grants", s.putMemberGrant)
+	project(grantor, "DELETE /api/v1/project/members/{person}/grants", s.deleteMemberGrant)
+	project(member, "POST /api/v1/project/leave", s.leaveProject)
 
-	tenant(member, "GET /api/v1/tenant/invitations", s.listInvitations)
-	tenant(byScope, "POST /api/v1/tenant/invitations", s.createInvitation)
-	tenant(byScope, "DELETE /api/v1/tenant/invitations/{id}", s.revokeInvitation)
+	project(noIntegration(member), "GET /api/v1/project/invitations", s.listInvitations)
+	project(grantor, "POST /api/v1/project/invitations", s.createInvitation)
+	project(grantor, "DELETE /api/v1/project/invitations/{id}", s.revokeInvitation)
 
-	tenant(onTenant(admin), "GET /api/v1/tenant/tokens", s.listOwnTokens)
-	tenant(onTenant(admin), "POST /api/v1/tenant/tokens", s.mintOwnToken)
-	tenant(onTenant(admin), "DELETE /api/v1/tenant/tokens/{hash}", s.revokeOwnToken)
+	project(noIntegration(onProject(admin)), "GET /api/v1/project/tokens", s.listOwnTokens)
+	project(noIntegration(onProject(admin)), "POST /api/v1/project/tokens", s.mintOwnToken)
+	project(noIntegration(onProject(admin)), "DELETE /api/v1/project/tokens/{hash}", s.revokeOwnToken)
+	// A token's grants beside its own, as a member's (ADR 0060: the
+	// protect dialog gives a token a grant on the environment).
+	project(grantor, "PUT /api/v1/project/tokens/{hash}/grants", s.putTokenGrant)
+	project(grantor, "DELETE /api/v1/project/tokens/{hash}/grants", s.deleteTokenGrant)
 }
 
 // ----------------------------------------------------------- person class --
@@ -77,9 +86,15 @@ func (s *server) memberRoutes(operator func(string, apiHandler), person func(str
 type personKey struct{}
 
 // person is the person class: a signed-in person's session (an
-// operator's too) with a session's CSRF rules, in no tenant.
+// operator's too) with a session's CSRF rules, in no project. An
+// integration's bearer (a JWT) is refused, 403 integration_refused: an
+// integration is no person (ADR 0056); FeRun-Person, which only an
+// integration sends, is 400 person_header_refused.
 func (s *server) person(h apiHandler) http.Handler {
 	return s.wrap(func(w http.ResponseWriter, r *http.Request) error {
+		if isJWT(bearer(r)) {
+			return errIntegrationRefused()
+		}
 		sess, ok, err := s.session(r)
 		if err != nil {
 			return err
@@ -89,6 +104,9 @@ func (s *server) person(h apiHandler) http.Handler {
 		}
 		if err := s.checkCSRF(r); err != nil {
 			return err
+		}
+		if _, sent, _ := personNamed(r); sent {
+			return errPersonHeaderRefused()
 		}
 		return h(w, r.WithContext(context.WithValue(r.Context(), personKey{}, sess)))
 	})
@@ -105,90 +123,105 @@ func sessionPrincipal(sess store.UISession) auth.Principal {
 	return auth.Principal{Person: sess.PersonID, Operator: sess.Admin}
 }
 
-// ---------------------------------------------------------------- tenants --
+// ---------------------------------------------------------------- projects --
 
-// reservedTenantName reports whether a person may not make a tenant of
+// reservedProjectName reports whether a person may not make a project of
 // that name.
-func (s *server) reservedTenantName(name string) bool {
-	return slices.Contains(fixedReservedTenantNames, name) || slices.Contains(s.cfg.ReservedTenantNames, name)
+func (s *server) reservedProjectName(name string) bool {
+	return slices.Contains(fixedReservedProjectNames, name) || slices.Contains(s.cfg.ReservedProjectNames, name)
 }
 
-// createPersonTenant is POST /api/v1/tenants {name}: a signed-in person
-// makes a tenant and holds admin on it (ADR 0031). --tenant-creation
-// operators keeps it to operators; --tenants-per-person bounds the
-// tenants a person made that are not being deleted (operators are not
-// bound). The tenant gets the default limits (--tenant-default-*) and its
-// default hosts in the tenant zone (--tenant-zone; the apps zone without
-// one), an operator's as well: what this route makes is a person's
-// tenant. No token: the session acts.
-func (s *server) createPersonTenant(w http.ResponseWriter, r *http.Request) error {
+// createPersonProject is POST /api/v1/projects {name, account?}: a
+// signed-in person makes a project on an account they may put projects on
+// (ADR 0059; "" is default) and holds admin on it (ADR 0031). default is
+// open to every signed-in person with --project-creation people, else to
+// the people on it and the operators; an account the person may not use is
+// absent (404), a closed one 409. --projects-per-person bounds the
+// projects a person made that are not being deleted, on every account
+// (operators are not bound). The project gets the default limits
+// (--project-default-*) and its default hosts in the project zone
+// (--project-zone; the apps zone without one), an operator's as well: what
+// this route makes is a person's project. No token: the session acts.
+func (s *server) createPersonProject(w http.ResponseWriter, r *http.Request) error {
 	sess := personSession(r)
 	var req struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		Account string `json:"account"`
 	}
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	if s.cfg.TenantCreation == TenantCreationOperators && !sess.Admin {
-		return apierr.New(http.StatusForbidden, "on this platform only operators make tenants")
+	if req.Account == "" {
+		req.Account = store.DefaultAccount
 	}
-	if !store.TenantNamePattern.MatchString(req.Name) {
-		return apierr.New(http.StatusBadRequest, "tenant name must match %s", store.TenantNamePattern)
+	if !store.ProjectNamePattern.MatchString(req.Name) {
+		return apierr.New(http.StatusBadRequest, "project name must match %s", store.ProjectNamePattern)
 	}
-	if s.reservedTenantName(req.Name) {
+	if s.reservedProjectName(req.Name) {
 		return apierr.WithCode(http.StatusUnprocessableEntity, CodeReservedName,
-			"the tenant name %s is reserved by the platform", req.Name)
+			"the project name %s is reserved by the platform", req.Name)
 	}
 	by := sessionPrincipal(sess).String()
-	var t store.Tenant
+	var t store.Project
+	var acct store.Account
 	err := s.st.InTx(r.Context(), func(tx *store.Store) error {
 		if _, err := tx.LockPerson(r.Context(), sess.PersonID); err != nil {
 			return err
 		}
-		if max := s.cfg.TenantsPerPerson; max > 0 && !sess.Admin {
-			n, err := tx.CountTenantsMadeBy(r.Context(), sess.PersonID)
+		var err error
+		acct, err = s.useAccount(r.Context(), tx, req.Account, sess.PersonID, sess.Admin)
+		if err != nil {
+			var e *apierr.Error
+			if req.Account == store.DefaultAccount && errors.As(err, &e) && e.Status == http.StatusNotFound {
+				return apierr.New(http.StatusForbidden, "on this platform only operators make projects")
+			}
+			return err
+		}
+		if max := s.cfg.ProjectsPerPerson; max > 0 && !sess.Admin {
+			n, err := tx.CountProjectsMadeBy(r.Context(), sess.PersonID)
 			if err != nil {
 				return err
 			}
 			if n >= max {
-				return apierr.QuotaExceeded("tenants", int64(max), int64(n), 1)
+				return apierr.QuotaExceeded("projects", int64(max), int64(n), 1)
 			}
 		}
 		var created bool
-		var err error
-		t, created, err = tx.MakeTenant(r.Context(), req.Name, store.NewTenant{Zone: s.cfg.Zones.ForNewTenant(true),
-			MadeBy: sess.PersonID, Limits: s.cfg.TenantDefaults})
+		t, created, err = tx.MakeProject(r.Context(), req.Name, store.NewProject{Zone: s.cfg.Zones.ForNewProject(true),
+			MadeBy: sess.PersonID, Limits: s.cfg.ProjectDefaults, Account: acct.ID, By: by})
 		if err != nil {
 			return err
 		}
 		if !created {
 			if t.Deleting() {
-				return apierr.New(http.StatusConflict, "tenant %s is being deleted", req.Name)
+				return apierr.New(http.StatusConflict, "project %s is being deleted", req.Name)
 			}
-			return apierr.New(http.StatusConflict, "tenant %s already exists", req.Name)
+			return apierr.New(http.StatusConflict, "project %s already exists", req.Name)
 		}
-		_, err = tx.PutGrant(r.Context(), store.Grant{TenantID: t.ID, PersonID: sess.PersonID,
+		_, err = tx.PutGrant(r.Context(), store.Grant{ProjectID: t.ID, PersonID: sess.PersonID,
 			Role: auth.RoleAdmin.String(), MadeBy: by})
 		return err
 	})
 	if err != nil {
-		return passOr(err, "create tenant")
+		return passOr(err, "create project")
 	}
-	s.log.Info("tenant created", "tenant", t.ID, "by", by)
-	s.record(r.Context(), store.ActivityRow{TenantID: t.ID, Kind: "tenant_created", Category: "lifecycle",
-		Name: "tenant " + t.ID + " created by " + by, Detail: detail(map[string]any{"tenant": t.ID, "by": by})})
+	s.log.Info("project created", "project", t.ID, "account", acct.ID, "by", by)
+	s.record(r.Context(), store.ActivityRow{ProjectID: t.ID, Kind: "project_created", Category: "lifecycle",
+		Name:   "project " + t.ID + " created by " + by,
+		Detail: detail(map[string]any{"project": t.ID, "account": acct.ID, "by": by})})
 	return writeJSON(w, http.StatusCreated, struct {
-		Name      string     `json:"name"`
-		CreatedAt string     `json:"createdAt"`
-		Role      string     `json:"role"`
-		Limits    limitsView `json:"limits"`
-	}{t.ID, rfc3339(t.CreatedAt), auth.RoleAdmin.String(), limitsOf(t.Limits)})
+		Name      string          `json:"name"`
+		CreatedAt string          `json:"createdAt"`
+		Role      string          `json:"role"`
+		Limits    limitsView      `json:"limits"`
+		Account   fapi.AccountRef `json:"account"`
+	}{t.ID, rfc3339(t.CreatedAt), auth.RoleAdmin.String(), limitsOf(t.Limits), refOf(acct)})
 }
 
 // ---------------------------------------------------------------- members --
 
 // grantView is a grant as the members' routes show it: the environment's
-// ID and name, "" for the tenant.
+// ID and name, "" for the project.
 type grantView struct {
 	Role            string `json:"role"`
 	Environment     string `json:"environment,omitempty"`
@@ -203,49 +236,62 @@ func idOrEmpty(id uuid.UUID) string {
 	return id.String()
 }
 
-// memberView is a member: a person with their role on the tenant ("":
-// none) and their roles on environments.
-type memberView struct {
-	Person       string        `json:"person"`
-	Name         string        `json:"name"`
-	Email        string        `json:"email"`
-	Disabled     bool          `json:"disabled,omitempty"`
-	Role         string        `json:"role"`
-	Environments []envRoleView `json:"environments"`
-}
-
-// envRoleView is a role on an environment.
-type envRoleView struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Role string `json:"role"`
-}
-
-// listMembers is GET /api/v1/tenant/members: the people who hold a grant
-// in the tenant, with their names and e-mail addresses, which only the
-// tenant's members see (ADR 0031). Of the grants on environments, those
-// the principal may not read are left out.
+// listMembers is GET /api/v1/project/members: the people who hold a grant
+// in the project, with their names, e-mail addresses, issuers and
+// subjects, which only the project's members see (ADR 0031, 0056), and the
+// integrations that hold one. Of the grants on environments, those the
+// principal may not read are left out; each grant names its principal and
+// that principal's name.
 func (s *server) listMembers(w http.ResponseWriter, r *http.Request) error {
-	ms, err := s.st.ListMembers(r.Context(), tenantOf(r))
+	ctx, project := r.Context(), projectOf(r)
+	ms, err := s.st.ListMembers(ctx, project)
 	if err != nil {
 		return fmt.Errorf("list members: %w", err)
 	}
-	out := struct {
-		Members []memberView `json:"members"`
-	}{Members: make([]memberView, 0, len(ms))}
+	is, err := s.st.ListIntegrationGrants(ctx, project)
+	if err != nil {
+		return fmt.Errorf("list integrations: %w", err)
+	}
+	var made []string
 	for _, m := range ms {
-		mv := memberView{Person: m.ID.String(), Name: m.Name, Email: m.Email, Disabled: m.Disabled(),
-			Environments: []envRoleView{}}
 		for _, g := range m.Grants {
+			made = append(made, g.MadeBy)
+		}
+	}
+	for _, i := range is {
+		for _, g := range i.Grants {
+			made = append(made, g.MadeBy)
+		}
+	}
+	names, err := s.st.PrincipalNames(ctx, made)
+	if err != nil {
+		return fmt.Errorf("list members: %w", err)
+	}
+	// grants splits grants into the project's role and its made_by, and
+	// the readable environments' grants.
+	grants := func(gs []store.MemberGrant) (role, madeBy string, envs []fapi.EnvGrant) {
+		envs = []fapi.EnvGrant{}
+		for _, g := range gs {
 			switch {
 			case g.EnvironmentID == uuid.Nil:
-				mv.Role = g.Role
+				role, madeBy = g.Role, g.MadeBy
 			case mayReadEnv(r, g.EnvironmentID.String()):
-				mv.Environments = append(mv.Environments, envRoleView{ID: g.EnvironmentID.String(),
-					Name: g.EnvironmentName, Role: g.Role})
+				envs = append(envs, fapi.EnvGrant{ID: g.EnvironmentID.String(), Name: g.EnvironmentName, Role: g.Role,
+					MadeBy: g.MadeBy, MadeByName: names[g.MadeBy]})
 			}
 		}
-		out.Members = append(out.Members, mv)
+		return role, madeBy, envs
+	}
+	out := fapi.Members{Members: make([]fapi.Member, 0, len(ms)), Integrations: make([]fapi.IntegrationGrant, 0, len(is))}
+	for _, m := range ms {
+		role, by, envs := grants(m.Grants)
+		out.Members = append(out.Members, fapi.Member{Person: m.ID.String(), Name: m.Name, Email: m.Email, Issuer: m.Issuer,
+			Subject: m.Sub, Disabled: m.Disabled(), Role: role, MadeBy: by, MadeByName: names[by], Environments: envs})
+	}
+	for _, i := range is {
+		role, by, envs := grants(i.Grants)
+		out.Integrations = append(out.Integrations, fapi.IntegrationGrant{Integration: i.Name, Title: i.Title, URL: i.URL,
+			Disabled: i.Disabled(), Role: role, MadeBy: by, MadeByName: names[by], Environments: envs})
 	}
 	return writeJSON(w, http.StatusOK, out)
 }
@@ -253,10 +299,10 @@ func (s *server) listMembers(w http.ResponseWriter, r *http.Request) error {
 func errNoMember() error { return apierr.New(http.StatusNotFound, "no such member") }
 
 // adminScope resolves a grant's or an invitation's scope, the
-// environment ref names (its ID or name; "": the tenant), and checks that
-// the principal is admin of it: on the tenant 403 role_required; on an
+// environment ref names (its ID or name; "": the project), and checks that
+// the principal is admin of it: on the project 403 role_required; on an
 // environment it does not see 404, one it holds a lower role on 403.
-func (s *server) adminScope(ctx context.Context, t auth.Tenant, ref string) (uuid.UUID, error) {
+func (s *server) adminScope(ctx context.Context, t auth.Project, ref string) (uuid.UUID, error) {
 	if ref == "" {
 		return uuid.Nil, mayAdminScope(t, uuid.Nil)
 	}
@@ -270,13 +316,13 @@ func (s *server) adminScope(ctx context.Context, t auth.Tenant, ref string) (uui
 	return env, mayAdminScope(t, env)
 }
 
-// memberOf reads the path's {person}, who must be a member of the tenant.
+// memberOf reads the path's {person}, who must be a member of the project.
 func memberOf(ctx context.Context, tx *store.Store, r *http.Request) (uuid.UUID, error) {
 	person, err := uuid.Parse(r.PathValue("person"))
 	if err != nil {
 		return uuid.Nil, errNoMember()
 	}
-	ok, err := tx.IsMember(ctx, tenantOf(r), person)
+	ok, err := tx.IsMember(ctx, projectOf(r), person)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -286,42 +332,42 @@ func memberOf(ctx context.Context, tx *store.Store, r *http.Request) (uuid.UUID,
 	return person, nil
 }
 
-// keepAdmin runs change with the tenant's row FOR NO KEY UPDATE, which
+// keepAdmin runs change with the project's row FOR NO KEY UPDATE, which
 // serialises the changes of its admins, and refuses (409 last_admin) a
-// change that leaves a tenant that had an admin without one: a tenant
+// change that leaves a project that had an admin without one: a project
 // always has an admin (ADR 0031). A person who is not disabled or a
-// token, with admin on the tenant itself, is one.
-func keepAdmin(ctx context.Context, tx *store.Store, tenant string, change func() error) error {
-	t, err := tx.LockTenant(ctx, tenant, store.ForNoKeyUpdate)
+// token, with admin on the project itself, is one.
+func keepAdmin(ctx context.Context, tx *store.Store, project string, change func() error) error {
+	t, err := tx.LockProject(ctx, project, store.ForNoKeyUpdate)
 	if isNoRow(err) {
-		return errNoTenant()
+		return errNoProject()
 	}
 	if err != nil {
 		return err
 	}
 	if t.Deleting() {
-		return apierr.New(http.StatusConflict, "tenant %s is being deleted", tenant)
+		return apierr.New(http.StatusConflict, "project %s is being deleted", project)
 	}
-	before, err := tx.CountAdmins(ctx, tenant)
+	before, err := tx.CountAdmins(ctx, project)
 	if err != nil {
 		return err
 	}
 	if err := change(); err != nil {
 		return err
 	}
-	after, err := tx.CountAdmins(ctx, tenant)
+	after, err := tx.CountAdmins(ctx, project)
 	if err != nil {
 		return err
 	}
 	if before > 0 && after == 0 {
 		return apierr.WithCode(http.StatusConflict, CodeLastAdmin,
-			"tenant %s would have no admin left: make another member admin first", tenant)
+			"project %s would have no admin left: make another member admin first", project)
 	}
 	return nil
 }
 
-// putMemberGrant is PUT /api/v1/tenant/members/{person}/grants {role,
-// environment?}: the member's role on the tenant, or on the environment
+// putMemberGrant is PUT /api/v1/project/members/{person}/grants {role,
+// environment?}: the member's role on the project, or on the environment
 // (its ID or name), by an admin of that scope. Only a member is given a
 // grant: a person joins by an invitation.
 func (s *server) putMemberGrant(w http.ResponseWriter, r *http.Request) error {
@@ -333,7 +379,7 @@ func (s *server) putMemberGrant(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	ctx := r.Context()
-	t, _ := auth.TenantFrom(ctx)
+	t, _ := auth.ProjectFrom(ctx)
 	env, err := s.adminScope(ctx, t, req.Environment)
 	if err != nil {
 		return err
@@ -343,12 +389,12 @@ func (s *server) putMemberGrant(w http.ResponseWriter, r *http.Request) error {
 	}
 	var g store.Grant
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
-		return keepAdmin(ctx, tx, tenantOf(r), func() error {
+		return keepAdmin(ctx, tx, projectOf(r), func() error {
 			person, err := memberOf(ctx, tx, r)
 			if err != nil {
 				return err
 			}
-			g, err = tx.PutGrant(ctx, store.Grant{TenantID: tenantOf(r), PersonID: person, EnvironmentID: env,
+			g, err = tx.PutGrant(ctx, store.Grant{ProjectID: projectOf(r), PersonID: person, EnvironmentID: env,
 				Role: req.Role, MadeBy: auth.MadeBy(ctx)})
 			return err
 		})
@@ -362,25 +408,25 @@ func (s *server) putMemberGrant(w http.ResponseWriter, r *http.Request) error {
 	}{g.PersonID.String(), grantView{Role: g.Role, Environment: idOrEmpty(g.EnvironmentID)}})
 }
 
-// deleteMemberGrant is DELETE /api/v1/tenant/members/{person}/grants
-// [?environment=<ID or name>]: the member's grant on the tenant, or on
+// deleteMemberGrant is DELETE /api/v1/project/members/{person}/grants
+// [?environment=<ID or name>]: the member's grant on the project, or on
 // the environment, goes, by an admin of that scope, unless it is the
-// tenant's last admin's. Without grants left, they are no member.
+// project's last admin's. Without grants left, they are no member.
 func (s *server) deleteMemberGrant(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
-	t, _ := auth.TenantFrom(ctx)
+	t, _ := auth.ProjectFrom(ctx)
 	env, err := s.adminScope(ctx, t, r.URL.Query().Get("environment"))
 	if err != nil {
 		return err
 	}
 	var deleted bool
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
-		return keepAdmin(ctx, tx, tenantOf(r), func() error {
+		return keepAdmin(ctx, tx, projectOf(r), func() error {
 			person, err := memberOf(ctx, tx, r)
 			if err != nil {
 				return err
 			}
-			deleted, err = tx.DeletePersonGrantAt(ctx, tenantOf(r), person, env)
+			deleted, err = tx.DeletePersonGrantAt(ctx, projectOf(r), person, env)
 			return err
 		})
 	})
@@ -392,15 +438,28 @@ func (s *server) deleteMemberGrant(w http.ResponseWriter, r *http.Request) error
 	}{deleted})
 }
 
-// leaveTenant is POST /api/v1/tenant/leave: a person gives up every grant
-// of theirs in the tenant, unless they are its last admin. A token does
-// not leave: it is revoked.
-func (s *server) leaveTenant(w http.ResponseWriter, r *http.Request) error {
-	t, _ := auth.TenantFrom(r.Context())
-	if t.Principal.Person == uuid.Nil {
-		return apierr.New(http.StatusBadRequest, "a token does not leave its tenant: revoke it")
-	}
+// leaveProject is POST /api/v1/project/leave: a person gives up every grant
+// of theirs in the project, unless they are its last admin; an integration
+// gives up every grant of its own there (ADR 0056), naming nobody or an
+// admin of the project (namedMayAdmin). A token does not
+// leave: it is revoked.
+func (s *server) leaveProject(w http.ResponseWriter, r *http.Request) error {
+	t, _ := auth.ProjectFrom(r.Context())
 	ctx := r.Context()
+	if t.Principal.IsIntegration() {
+		if err := namedMayAdmin(t, uuid.Nil); err != nil {
+			return err
+		}
+		if _, err := s.st.DeleteIntegrationGrants(ctx, t.Name, t.Principal.Integration); err != nil {
+			return fmt.Errorf("leave: %w", err)
+		}
+		return writeJSON(w, http.StatusOK, struct {
+			Left bool `json:"left"`
+		}{true})
+	}
+	if t.Principal.Person == uuid.Nil {
+		return apierr.New(http.StatusBadRequest, "a token does not leave its project: revoke it")
+	}
 	err := s.st.InTx(ctx, func(tx *store.Store) error {
 		return keepAdmin(ctx, tx, t.Name, func() error {
 			_, err := tx.DeletePersonGrants(ctx, t.Name, t.Principal.Person)
@@ -443,9 +502,9 @@ func invitationOf(i store.Invitation) invitationView {
 // inviteURL is the UI's page of an invitation, <public URL>/invite/<token>.
 func (s *server) inviteURL(token string) string { return s.cfg.PublicURL + "/invite/" + token }
 
-// createInvitation is POST /api/v1/tenant/invitations {role,
+// createInvitation is POST /api/v1/project/invitations {role,
 // environment?}: a single-use link that gives whoever opens it signed in
-// the role on the tenant or the environment (its ID or name), valid for 7
+// the role on the project or the environment (its ID or name), valid for 7
 // days, by an admin of that scope. The answer holds the secret (token)
 // and the UI's page of it (url) once; only its hash is stored. FeRun
 // sends no mail: the admin passes the link on.
@@ -457,8 +516,8 @@ func (s *server) createInvitation(w http.ResponseWriter, r *http.Request) error 
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	ctx, tenant := r.Context(), tenantOf(r)
-	t, _ := auth.TenantFrom(ctx)
+	ctx, project := r.Context(), projectOf(r)
+	t, _ := auth.ProjectFrom(ctx)
 	env, err := s.adminScope(ctx, t, req.Environment)
 	if err != nil {
 		return err
@@ -466,17 +525,17 @@ func (s *server) createInvitation(w http.ResponseWriter, r *http.Request) error 
 	if _, ok := auth.ParseRole(req.Role); !ok {
 		return apierr.New(http.StatusBadRequest, "role must be read, write or admin, got %q", req.Role)
 	}
-	secret, hash, err := mintTenantToken()
+	secret, hash, err := mintProjectToken()
 	if err != nil {
 		return fmt.Errorf("invitation: %w", err)
 	}
 	var inv store.Invitation
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
-		if err := lockTenantForToken(ctx, tx, tenant); err != nil {
+		if err := lockProjectForToken(ctx, tx, project); err != nil {
 			return err
 		}
 		var err error
-		inv, err = tx.InsertInvitation(ctx, store.Invitation{Hash: hash, TenantID: tenant, EnvironmentID: env,
+		inv, err = tx.InsertInvitation(ctx, store.Invitation{Hash: hash, ProjectID: project, EnvironmentID: env,
 			Role: req.Role, MadeBy: auth.MadeBy(ctx)}, invitationTTL)
 		if isNoRow(err) {
 			return errNoEnvironment()
@@ -493,14 +552,14 @@ func (s *server) createInvitation(w http.ResponseWriter, r *http.Request) error 
 	}{invitationOf(inv), secret, s.inviteURL(secret)})
 }
 
-// mayAdminScope checks admin on an invitation's scope: the tenant, or its
+// mayAdminScope checks admin on an invitation's scope: the project, or its
 // environment (absent when the principal holds no role there).
-func mayAdminScope(t auth.Tenant, env uuid.UUID) error {
+func mayAdminScope(t auth.Project, env uuid.UUID) error {
 	if env == uuid.Nil {
-		if t.MayOnTenant(auth.RoleAdmin) {
+		if t.MayOnProject(auth.RoleAdmin) {
 			return nil
 		}
-		return apierr.RoleRequired(auth.RoleAdmin.String(), "tenant")
+		return apierr.RoleRequired(auth.RoleAdmin.String(), "project")
 	}
 	if t.Principal.IsZero() {
 		return nil
@@ -508,15 +567,15 @@ func mayAdminScope(t auth.Tenant, env uuid.UUID) error {
 	return allowEnvID(t, env, auth.RoleAdmin)
 }
 
-// listInvitations is GET /api/v1/tenant/invitations: the tenant's
+// listInvitations is GET /api/v1/project/invitations: the project's
 // invitations, open, used and expired, whose scope the principal is
 // admin of.
 func (s *server) listInvitations(w http.ResponseWriter, r *http.Request) error {
-	invs, err := s.st.ListInvitations(r.Context(), tenantOf(r))
+	invs, err := s.st.ListInvitations(r.Context(), projectOf(r))
 	if err != nil {
 		return fmt.Errorf("list invitations: %w", err)
 	}
-	t, _ := auth.TenantFrom(r.Context())
+	t, _ := auth.ProjectFrom(r.Context())
 	out := struct {
 		Invitations []invitationView `json:"invitations"`
 	}{Invitations: []invitationView{}}
@@ -530,24 +589,24 @@ func (s *server) listInvitations(w http.ResponseWriter, r *http.Request) error {
 
 func errNoInvitation() error { return apierr.New(http.StatusNotFound, "no such invitation") }
 
-// revokeInvitation is DELETE /api/v1/tenant/invitations/{id}, by an admin of its
+// revokeInvitation is DELETE /api/v1/project/invitations/{id}, by an admin of its
 // scope; an invitation the principal cannot see is absent.
 func (s *server) revokeInvitation(w http.ResponseWriter, r *http.Request) error {
 	inv, err := s.st.GetInvitation(r.Context(), r.PathValue("id"))
-	if isNoRow(err) || (err == nil && inv.TenantID != tenantOf(r)) {
+	if isNoRow(err) || (err == nil && inv.ProjectID != projectOf(r)) {
 		return errNoInvitation()
 	}
 	if err != nil {
 		return fmt.Errorf("invitation: %w", err)
 	}
-	t, _ := auth.TenantFrom(r.Context())
+	t, _ := auth.ProjectFrom(r.Context())
 	if err := mayAdminScope(t, inv.EnvironmentID); err != nil {
 		if inv.EnvironmentID != uuid.Nil && t.EnvRole(inv.EnvironmentID) == auth.RoleNone {
 			return errNoInvitation()
 		}
 		return err
 	}
-	ok, err := s.st.DeleteInvitation(r.Context(), inv.TenantID, inv.Hash)
+	ok, err := s.st.DeleteInvitation(r.Context(), inv.ProjectID, inv.Hash)
 	if err != nil {
 		return fmt.Errorf("revoke invitation: %w", err)
 	}
@@ -558,8 +617,9 @@ func (s *server) revokeInvitation(w http.ResponseWriter, r *http.Request) error 
 
 // previewInvitation is GET /api/v1/invitations/{token}: what an
 // invitation gives, to the signed-in person who holds its link, while it
-// is open or theirs: {tenant, role, environment?, environmentName?,
-// expiresAt}; otherwise 404, as an unknown one.
+// is open or theirs: to a project {project, role, environment?,
+// environmentName?, expiresAt}, to an account (ADR 0059) {account: {name,
+// title}, role, expiresAt}; otherwise 404, as an unknown one.
 func (s *server) previewInvitation(w http.ResponseWriter, r *http.Request) error {
 	sess := personSession(r)
 	inv, err := s.st.GetInvitation(r.Context(), store.HashToken(r.PathValue("token")))
@@ -569,25 +629,46 @@ func (s *server) previewInvitation(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return fmt.Errorf("invitation: %w", err)
 	}
-	t, err := s.st.GetTenant(r.Context(), inv.TenantID)
+	if inv.UsedBy != sess.PersonID && !inv.Open(time.Now()) {
+		return errNoInvitation()
+	}
+	if inv.Account() {
+		return writeJSON(w, http.StatusOK, struct {
+			Account   fapi.AccountRef `json:"account"`
+			Role      string          `json:"role"`
+			ExpiresAt string          `json:"expiresAt"`
+		}{fapi.AccountRef{Name: inv.AccountID, Title: inv.AccountTitle}, inv.Role, rfc3339(inv.ExpiresAt)})
+	}
+	t, err := s.st.GetProject(r.Context(), inv.ProjectID)
 	if err != nil && !isNoRow(err) {
 		return fmt.Errorf("invitation: %w", err)
 	}
-	if isNoRow(err) || t.Deleting() || (inv.UsedBy != sess.PersonID && !inv.Open(time.Now())) {
+	if isNoRow(err) || t.Deleting() {
 		return errNoInvitation()
 	}
 	return writeJSON(w, http.StatusOK, struct {
-		Tenant string `json:"tenant"`
+		Project string `json:"project"`
 		grantView
 		ExpiresAt string `json:"expiresAt"`
-	}{inv.TenantID, grantView{Role: inv.Role, Environment: idOrEmpty(inv.EnvironmentID),
+	}{inv.ProjectID, grantView{Role: inv.Role, Environment: idOrEmpty(inv.EnvironmentID),
 		EnvironmentName: inv.EnvironmentName}, rfc3339(inv.ExpiresAt)})
+}
+
+// errInvitationGone is the answer to an invitation that was used or
+// expired: 410, the reason to whoever holds its link.
+func errInvitationGone(inv store.Invitation) error {
+	if inv.UsedBy != uuid.Nil {
+		return apierr.New(http.StatusGone, "this invitation was used")
+	}
+	return apierr.New(http.StatusGone, "this invitation expired")
 }
 
 // acceptInvitation is POST /api/v1/invitations/{token}/accept: the
 // signed-in person takes an open invitation and holds its grant, or the
-// higher role they hold there already. Once taken, it is gone for
-// everyone else (410); the person who took it gets the same answer again.
+// higher role they hold there already; an account's invitation makes them
+// one of its people, member or admin, the higher of what they hold and
+// what it gives. Once taken, it is gone for everyone else (410); the
+// person who took it gets the same answer again.
 func (s *server) acceptInvitation(w http.ResponseWriter, r *http.Request) error {
 	sess := personSession(r)
 	ctx, hash := r.Context(), store.HashToken(r.PathValue("token"))
@@ -598,9 +679,12 @@ func (s *server) acceptInvitation(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return fmt.Errorf("invitation: %w", err)
 	}
+	if inv.Account() {
+		return s.acceptAccountInvitation(w, r, inv)
+	}
 	var g store.Grant
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
-		t, err := tx.LockTenant(ctx, inv.TenantID, store.ForShare)
+		t, err := tx.LockProject(ctx, inv.ProjectID, store.ForShare)
 		if isNoRow(err) || (err == nil && t.Deleting()) {
 			return errNoInvitation()
 		}
@@ -616,28 +700,26 @@ func (s *server) acceptInvitation(w http.ResponseWriter, r *http.Request) error 
 			case err != nil:
 				return err
 			case cur.UsedBy == sess.PersonID:
-				g, err = tx.PersonGrantAt(ctx, cur.TenantID, sess.PersonID, cur.EnvironmentID)
+				g, err = tx.PersonGrantAt(ctx, cur.ProjectID, sess.PersonID, cur.EnvironmentID)
 				if isNoRow(err) {
 					return apierr.New(http.StatusGone, "this invitation was used")
 				}
 				return err
-			case cur.UsedBy != uuid.Nil:
-				return apierr.New(http.StatusGone, "this invitation was used")
 			}
-			return apierr.New(http.StatusGone, "this invitation expired")
+			return errInvitationGone(cur)
 		}
 		if err != nil {
 			return err
 		}
 		role := used.Role
-		if have, err := tx.PersonGrantAt(ctx, used.TenantID, sess.PersonID, used.EnvironmentID); err == nil {
+		if have, err := tx.PersonGrantAt(ctx, used.ProjectID, sess.PersonID, used.EnvironmentID); err == nil {
 			a, _ := auth.ParseRole(have.Role)
 			b, _ := auth.ParseRole(used.Role)
 			role = max(a, b).String()
 		} else if !isNoRow(err) {
 			return err
 		}
-		g, err = tx.PutGrant(ctx, store.Grant{TenantID: used.TenantID, PersonID: sess.PersonID,
+		g, err = tx.PutGrant(ctx, store.Grant{ProjectID: used.ProjectID, PersonID: sess.PersonID,
 			EnvironmentID: used.EnvironmentID, Role: role, MadeBy: used.MadeBy})
 		if isNoRow(err) {
 			return errNoInvitation()
@@ -647,34 +729,102 @@ func (s *server) acceptInvitation(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return passOr(err, "accept invitation")
 	}
-	s.log.Info("invitation accepted", "tenant", inv.TenantID, "person", sess.PersonID, "role", g.Role,
+	s.log.Info("invitation accepted", "project", inv.ProjectID, "person", sess.PersonID, "role", g.Role,
 		"environment", idOrEmpty(g.EnvironmentID))
 	return writeJSON(w, http.StatusOK, struct {
-		Tenant string `json:"tenant"`
+		Project string `json:"project"`
 		grantView
-	}{inv.TenantID, grantView{Role: g.Role, Environment: idOrEmpty(g.EnvironmentID),
+	}{inv.ProjectID, grantView{Role: g.Role, Environment: idOrEmpty(g.EnvironmentID),
 		EnvironmentName: inv.EnvironmentName}})
+}
+
+// acceptAccountInvitation is acceptInvitation of an account's invitation:
+// the account's row FOR NO KEY UPDATE, as its people's changes take it.
+func (s *server) acceptAccountInvitation(w http.ResponseWriter, r *http.Request, inv store.Invitation) error {
+	sess := personSession(r)
+	ctx := r.Context()
+	var role string
+	var changed bool
+	err := s.st.InTx(ctx, func(tx *store.Store) error {
+		if _, err := tx.LockAccount(ctx, inv.AccountID, store.ForNoKeyUpdate); isNoRow(err) {
+			return errNoInvitation()
+		} else if err != nil {
+			return err
+		}
+		have, err := tx.AccountMemberRole(ctx, inv.AccountID, sess.PersonID)
+		if err != nil {
+			return err
+		}
+		used, err := tx.UseInvitation(ctx, inv.Hash, sess.PersonID)
+		if isNoRow(err) {
+			cur, err := tx.GetInvitation(ctx, inv.Hash)
+			switch {
+			case isNoRow(err):
+				return errNoInvitation()
+			case err != nil:
+				return err
+			case cur.UsedBy == sess.PersonID && have != "":
+				role = have
+				return nil
+			}
+			return errInvitationGone(cur)
+		}
+		if err != nil {
+			return err
+		}
+		role = used.Role
+		if have != "" {
+			role = higherAccountRole(have, used.Role)
+		}
+		if role == have {
+			return nil
+		}
+		changed = true
+		return tx.PutAccountMember(ctx, inv.AccountID, sess.PersonID, role, used.MadeBy)
+	})
+	if err != nil {
+		return passOr(err, "accept invitation")
+	}
+	if changed {
+		s.log.Info("invitation accepted", "account", inv.AccountID, "person", sess.PersonID, "role", role)
+		s.recordMember(r, inv.AccountID, sess.PersonID, role, inv.MadeBy)
+	}
+	return writeJSON(w, http.StatusOK, struct {
+		Account string `json:"account"`
+		Role    string `json:"role"`
+	}{inv.AccountID, role})
 }
 
 // ----------------------------------------------------------------- tokens --
 
-// listOwnTokens is GET /api/v1/tenant/tokens: the tenant's tokens, by its admins.
+// listOwnTokens is GET /api/v1/project/tokens: the project's tokens, by its
+// admins, each with its grants beside its own.
 func (s *server) listOwnTokens(w http.ResponseWriter, r *http.Request) error {
-	toks, err := s.st.ListTenantTokens(r.Context(), tenantOf(r))
+	toks, err := s.st.ListProjectTokens(r.Context(), projectOf(r))
+	if err != nil {
+		return fmt.Errorf("list tokens: %w", err)
+	}
+	gs, err := s.st.ListGrants(r.Context(), projectOf(r))
 	if err != nil {
 		return fmt.Errorf("list tokens: %w", err)
 	}
 	out := struct {
-		Tokens []tenantTokenInfo `json:"tokens"`
-	}{Tokens: make([]tenantTokenInfo, 0, len(toks))}
+		Tokens []projectTokenInfo `json:"tokens"`
+	}{Tokens: make([]projectTokenInfo, 0, len(toks))}
 	for _, t := range toks {
-		out.Tokens = append(out.Tokens, tenantTokenOf(t))
+		info := projectTokenOf(t)
+		for _, g := range gs {
+			if g.TokenHash == t.Hash {
+				info.Grants = append(info.Grants, tokenGrantInfo{Role: g.Role, Environment: idOrEmpty(g.EnvironmentID)})
+			}
+		}
+		out.Tokens = append(out.Tokens, info)
 	}
 	return writeJSON(w, http.StatusOK, out)
 }
 
-// mintOwnToken is POST /api/v1/tenant/tokens {label?, role, environment?}: a
-// token of the tenant with its own grant, by an admin of the tenant, never
+// mintOwnToken is POST /api/v1/project/tokens {label?, role, environment?}: a
+// token of the project with its own grant, by an admin of the project, never
 // above the minter's role on the token's scope (ADR 0031). It is shown
 // once.
 func (s *server) mintOwnToken(w http.ResponseWriter, r *http.Request) error {
@@ -691,7 +841,7 @@ func (s *server) mintOwnToken(w http.ResponseWriter, r *http.Request) error {
 		return apierr.New(http.StatusBadRequest, "role must be read, write or admin, got %q", req.Role)
 	}
 	ctx := r.Context()
-	t, _ := auth.TenantFrom(ctx)
+	t, _ := auth.ProjectFrom(ctx)
 	env := uuid.Nil
 	if req.Environment != "" {
 		id, err := s.st.EnvironmentRef(ctx, t.Name, req.Environment)
@@ -704,22 +854,22 @@ func (s *server) mintOwnToken(w http.ResponseWriter, r *http.Request) error {
 		env = id
 	}
 	switch {
-	case env == uuid.Nil && !t.MayOnTenant(role):
-		return apierr.RoleRequired(role.String(), "tenant")
+	case env == uuid.Nil && !t.MayOnProject(role):
+		return apierr.RoleRequired(role.String(), "project")
 	case env != uuid.Nil && !t.Principal.IsZero() && t.EnvRole(env) < role:
 		return apierr.RoleRequired(role.String(), "environment")
 	}
-	token, hash, err := mintTenantToken()
+	token, hash, err := mintProjectToken()
 	if err != nil {
 		return fmt.Errorf("create token: %w", err)
 	}
-	var tok store.TenantToken
+	var tok store.ProjectToken
 	err = s.st.InTx(ctx, func(tx *store.Store) error {
-		if err := lockTenantForToken(ctx, tx, t.Name); err != nil {
+		if err := lockProjectForToken(ctx, tx, t.Name); err != nil {
 			return err
 		}
 		var err error
-		tok, err = tx.InsertTenantToken(ctx, store.TenantToken{Hash: hash, TenantID: t.Name, Label: req.Label,
+		tok, err = tx.InsertProjectToken(ctx, store.ProjectToken{Hash: hash, ProjectID: t.Name, Label: req.Label,
 			Role: role.String(), EnvironmentID: env, MadeBy: auth.MadeBy(ctx)})
 		if isNoRow(err) {
 			return errNoEnvironment()
@@ -730,20 +880,20 @@ func (s *server) mintOwnToken(w http.ResponseWriter, r *http.Request) error {
 		return passOr(err, "create token")
 	}
 	return writeJSON(w, http.StatusCreated, struct {
-		tenantTokenInfo
+		projectTokenInfo
 		Token string `json:"token"`
-	}{tenantTokenOf(tok), token})
+	}{projectTokenOf(tok), token})
 }
 
-// revokeOwnToken is DELETE /api/v1/tenant/tokens/{hash}, by an admin of the
-// tenant, unless the token is its last admin.
+// revokeOwnToken is DELETE /api/v1/project/tokens/{hash}, by an admin of the
+// project, unless the token is its last admin.
 func (s *server) revokeOwnToken(w http.ResponseWriter, r *http.Request) error {
 	ctx := r.Context()
 	var ok bool
 	err := s.st.InTx(ctx, func(tx *store.Store) error {
-		return keepAdmin(ctx, tx, tenantOf(r), func() error {
+		return keepAdmin(ctx, tx, projectOf(r), func() error {
 			var err error
-			ok, err = tx.DeleteTenantToken(ctx, tenantOf(r), r.PathValue("hash"))
+			ok, err = tx.DeleteProjectToken(ctx, projectOf(r), r.PathValue("hash"))
 			return err
 		})
 	})
@@ -753,6 +903,91 @@ func (s *server) revokeOwnToken(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, http.StatusOK, struct {
 		Revoked bool `json:"revoked"`
 	}{ok})
+}
+
+func errNoToken() error { return apierr.New(http.StatusNotFound, "no such token") }
+
+// tokenOf reads the path's {hash}, a token of the project.
+func tokenOf(r *http.Request, tx *store.Store) (store.ProjectToken, error) {
+	tok, err := tx.GetProjectToken(r.Context(), projectOf(r), r.PathValue("hash"))
+	if isNoRow(err) {
+		return store.ProjectToken{}, errNoToken()
+	}
+	return tok, err
+}
+
+// putTokenGrant is PUT /api/v1/project/tokens/{hash}/grants {role,
+// environment?}: a grant of the token beside its own, on the project or on
+// the environment (its ID or name), by an admin of that scope, as a
+// member's grant is given (ADR 0060's dialog gives a token write on the
+// environment it protects).
+func (s *server) putTokenGrant(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Role        string `json:"role"`
+		Environment string `json:"environment"`
+	}
+	if _, err := decodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx := r.Context()
+	t, _ := auth.ProjectFrom(ctx)
+	env, err := s.adminScope(ctx, t, req.Environment)
+	if err != nil {
+		return err
+	}
+	if _, ok := auth.ParseRole(req.Role); !ok {
+		return apierr.New(http.StatusBadRequest, "role must be read, write or admin, got %q", req.Role)
+	}
+	var g store.Grant
+	err = s.st.InTx(ctx, func(tx *store.Store) error {
+		return keepAdmin(ctx, tx, projectOf(r), func() error {
+			tok, err := tokenOf(r, tx)
+			if err != nil {
+				return err
+			}
+			g, err = tx.PutGrant(ctx, store.Grant{ProjectID: projectOf(r), TokenHash: tok.Hash, EnvironmentID: env,
+				Role: req.Role, MadeBy: auth.MadeBy(ctx)})
+			return err
+		})
+	})
+	if err != nil {
+		return passOr(err, "grant")
+	}
+	return writeJSON(w, http.StatusOK, struct {
+		Token       string `json:"token"`
+		Role        string `json:"role"`
+		Environment string `json:"environment"`
+	}{g.TokenHash, g.Role, idOrEmpty(g.EnvironmentID)})
+}
+
+// deleteTokenGrant is DELETE /api/v1/project/tokens/{hash}/grants
+// [?environment=<ID or name>]: the token's grant (of those beside its own)
+// on the project or on the environment goes, by an admin of that scope,
+// unless it is the project's last admin's.
+func (s *server) deleteTokenGrant(w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
+	t, _ := auth.ProjectFrom(ctx)
+	env, err := s.adminScope(ctx, t, r.URL.Query().Get("environment"))
+	if err != nil {
+		return err
+	}
+	var deleted bool
+	err = s.st.InTx(ctx, func(tx *store.Store) error {
+		return keepAdmin(ctx, tx, projectOf(r), func() error {
+			tok, err := tokenOf(r, tx)
+			if err != nil {
+				return err
+			}
+			deleted, err = tx.DeleteTokenGrantAt(ctx, projectOf(r), tok.Hash, env)
+			return err
+		})
+	})
+	if err != nil {
+		return passOr(err, "delete grant")
+	}
+	return writeJSON(w, http.StatusOK, struct {
+		Deleted bool `json:"deleted"`
+	}{deleted})
 }
 
 // ----------------------------------------------------------------- people --

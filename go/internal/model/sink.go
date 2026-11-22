@@ -6,10 +6,10 @@ package model
 // The labels of a pod's container logs (ADR 0026,
 // CreatePodRequest.log_labels, docs/architecture/sink.md): ferund sets
 // them at the insert of an environment's instance or job run, of a
-// tenant's job's pod and of a sandbox (sandboxes.log_labels), each with
+// project's job's pod and of a sandbox (sandboxes.log_labels), each with
 // its environment (ADR 0035).
 const (
-	LogTenant        = "ferun.tenant"
+	LogProject       = "ferun.project"
 	LogInstance      = "ferun.instance"
 	LogEnvironment   = "ferun.environment"
 	LogKind          = "ferun.kind"
@@ -25,7 +25,7 @@ const (
 // ferun.object.
 const LogKindSandbox = "sandbox"
 
-// The bounds of a tenant's job's logRetentionDays.
+// The bounds of a project's job's logRetentionDays.
 const (
 	MinLogRetentionDays = 1
 	MaxLogRetentionDays = 400

@@ -13,17 +13,17 @@ import (
 // environment's objects are named by spec.KindService, KindJob and
 // KindAddon and the object's name.
 const (
-	WorkloadSandbox   = "sandbox"
-	WorkloadTenantJob = "tenant-job"
+	WorkloadSandbox    = "sandbox"
+	WorkloadProjectJob = "project-job"
 )
 
 // WorkloadID is the SPIFFE ID of a workload (ADR 0036): every pod of an
 // environment's object, every replica and every pod after a roll, and the
-// one pod of a sandbox or a tenant's job, has
-// spiffe://<td>/tenant/<tenant>/env/<environment ID>/<kind>/<name>. The
+// one pod of a sandbox or a project's job, has
+// spiffe://<td>/project/<project>/env/<environment ID>/<kind>/<name>. The
 // environment is named by its ID, which a rename keeps (ADR 0037).
-func WorkloadID(td, tenant string, envID uuid.UUID, kind, name string) string {
-	return spiffeScheme + td + "/tenant/" + tenant + "/env/" + envID.String() + "/" + kind + "/" + name
+func WorkloadID(td, project string, envID uuid.UUID, kind, name string) string {
+	return spiffeScheme + td + "/project/" + project + "/env/" + envID.String() + "/" + kind + "/" + name
 }
 
 // PodSubject is a pod certificate's subject (ADR 0036): the CN names the

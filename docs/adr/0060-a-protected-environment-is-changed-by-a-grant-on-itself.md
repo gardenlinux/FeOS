@@ -2,32 +2,32 @@
 
 **Status:** Proposed · **Date:** 2026-11-21
 
-An environment can be **protected**. A grant on the tenant then reads
+An environment can be **protected**. A grant on the project then reads
 it and no longer changes it: whoever changes it holds a grant on the
-environment itself, or is `admin` of the tenant. An integration
+environment itself, or is `admin` of the project. An integration
 (ADR 0056) changes it only for a person it names, never by itself. It
-is one switch on an environment and no new role. With it a tenant keeps
-production out of the hands of everyone who merely works in the tenant,
+is one switch on an environment and no new role. With it a project keeps
+production out of the hands of everyone who merely works in the project,
 the software it let in among them, whichever way they come.
 
 ## Context
 
 A principal's role on an environment is the higher of its grant on the
-tenant and its grant on that environment (ADR 0031). `write` on the
-tenant therefore changes every environment, production as it changes a
-scratch environment made an hour ago. A tenant that wants fewer hands
-on production can give nobody `write` on the tenant, and then nobody
+project and its grant on that environment (ADR 0031). `write` on the
+project therefore changes every environment, production as it changes a
+scratch environment made an hour ago. A project that wants fewer hands
+on production can give nobody `write` on the project, and then nobody
 but an admin makes an environment.
 
 Integrations make it pressing (ADR 0056). A platform needs `write` on
-the tenant for its work: it makes environments, runs builds and opens
+the project for its work: it makes environments, runs builds and opens
 sandboxes. With that it reaches production too, and it acts by itself,
 on a push or with an agent.
 
 FeCode answered this with a rule of its own: an environment's
 protection, and approvals for what protection held back (FeCode's
 ADR 0032). The rule held for what went through FeCode. A person at
-FeRun's console and a tenant token passed by it. Who may change an
+FeRun's console and a project token passed by it. Who may change an
 environment is FeRun's question, and one answer has to hold for the
 console, a token and a platform alike.
 
@@ -41,14 +41,14 @@ console, a token and a platform alike.
 - A clone is a new environment and starts unprotected, whatever its
   source is.
 
-### A tenant's grant reads a protected environment
+### A project's grant reads a protected environment
 
 - On a protected environment a principal's role is the higher of its
-  grant on that environment and what its grant on the tenant counts for
+  grant on that environment and what its grant on the project counts for
   there: `admin` as `admin`, `write` and `read` as `read`.
-- This holds for every principal alike: a person, a tenant token, an
+- This holds for every principal alike: a person, a project token, an
   integration.
-- So a principal with `write` on the tenant and no grant on the
+- So a principal with `write` on the project and no grant on the
   environment reads it: its objects, deployments and plans, its logs,
   traces and traffic, the names of its secrets. It does nothing that
   `write` on an environment gives (ADR 0031): no deployment and no
@@ -57,8 +57,8 @@ console, a token and a platform alike.
 - A plan changes nothing and is not held back: whoever could plan
   against the environment were it not protected plans against it.
 - Deleting a protected environment takes `admin` on it. `write` on the
-  tenant, which deletes other environments, does not suffice.
-- Cloning from it stays what it is, `write` on the tenant: it reads the
+  project, which deletes other environments, does not suffice.
+- Cloning from it stays what it is, `write` on the project: it reads the
   source and changes nothing of it.
 - Who visits a protected environment is its access's matter and not
   this one's (ADR 0054).
@@ -74,8 +74,8 @@ console, a token and a platform alike.
   this change themselves. What a platform's agent wants changed there,
   in whoever's session, the platform holds back until a person takes it
   up.
-- A tenant's admin thereby has three settings for a platform that
-  holds `write` on the tenant, and production. With no grant on it,
+- A project's admin thereby has three settings for a platform that
+  holds `write` on the project, and production. With no grant on it,
   the platform reads it and plans against it. With `write` on it, the
   platform deploys there for the people who hold `write` on it too.
   With `admin` on it, it also publishes it and binds its domains for
@@ -84,10 +84,10 @@ console, a token and a platform alike.
 ## Alternatives considered
 
 - **The platform's own rule**, FeCode's protection and approvals as
-  they were. It holds for one way in: the tenant's console and its
+  they were. It holds for one way in: the project's console and its
   tokens pass by it, and FeRun cannot show or check it.
-- **No `write` on the tenant for anyone**, and a grant on each
-  environment. Making an environment needs `write` on the tenant, and
+- **No `write` on the project for anyone**, and a grant on each
+  environment. Making an environment needs `write` on the project, and
   every new environment would need its grants one by one, for people
   and for a platform that makes an environment per workspace.
 - **A fourth role**, a releaser between `write` and `admin`, or a list
@@ -118,16 +118,16 @@ console, a token and a platform alike.
   plan as the one exception and the deletion as the stricter one.
 - The console shows protection on an environment's page and wherever
   environments are listed. The dialog that protects one names who
-  changes it by a tenant's grant today, people, tokens and
+  changes it by a project's grant today, people, tokens and
   integrations, and offers each a grant on it, since from then on they
   read it.
-- A tenant token with `write` on the tenant, a pipeline's, stops
+- A project token with `write` on the project, a pipeline's, stops
   deploying to an environment that becomes protected until it holds a
   grant on it.
-- A person with `write` on the tenant still makes environments, works
+- A person with `write` on the project still makes environments, works
   in them and plans against production. What they want changed there,
   someone with a role on it changes.
-- An integration's reach into production is the tenant's admin's
+- An integration's reach into production is the project's admin's
   decision, per environment. The person named is the integration's word
   (ADR 0056): protection keeps an honest platform's agent out, and it
   does not stop a flawed platform that holds a grant there from naming
@@ -145,7 +145,7 @@ nothing of it is built. It amends ADR 0031 (a principal's role on an
 environment, and who deletes one).
 
 It began as FeCode's protection (FeCode's ADR 0032) and as a backlog
-line of ADR 0056, an environment that a tenant's grant does not reach.
-It moved here once a platform's users were the tenant's people with
+line of ADR 0056, an environment that a project's grant does not reach.
+It moved here once a platform's users were the project's people with
 FeRun's roles: a rule about who may change an environment then had one
 place to be.

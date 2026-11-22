@@ -25,10 +25,10 @@ func TestRunJobBusy(t *testing.T) {
 	ctx := h.ctx()
 	h.create("stage", nil)
 	h.apply("stage", `{"jobs": {"backfill": {"image": "ghcr.io/acme/api:1", "on": "manual"}}}`, 0)
-	if err := h.svc.RunJob(ctx, tenantA, "stage", "backfill"); err != nil {
+	if err := h.svc.RunJob(ctx, projectA, "stage", "backfill"); err != nil {
 		t.Fatal(err)
 	}
-	err := h.svc.RunJob(ctx, tenantA, "stage", "backfill")
+	err := h.svc.RunJob(ctx, projectA, "stage", "backfill")
 	wantStatus(t, err, http.StatusConflict, "job backfill runs already (deployment 1, attempt 1)")
 	var ae *apierr.Error
 	if !errors.As(err, &ae) || ae.Code != CodeBusy || ae.Header.Get("Retry-After") != "30" ||

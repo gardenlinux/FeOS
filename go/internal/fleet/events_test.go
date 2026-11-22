@@ -333,7 +333,7 @@ func TestPublishEventsAttribution(t *testing.T) {
 	serial := h.joined("n1")
 	h.joined("n2")
 	h.links.setConnected("n1", true)
-	if _, _, err := h.st.CreateTenant(bg, "acme"); err != nil {
+	if _, _, err := h.st.CreateProject(bg, "acme"); err != nil {
 		t.Fatal(err)
 	}
 	// Short IDs and, made before ADR 0019, UUIDs.
@@ -384,19 +384,19 @@ func TestPublishEventsAttribution(t *testing.T) {
 	attributed := map[podid.ID]bool{onNode: true, target: true, lost: true, tomb: true, cert: true, legacyOnNode: true}
 	for i, p := range pods {
 		var sandbox *podid.ID
-		var tenant string
+		var project string
 		var foreign bool
-		if err := h.d.Pool.QueryRow(bg, "SELECT sandbox_id, tenant_id, foreign_pod FROM activity WHERE start_id = $1 AND seq = $2",
-			start, i+1).Scan(&sandbox, &tenant, &foreign); err != nil {
+		if err := h.d.Pool.QueryRow(bg, "SELECT sandbox_id, project_id, foreign_pod FROM activity WHERE start_id = $1 AND seq = $2",
+			start, i+1).Scan(&sandbox, &project, &foreign); err != nil {
 			t.Fatal(err)
 		}
 		id, _ := podid.Parse(p)
 		if attributed[id] {
-			if sandbox == nil || *sandbox != id || tenant != "acme" || foreign {
-				t.Fatalf("pod %s: sandbox %v tenant %q foreign %v; want attributed", p, sandbox, tenant, foreign)
+			if sandbox == nil || *sandbox != id || project != "acme" || foreign {
+				t.Fatalf("pod %s: sandbox %v project %q foreign %v; want attributed", p, sandbox, project, foreign)
 			}
-		} else if sandbox != nil || tenant != "" || !foreign {
-			t.Fatalf("pod %s: sandbox %v tenant %q foreign %v; want a foreign record", p, sandbox, tenant, foreign)
+		} else if sandbox != nil || project != "" || !foreign {
+			t.Fatalf("pod %s: sandbox %v project %q foreign %v; want a foreign record", p, sandbox, project, foreign)
 		}
 	}
 	var sb *podid.ID
@@ -425,7 +425,7 @@ func TestPublishEventsReconcileOnlyForRowsElsewhere(t *testing.T) {
 	h := newHarness(t)
 	serial := h.joined("n1")
 	h.links.setConnected("n1", true)
-	if _, _, err := h.st.CreateTenant(bg, "acme"); err != nil {
+	if _, _, err := h.st.CreateProject(bg, "acme"); err != nil {
 		t.Fatal(err)
 	}
 	onNode := podid.Mint()
@@ -471,7 +471,7 @@ func TestPublishEventsAckLost(t *testing.T) {
 	serial := h.joined("n1")
 	h.joined("n2")
 	h.links.setConnected("n1", true)
-	if _, _, err := h.st.CreateTenant(bg, "acme"); err != nil {
+	if _, _, err := h.st.CreateProject(bg, "acme"); err != nil {
 		t.Fatal(err)
 	}
 	pod := podid.Mint()
@@ -588,7 +588,7 @@ func TestPublishEventsStopping(t *testing.T) {
 func TestPublishEventsEgress(t *testing.T) {
 	h := newHarness(t)
 	serial := h.joined("n1")
-	if _, _, err := h.st.CreateTenant(bg, "acme"); err != nil {
+	if _, _, err := h.st.CreateProject(bg, "acme"); err != nil {
 		t.Fatal(err)
 	}
 	pod := podid.Mint()

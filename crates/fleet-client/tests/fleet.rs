@@ -1327,7 +1327,7 @@ impl Logs for Pods {
         }
         vec![ShippedPod {
             id: POD.into(),
-            labels: [("ferun.tenant".to_string(), "acme".to_string())].into(),
+            labels: [("ferun.project".to_string(), "acme".to_string())].into(),
             redact: vec!["hunter2".into()],
             containers: vec!["main".into()],
         }]
@@ -1460,7 +1460,7 @@ async fn a_node_ships_its_pods_logs_to_the_sink_it_is_told_of() {
             ("ferun.log_id", "log-1"),
             ("ferun.node", NODE),
             ("ferun.pod", POD),
-            ("ferun.tenant", "acme"),
+            ("ferun.project", "acme"),
         ]
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))

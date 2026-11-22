@@ -4,7 +4,7 @@
  */
 
 /* The platform's pages: nodes, ingresses, the control plane, join
-   tokens, tenants and people (the operators' space). */
+   tokens, projects and people (the operators' space). */
 
 .pagehead-actions { margin-left: auto; display: inline-flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .platform { display: flex; flex-direction: column; gap: 14px; max-width: 1400px; }
@@ -71,14 +71,14 @@
 .pf-how code { color: var(--text); }
 .net { color: var(--net); }
 
-/* tenants */
+/* projects */
 .pf-sub { padding: 10px 12px 12px; background: var(--panel2); border-radius: 5px; }
 .pf-sub .tabbar { margin: 0 -12px 10px; }
 .limits-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 10px; }
 .limits-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
 .limits-grid .use { font-size: 11px; }
 .zone-moves { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; }
-.tenant-limits { font-size: 12px; color: var(--muted); min-width: 200px; max-width: 280px; }
+.project-limits { font-size: 12px; color: var(--muted); min-width: 200px; max-width: 280px; }
 .zone { color: var(--net); }
 
 /* people */

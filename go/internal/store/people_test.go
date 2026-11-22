@@ -31,8 +31,8 @@ func TestPeople(t *testing.T) {
 		t.Fatalf("other issuer %+v %v", other, err)
 	}
 
-	mkTenant(t, s, "acme")
-	if _, err := s.PutGrant(bg, store.Grant{TenantID: "acme", PersonID: p.ID, Role: "write"}); err != nil {
+	mkProject(t, s, "acme")
+	if _, err := s.PutGrant(bg, store.Grant{ProjectID: "acme", PersonID: p.ID, Role: "write"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.InsertUISession(bg, store.UISession{IDHash: "h1", Sub: "s1", PersonID: p.ID, SID: "sid1"},
@@ -91,12 +91,12 @@ func TestDeleteUISessionsBySID(t *testing.T) {
 }
 
 // Grants: one per principal and scope (a second put changes the role),
-// exactly one principal, an environment of the tenant only; an
-// environment's grants go with it, every grant with its tenant.
+// exactly one principal, an environment of the project only; an
+// environment's grants go with it, every grant with its project.
 func TestGrants(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
-	mkTenant(t, s, "other")
+	mkProject(t, s, "acme")
+	mkProject(t, s, "other")
 	p, err := s.UpsertPerson(bg, "https://id", "s1", "", "")
 	must(t, err)
 	stage, err := s.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: "acme", Name: "stage"})
@@ -104,24 +104,24 @@ func TestGrants(t *testing.T) {
 	foreign, err := s.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: "other", Name: "prod"})
 	must(t, err)
 
-	g1, err := s.PutGrant(bg, store.Grant{TenantID: "acme", PersonID: p.ID, Role: "read", MadeBy: "basic:op"})
+	g1, err := s.PutGrant(bg, store.Grant{ProjectID: "acme", PersonID: p.ID, Role: "read", MadeBy: "basic:op"})
 	must(t, err)
-	g2, err := s.PutGrant(bg, store.Grant{TenantID: "acme", PersonID: p.ID, Role: "admin"})
+	g2, err := s.PutGrant(bg, store.Grant{ProjectID: "acme", PersonID: p.ID, Role: "admin"})
 	if err != nil || g2.ID != g1.ID || g2.Role != "admin" || g2.MadeBy != "" {
 		t.Fatalf("second put %+v %v", g2, err)
 	}
-	if _, err := s.PutGrant(bg, store.Grant{TenantID: "acme", PersonID: p.ID, EnvironmentID: stage.ID,
+	if _, err := s.PutGrant(bg, store.Grant{ProjectID: "acme", PersonID: p.ID, EnvironmentID: stage.ID,
 		Role: "write"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.PutGrant(bg, store.Grant{TenantID: "acme", PersonID: p.ID, EnvironmentID: foreign.ID,
+	if _, err := s.PutGrant(bg, store.Grant{ProjectID: "acme", PersonID: p.ID, EnvironmentID: foreign.ID,
 		Role: "write"}); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("foreign environment: %v", err)
 	}
-	if _, err := s.PutGrant(bg, store.Grant{TenantID: "acme", PersonID: uuid.New(), Role: "read"}); !errors.Is(err, store.ErrNoRow) {
+	if _, err := s.PutGrant(bg, store.Grant{ProjectID: "acme", PersonID: uuid.New(), Role: "read"}); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("unknown person: %v", err)
 	}
-	if _, err := s.PutGrant(bg, store.Grant{TenantID: "acme", Role: "read"}); err == nil {
+	if _, err := s.PutGrant(bg, store.Grant{ProjectID: "acme", Role: "read"}); err == nil {
 		t.Fatal("a grant without a principal")
 	}
 	gs, err := s.ListGrants(bg, "acme")
@@ -139,42 +139,42 @@ func TestGrants(t *testing.T) {
 		t.Fatalf("after the environment's deletion: %+v", gs)
 	}
 	if ok, err := s.DeleteGrant(bg, "other", g1.ID); err != nil || ok {
-		t.Fatalf("another tenant's delete: %v %v", ok, err)
+		t.Fatalf("another project's delete: %v %v", ok, err)
 	}
 	if _, ok, err := s.PersonAccess(bg, "nope", p.ID); err != nil || ok {
-		t.Fatalf("unknown tenant: %v %v", ok, err)
+		t.Fatalf("unknown project: %v %v", ok, err)
 	}
 }
 
-// A tenant token is admin on its tenant unless minted with a role and a
-// scope; its grants add to its own; a scope of another tenant is refused.
+// A project token is admin on its project unless minted with a role and a
+// scope; its grants add to its own; a scope of another project is refused.
 func TestTokenAccess(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
-	mkTenant(t, s, "other")
+	mkProject(t, s, "acme")
+	mkProject(t, s, "other")
 	stage, err := s.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: "acme", Name: "stage"})
 	must(t, err)
 	foreign, err := s.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: "other", Name: "prod"})
 	must(t, err)
-	if tk, err := s.CreateTenantToken(bg, "h1", "acme", "fecode"); err != nil || tk.Role != "admin" ||
+	if tk, err := s.CreateProjectToken(bg, "h1", "acme", "fecode"); err != nil || tk.Role != "admin" ||
 		tk.EnvironmentID != uuid.Nil {
 		t.Fatalf("create %+v %v", tk, err)
 	}
 	// A token an instance of the previous version mints is admin too.
-	exec(t, s, "INSERT INTO tenant_tokens (hash, tenant_id) VALUES ('h0', 'acme')")
-	tenant, roles, err := s.TokenAccess(bg, "h0")
-	if err != nil || tenant != "acme" || len(roles) != 1 || roles[0] != (store.RoleAt{Role: "admin"}) {
-		t.Fatalf("old token %q %+v %v", tenant, roles, err)
+	exec(t, s, "INSERT INTO project_tokens (hash, project_id) VALUES ('h0', 'acme')")
+	project, roles, err := s.TokenAccess(bg, "h0")
+	if err != nil || project != "acme" || len(roles) != 1 || roles[0] != (store.RoleAt{Role: "admin"}) {
+		t.Fatalf("old token %q %+v %v", project, roles, err)
 	}
-	if _, err := s.InsertTenantToken(bg, store.TenantToken{Hash: "h2", TenantID: "acme", Role: "read",
+	if _, err := s.InsertProjectToken(bg, store.ProjectToken{Hash: "h2", ProjectID: "acme", Role: "read",
 		EnvironmentID: stage.ID, MadeBy: "basic:op"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.InsertTenantToken(bg, store.TenantToken{Hash: "h3", TenantID: "acme", Role: "read",
+	if _, err := s.InsertProjectToken(bg, store.ProjectToken{Hash: "h3", ProjectID: "acme", Role: "read",
 		EnvironmentID: foreign.ID}); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("foreign scope: %v", err)
 	}
-	if _, err := s.PutGrant(bg, store.Grant{TenantID: "acme", TokenHash: "h2", Role: "read"}); err != nil {
+	if _, err := s.PutGrant(bg, store.Grant{ProjectID: "acme", TokenHash: "h2", Role: "read"}); err != nil {
 		t.Fatal(err)
 	}
 	_, roles, err = s.TokenAccess(bg, "h2")

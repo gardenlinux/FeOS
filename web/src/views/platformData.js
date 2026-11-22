@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The derivations of the platform's pages (nodes, ingresses, join tokens,
-// tenants, people, the control plane): pure, so that the tests load them
+// projects, people, the control plane): pure, so that the tests load them
 // as they are.
 
 import { QUOTA_ITEMS, fmtQuota } from '../people.js';
@@ -183,7 +183,7 @@ export function joinTokenTitle(t) {
   return t.name || t.node ? `Join token for ${kind} ${t.name || t.node}` : `Join token for a new ${kind}`;
 }
 
-// ---------------------------------------------------------------- tenants --
+// ---------------------------------------------------------------- projects --
 
 // limitsForm is the limits form's values: a limit as a string, none as
 // ''. Memory is in MiB, as the API has it.
@@ -208,10 +208,10 @@ export function limitsBody(form) {
   return out;
 }
 
-// LIMIT_WORDS are the limits' short words in a tenant's row.
+// LIMIT_WORDS are the limits' short words in a project's row.
 const LIMIT_WORDS = { sandboxes: 'sandboxes', environments: 'envs', runningJobs: 'jobs', vcpus: 'vCPU', memoryMib: '' };
 
-// limitsText sums a tenant's limits up in one short line: "no limits",
+// limitsText sums a project's limits up in one short line: "no limits",
 // or each set one ("50 sandboxes · 10 envs · 32 vCPU · 64 GiB").
 export function limitsText(limits) {
   const l = limits || {};
@@ -220,11 +220,11 @@ export function limitsText(limits) {
   return set.map((it) => `${fmtQuota(it, Number(l[it.key]))}${LIMIT_WORDS[it.key] ? ' ' + LIMIT_WORDS[it.key] : ''}`).join(' · ');
 }
 
-// knownZones are the zones the tenants' list names, sorted: the zones an
-// operator can move a tenant to, as far as the UI can tell (ferund's 400
+// knownZones are the zones the projects' list names, sorted: the zones an
+// operator can move a project to, as far as the UI can tell (ferund's 400
 // names the others).
-export function knownZones(tenants) {
-  return [...new Set((tenants || []).map((t) => t.zone).filter(Boolean))].sort();
+export function knownZones(projects) {
+  return [...new Set((projects || []).map((t) => t.zone).filter(Boolean))].sort();
 }
 
 // zoneMoveText says what a zone change did to one environment's host.

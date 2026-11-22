@@ -17,7 +17,7 @@ import (
 )
 
 // Every provider has a redirect URI of its own: /callback/ferun for kind
-// ferun, /callback/<tenant>/<provider> for kind oidc.
+// ferun, /callback/<project>/<provider> for kind oidc.
 func TestRedirectURIPerProvider(t *testing.T) {
 	h := newHarness(t, withFerunIssuer)
 	h.ferund.view("f", kindFerun, nil)
@@ -30,7 +30,7 @@ func TestRedirectURIPerProvider(t *testing.T) {
 	}
 }
 
-// The mix-up attack: a tenant's issuer A sends the victim on to issuer B
+// The mix-up attack: a project's issuer A sends the victim on to issuer B
 // with the state of A's flow, so that B's code comes back to A's flow. B
 // answers only at its own redirect URI, which is not the flow's: the
 // callback refuses before anything is exchanged, and the flow is gone.

@@ -1,0 +1,121 @@
+// SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+// SPDX-License-Identifier: Apache-2.0
+
+package store_test
+
+import (
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/gardenlinux/feos/go/internal/model"
+	"github.com/gardenlinux/feos/go/internal/podid"
+	"github.com/gardenlinux/feos/go/internal/store"
+)
+
+// insertProjectJob inserts a job of t1 with its pod's row, as a create does.
+func insertProjectJob(t *testing.T, s *store.Store, key string, labels map[string]string) store.ProjectJob {
+	t.Helper()
+	var job store.ProjectJob
+	env := boxEnv(t, s, "t1")
+	err := s.InTx(bg, func(tx *store.Store) error {
+		idle := 0
+		sb, err := tx.CreateMintedSandbox(bg, func(id podid.ID) store.NewSandbox {
+			return store.NewSandbox{ID: id, Owner: "t1", Image: "img", VCPUs: 1, MemoryMiB: 512, ImageRef: "img@sha256:00",
+				EnvironmentID: env, PodTemplate: &model.PodTemplate{}, IdleAfterS: &idle, ProjectJob: true}
+		})
+		if err != nil {
+			return err
+		}
+		job, err = tx.InsertProjectJob(bg, store.ProjectJob{ID: sb.ID, Owner: "t1", EnvID: env, Key: key, RequestHash: "h", Image: "img",
+			ImageRef: "img@sha256:00", VCPUs: 1, MemoryMiB: 512, Labels: labels}, []byte("sealed"), time.Minute)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return job
+}
+
+// A job's pod is no sandbox of its project; a key is unique per project; a
+// job ends once, which drops its secrets; the pods of ended jobs are
+// left for deletion; the sweep takes the jobs that ended long enough ago.
+func TestProjectJobs(t *testing.T) {
+	s, _ := newStore(t)
+	mkProject(t, s, "t1")
+	a := insertProjectJob(t, s, "k1", map[string]string{"project": "p1"})
+	b := insertProjectJob(t, s, "", nil)
+	if a.Phase != model.JobQueued || a.Key != "k1" || a.DeadlineAt.Sub(a.CreatedAt) != time.Minute || a.Ended() {
+		t.Fatalf("inserted %+v", a)
+	}
+	if list, err := s.ListSandboxes(bg, "t1", nil); err != nil || len(list) != 0 {
+		t.Fatalf("the project's sandboxes %d %v", len(list), err)
+	}
+	if err := s.InTx(bg, func(tx *store.Store) error {
+		_, err := tx.InsertProjectJob(bg, store.ProjectJob{ID: podid.Mint(), Owner: "t1", EnvID: a.EnvID, Key: "k1", RequestHash: "h2", Image: "i",
+			ImageRef: "i"}, nil, time.Minute)
+		return err
+	}); !errors.Is(err, store.ErrExists) {
+		t.Fatalf("a second job under k1: %v", err)
+	}
+	if r, err := s.ProjectJobByKey(bg, "t1", "k1"); err != nil || r.ID != a.ID {
+		t.Fatalf("by key %+v %v", r, err)
+	}
+	if list, err := s.ListProjectJobs(bg, "t1", map[string]string{"project": "p1"}, nil); err != nil || len(list) != 1 ||
+		list[0].ID != a.ID {
+		t.Fatalf("by label %+v %v", list, err)
+	}
+	if a.EnvName != "box" || a.Reaches.All || len(a.Reaches.Entries) != 0 || a.Egress != nil {
+		t.Fatalf("environment and reaches %+v", a)
+	}
+	if list, err := s.ListProjectJobs(bg, "t1", nil, []uuid.UUID{}); err != nil || len(list) != 0 {
+		t.Fatalf("of no environment %+v %v", list, err)
+	}
+	if list, err := s.ListProjectJobs(bg, "t1", nil, []uuid.UUID{a.EnvID}); err != nil || len(list) != 2 {
+		t.Fatalf("of its environment %+v %v", list, err)
+	}
+	if ok, err := s.StartProjectJob(bg, a.ID); err != nil || !ok {
+		t.Fatalf("start %v %v", ok, err)
+	}
+	code := 0
+	end := store.ProjectJobEnd{Phase: model.JobSucceeded, ExitCode: &code, Result: "sha256:1", LogTail: []string{"done"},
+		Exited: true}
+	if ok, err := s.EndProjectJob(bg, a.ID, end); err != nil || !ok {
+		t.Fatalf("end %v %v", ok, err)
+	}
+	if ok, err := s.EndProjectJob(bg, a.ID, store.ProjectJobEnd{Phase: model.JobCancelled}); err != nil || ok {
+		t.Fatalf("a second end %v %v", ok, err)
+	}
+	got, err := s.GetProjectJob(bg, "t1", a.ID)
+	if err != nil || got.Phase != model.JobSucceeded || got.Result != "sha256:1" || got.StartedAt.IsZero() ||
+		!got.Ended() || len(got.LogTail) != 1 {
+		t.Fatalf("ended %+v %v", got, err)
+	}
+	if sealed, err := s.ProjectJobSealed(bg, a.ID); err != nil || sealed != nil {
+		t.Fatalf("sealed after the end %v %v", sealed, err)
+	}
+	if _, err := s.GetProjectJob(bg, "t2", a.ID); !errors.Is(err, store.ErrNoRow) {
+		t.Fatalf("another project's read: %v", err)
+	}
+	// An exit never seen running gets its start at its end.
+	if ok, err := s.EndProjectJob(bg, b.ID, store.ProjectJobEnd{Phase: model.JobFailed, Reason: model.JobReasonExit, ExitCode: &code,
+		Exited: true}); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if got, _ := s.GetProjectJob(bg, "t1", b.ID); got.StartedAt.IsZero() {
+		t.Error("the exit has no start")
+	}
+	left, err := s.LeftProjectJobPods(bg)
+	if err != nil || len(left) != 2 {
+		t.Fatalf("left pods %d %v", len(left), err)
+	}
+	exec(t, s, "UPDATE jobs SET finished_at = now() - interval '8 days' WHERE id = $1", a.ID)
+	if n, err := s.SweepProjectJobs(bg, 7*24*time.Hour); err != nil || n != 1 {
+		t.Fatalf("swept %d %v", n, err)
+	}
+	if _, err := s.GetProjectJob(bg, "t1", a.ID); !errors.Is(err, store.ErrNoRow) {
+		t.Fatalf("the swept job: %v", err)
+	}
+}

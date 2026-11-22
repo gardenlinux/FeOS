@@ -485,8 +485,8 @@ log "the ssh agent socket comes and goes in the container"
 # its feos-authn starts: a client that connects at once is not refused,
 # and is served once the signer answers. A reset replaces the process,
 # which takes the same listeners again.
-POD_ID=spiffe://feos.test/tenant/t/env/e/service/app
-DB_ID=spiffe://feos.test/tenant/t/env/e/addon/db
+POD_ID=spiffe://feos.test/project/t/env/e/service/app
+DB_ID=spiffe://feos.test/project/t/env/e/addon/db
 PEER_LOG="${RUN_DIR}/peer.log"
 rm -f "${VSOCK}_10002"
 start_peer() {

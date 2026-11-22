@@ -27,18 +27,18 @@ import (
 var trafficT0 = time.Date(2026, 11, 2, 1, 0, 0, 0, time.UTC)
 
 // trafficRecords are the ingress's records of the traffic tests, of
-// tenant acme's environment env1 unless said: web's in the range
+// project acme's environment env1 unless said: web's in the range
 // [t0, t0+5m) a request of each kind in its first minute (10 to 70 ms;
 // three failed: 503, no status written, 502 to a client that went away)
 // and two in its third, one before and one at its end; api's one in its
 // fifth minute; and one failed request each of web of env2 and of
-// another tenant's env9.
+// another project's env9.
 func trafficRecords() []wire.AccessLogEntry {
 	var out []wire.AccessLogEntry
-	add := func(tenant, env, service string, at time.Duration, ms int64, status int, outcome string) {
+	add := func(project, env, service string, at time.Duration, ms int64, status int, outcome string) {
 		n := len(out) + 1
 		out = append(out, wire.AccessLogEntry{Time: trafficT0.Add(at), DurationNs: ms * int64(time.Millisecond), Env: env,
-			Tenant: tenant, Service: service, Host: "app.apps.example", Method: "GET", Path: "/", Proto: "HTTP/1.1",
+			Project: project, Service: service, Host: "app.apps.example", Method: "GET", Path: "/", Proto: "HTTP/1.1",
 			Status: status, Outcome: outcome, Attempts: 1, TraceID: fmt.Sprintf("%032x", n), SpanID: fmt.Sprintf("%016x", n)})
 	}
 	for i, c := range []struct {
@@ -85,7 +85,7 @@ func TestTraffic(t *testing.T) {
 		testSpan(traceA, "000000000000000a", "", "GET /", trafficT0.UnixNano(), time.Millisecond))); err != nil {
 		t.Fatal(err)
 	}
-	q := TrafficQuery{Tenant: "acme", Environment: "env1", Services: []string{"web", "api", "idle"},
+	q := TrafficQuery{Project: "acme", Environment: "env1", Services: []string{"web", "api", "idle"},
 		SinceNs: trafficT0.UnixNano(), UntilNs: trafficT0.Add(5 * time.Minute).UnixNano(), Step: time.Minute}
 	got, err := tr.Traffic(ctx, q)
 	if err != nil || len(got) != 3 || got[0].Requests != 0 || len(got[0].Steps) != 0 {
@@ -123,14 +123,14 @@ func TestTraffic(t *testing.T) {
 	if string(gb) != string(wb) {
 		t.Errorf("traffic\n%s\nwant\n%s", gb, wb)
 	}
-	// A tenant reads its own spans only.
+	// A project reads its own spans only.
 	q.Environment, q.Services = "env9", []string{"web"}
 	if got, err := tr.Traffic(ctx, q); err != nil || got[0].Requests != 0 {
-		t.Errorf("another tenant's environment: %+v %v", got, err)
+		t.Errorf("another project's environment: %+v %v", got, err)
 	}
-	q.Tenant = "other"
+	q.Project = "other"
 	if got, err := tr.Traffic(ctx, q); err != nil || got[0].Requests != 1 || got[0].Errors != 1 {
-		t.Errorf("the other tenant's: %+v %v", got, err)
+		t.Errorf("the other project's: %+v %v", got, err)
 	}
 }
 
@@ -177,7 +177,7 @@ func TestTrafficApp(t *testing.T) {
 		t.Fatal(err)
 	}
 	idx.sync(lg)
-	q := TrafficQuery{Tenant: "acme", Environment: "env1", Services: []string{"web", "api", "idle"}, Source: TrafficApp,
+	q := TrafficQuery{Project: "acme", Environment: "env1", Services: []string{"web", "api", "idle"}, Source: TrafficApp,
 		Skip: map[string][]string{"web": {"/readyz"}}, SinceNs: trafficT0.UnixNano(), UntilNs: trafficT0.Add(5 * time.Minute).UnixNano(),
 		Step: time.Minute}
 	got, err := tr.Traffic(ctx, q)
@@ -219,7 +219,7 @@ func TestParseTrafficQuery(t *testing.T) {
 	ok := url.Values{"environment": {"e"}, "service": {"web", "api", "web"}, "since": {"2026-11-02T01:00:00Z"},
 		"until": {"1793584800000000000"}, "step": {"60s"}}
 	q, err := parseTrafficQuery(ok, "acme")
-	if err != nil || q.Tenant != "acme" || q.Environment != "e" || strings.Join(q.Services, ",") != "web,api" ||
+	if err != nil || q.Project != "acme" || q.Environment != "e" || strings.Join(q.Services, ",") != "web,api" ||
 		q.SinceNs != 1793581200000000000 || q.UntilNs != 1793584800000000000 || q.Step != time.Minute ||
 		q.Source != TrafficIngress || q.Skip != nil {
 		t.Fatalf("%+v %v", q, err)
@@ -355,7 +355,7 @@ func TestTrafficQuickwit(t *testing.T) {
 	since, until := trafficT0.UnixNano(), trafficT0.Add(5*time.Minute).UnixNano()
 	for _, svc := range []string{"web", "api", "idle"} {
 		for _, failed := range []bool{false, true} {
-			q := quickwit.SpanQuery{Tenant: "acme", Environment: "env1", Object: svc, Source: SourceIngress, SinceNs: since,
+			q := quickwit.SpanQuery{Project: "acme", Environment: "env1", Object: svc, Source: SourceIngress, SinceNs: since,
 				UntilNs: until - 1, Failed: failed}
 			got, err := c.SpanHistogram(ctx, pattern, q, time.Minute, true)
 			if err != nil {

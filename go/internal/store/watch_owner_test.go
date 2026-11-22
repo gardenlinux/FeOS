@@ -16,7 +16,7 @@ import (
 // release ends its leases at once.
 func TestOwnedWatches(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "t1")
+	mkProject(t, s, "t1")
 	sb := mkSandbox(t, s, "t1")
 	mk := func() store.Watch {
 		t.Helper()

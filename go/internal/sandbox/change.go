@@ -40,6 +40,9 @@ type change struct {
 
 	written store.Sandbox
 	events  []activity.Event
+	// tls is the push of the pod's TLS bindings that follows the commit
+	// (tlsPushOf); nil: none.
+	tls *tlsPush
 }
 
 func (e *Engine) newChange(ctx context.Context, tx *store.Store, row store.Sandbox) (*change, error) {
@@ -71,15 +74,17 @@ func (c *change) commit(ctx context.Context) error {
 		c.events = append(c.events, c.runEnd(a.RunID, c.closeRun))
 		a.RunID = ""
 	}
+	opened := ""
 	if a.ClientState == model.StateRunning && a.RunID == "" && c.openRun != "" {
 		a.RunID = newRunID()
 		c.events = append(c.events, c.runStart(a.RunID, c.openRun))
+		opened = c.openRun
 	}
 	for _, t := range c.tombstones {
 		if _, err := c.tx.UpsertTombstone(ctx, t); err != nil {
 			return err
 		}
-		c.events = append(c.events, activity.Event{SandboxID: t.PodID, TenantID: c.before.Owner, Node: t.Node,
+		c.events = append(c.events, activity.Event{SandboxID: t.PodID, ProjectID: c.before.Owner, Node: t.Node,
 			Kind: activity.KindTombstone, Name: fmt.Sprintf("tombstone on node %s: %s", t.Node, t.Reason),
 			Detail: map[string]any{"node": t.Node, "incarnation": t.Incarnation.String(), "reason": t.Reason}})
 	}
@@ -88,6 +93,7 @@ func (c *change) commit(ctx context.Context) error {
 		return err
 	}
 	c.written = written
+	c.tls = tlsPushOf(written, opened)
 	if written.Address != c.before.Address {
 		if err := c.tx.Notify(ctx, db.ChanLeader, store.HintEnvGroups); err != nil {
 			return err
@@ -107,7 +113,7 @@ func (c *change) commit(ctx context.Context) error {
 		if written.StatusDescription != "" {
 			detail["description"] = written.StatusDescription
 		}
-		c.events = append(c.events, activity.Event{SandboxID: written.ID, TenantID: written.Owner, Node: written.Node,
+		c.events = append(c.events, activity.Event{SandboxID: written.ID, ProjectID: written.Owner, Node: written.Node,
 			Kind: activity.KindSandboxState, ParentSpanID: parent,
 			Name: fmt.Sprintf("%s → %s", c.before.ClientState, written.ClientState), Detail: detail})
 	}
@@ -161,13 +167,13 @@ func (c *change) runStart(runID, origin string) activity.Event {
 	default:
 		name += " (" + origin + ")"
 	}
-	return activity.Event{SandboxID: a.ID, TenantID: a.Owner, Node: a.Node, Kind: activity.KindRunStart,
+	return activity.Event{SandboxID: a.ID, ProjectID: a.Owner, Node: a.Node, Kind: activity.KindRunStart,
 		SpanID: runID, Name: name, Detail: map[string]any{"node": a.Node, "origin": origin, "image": a.ImageRef,
 			"vcpus": a.VCPUs, "memory_mib": a.MemoryMiB}}
 }
 
 func (c *change) runEnd(runID, reason string) activity.Event {
-	ev := activity.Event{SandboxID: c.before.ID, TenantID: c.before.Owner, Node: c.before.Node, Kind: activity.KindRunEnd,
+	ev := activity.Event{SandboxID: c.before.ID, ProjectID: c.before.Owner, Node: c.before.Node, Kind: activity.KindRunEnd,
 		SpanID: runID, Name: "ended: " + reason, Detail: map[string]any{"reason": reason}}
 	if start := runStarted(runID); !start.IsZero() {
 		d := max(time.Since(start), 0).Nanoseconds()
@@ -394,7 +400,7 @@ func (e *Engine) syncBooking(ctx context.Context, tx *store.Store, before, after
 		if gate != "" {
 			msg := fmt.Sprintf("node %s overbooked by sandbox %s: %s", after.Node, after.ID, gate)
 			e.log.Warn(msg)
-			events = append(events, activity.Event{SandboxID: after.ID, TenantID: after.Owner, Node: after.Node,
+			events = append(events, activity.Event{SandboxID: after.ID, ProjectID: after.Owner, Node: after.Node,
 				Kind: activity.KindOverbooked, Name: msg, Detail: map[string]any{"node": after.Node, "gate": gate}})
 		}
 	}

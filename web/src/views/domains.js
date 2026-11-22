@@ -321,7 +321,7 @@ export function pickDomain(list, sel) {
 
 // mayBind tells whether access may move a domain from the environment
 // from (its ID, '' or null: none) to the one to ('' for unbinding):
-// admin on each (the tenant's admin has it on all).
+// admin on each (the project's admin has it on all).
 export function mayBind(access, from, to) {
   if (from && !atLeast(envRole(access, from), 'admin')) return false;
   if (to && !atLeast(envRole(access, to), 'admin')) return false;

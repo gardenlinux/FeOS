@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/gardenlinux/feos/go/ferun/api"
 )
 
 // MsgSandboxID is the message of a 400 for a sandbox ID that is neither
@@ -28,7 +30,7 @@ type Error struct {
 	// Header is set on the response, e.g. Retry-After.
 	Header http.Header
 	// Role and Scope are a role_required answer's (ADR 0031): the role
-	// the principal lacks, and on what ("tenant" or "environment").
+	// the principal lacks, and on what ("project" or "environment").
 	Role, Scope string
 	// Quota is a quota_exceeded answer's (ADR 0031): the resource, its
 	// limit and the use before the request.
@@ -45,7 +47,7 @@ type InUse struct {
 
 // CodeEnvironmentInUse is the code of the 409 of an environment's delete
 // while sandboxes or queued or running jobs are in it (ADR 0035).
-const CodeEnvironmentInUse = "environment_in_use"
+const CodeEnvironmentInUse = api.CodeEnvironmentInUse
 
 // EnvironmentInUse is the 409 environment_in_use for the environment
 // name, naming what is in it.
@@ -106,18 +108,18 @@ func RetryAfterOf(err error, def int) int {
 
 // CodeRoleRequired is the code of a 403 for a principal that sees what it
 // names but lacks the role for what it asks (ADR 0031).
-const CodeRoleRequired = "role_required"
+const CodeRoleRequired = api.CodeRoleRequired
 
 // RoleRequired is 403 {"code": "role_required", "role", "scope"}: the
-// principal needs role on scope ("tenant" or "environment").
+// principal needs role on scope ("project" or "environment").
 func RoleRequired(role, scope string) *Error {
 	return &Error{Status: http.StatusForbidden, Code: CodeRoleRequired, Role: role, Scope: scope,
 		Msg: fmt.Sprintf("this needs the role %s on the %s", role, scope)}
 }
 
 // CodeQuotaExceeded is the code of a 422 for a create that would pass
-// one of its tenant's limits (ADR 0031, "Quotas per tenant").
-const CodeQuotaExceeded = "quota_exceeded"
+// one of its project's limits (ADR 0031, "Quotas per project").
+const CodeQuotaExceeded = api.CodeQuotaExceeded
 
 // QuotaExceeded is 422 {"code": "quota_exceeded", "resource", "limit",
 // "use"}: asking for ask more of resource passes the limit, use being in
@@ -125,21 +127,11 @@ const CodeQuotaExceeded = "quota_exceeded"
 func QuotaExceeded(resource string, limit, use, ask int64) *Error {
 	return &Error{Status: http.StatusUnprocessableEntity, Code: CodeQuotaExceeded,
 		Quota: &Quota{Resource: resource, Limit: limit, Use: use},
-		Msg:   fmt.Sprintf("the tenant's limit of %s is %d, %d are in use and this asks for %d more", resource, limit, use, ask)}
+		Msg:   fmt.Sprintf("the project's limit of %s is %d, %d are in use and this asks for %d more", resource, limit, use, ask)}
 }
 
-type body struct {
-	Error    string `json:"error"`
-	Code     string `json:"code,omitempty"`
-	Role     string `json:"role,omitempty"`
-	Scope    string `json:"scope,omitempty"`
-	Resource string `json:"resource,omitempty"`
-	Limit    *int64 `json:"limit,omitempty"`
-	Use      *int64 `json:"use,omitempty"`
-	// Sandboxes and Jobs are an environment_in_use answer's.
-	Sandboxes *[]string `json:"sandboxes,omitempty"`
-	Jobs      *[]string `json:"jobs,omitempty"`
-}
+// body is every refusal's body: the published module's (ADR 0057).
+type body = api.ErrorBody
 
 // Write answers err: an *Error with its status and body, anything else with
 // 500 and the error's text, as the sandbox system's API did.

@@ -98,7 +98,7 @@ func TestReachabilityMigration(t *testing.T) {
 	// The pods: an instance of stage's web, one without its row in
 	// env_instances, one without a template; sandboxes in workspace and
 	// default, in default only (without a pod, and with a template that
-	// has no groups); a tenant's job's pod in workspace.
+	// has no groups); a project's job's pod in workspace.
 	tmpl := func(env string, more ...string) string {
 		groups := append([]string{`"env-` + env + `"`, `"sg-` + sg + `"`}, more...)
 		return `{"image": "x", "securityGroups": [` + strings.Join(groups, ", ") + `],

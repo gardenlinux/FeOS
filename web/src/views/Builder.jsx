@@ -7,11 +7,11 @@ import { Icon } from '../Icon.jsx';
 import { ErrBox } from '../components.jsx';
 import { readItem, writeItem } from '../storage.js';
 import { envPath } from '../routes.js';
-import { mayBuild, useAccess } from '../people.js';
+import { mayBuild, mayPlan, useAccess, useMe } from '../people.js';
 import { admitsWords, fmtValue, heavyEffect, statusState } from './envs.js';
 import {
   addService, decodeDraft, deployBlock, draftKey, draftWords, encodeDraft, getObject, isDnsLabel, isObject, isSecretName,
-  keyOfKind, newEnvID, objectsOf, parseSpecText, proposeMessage, removeObject, renameObject, setObject, specText, uniqueName,
+  keyOfKind, newEnvID, PROTECTED_DEPLOY, objectsOf, parseSpecText, proposeMessage, removeObject, renameObject, setObject, specText, uniqueName,
 } from './draft.js';
 import { refLine, referencesTo, removeWithRefs, secretNames } from './refs.js';
 import { groupFindings, severityCounts, unitKey, worst } from './findings.js';
@@ -116,20 +116,28 @@ function AddAddonButton({ catalog, onAdd }) {
   );
 }
 
+// PROTECTED_NOTICE is draft.js's PROTECTED_DEPLOY as a sentence.
+const PROTECTED_NOTICE = `${PROTECTED_DEPLOY[0].toUpperCase()}${PROTECTED_DEPLOY.slice(1)}.`;
+
 // ---------------------------------------------------------------- builder --
 
-export function Builder({ tenant, env, st, navigate, item = '' }) {
+export function Builder({ project, env, st, navigate, item = '' }) {
   const isNew = !env;
   // What the role allows (ADR 0031, ADR 0035): a new environment needs
-  // write on the tenant, a deployment, a secret's value and an attached
-  // service write on the environment (the tenant grant or the
+  // write on the project, a deployment, a secret's value and an attached
+  // service write on the environment (the project grant or the
   // environment's, the higher). Below that the builder shows the latest
   // deployment's spec and changes nothing: no plan (it needs write), no
-  // apply, no secret written, no draft stored.
-  const access = useAccess(tenant);
-  const readOnly = !mayBuild(access, isNew ? '' : (st && st.id) || env);
-  const editAttached = !readOnly;
-  const key = draftKey(tenant, env);
+  // apply, no secret written, no draft stored. On a protected environment
+  // (ADR 0060) whoever ferund lets plan but not deploy (a project grant of
+  // write) edits and plans a draft, and deploys nothing: plan-only.
+  const access = useAccess(project);
+  const { reload } = useMe();
+  const target = isNew ? '' : (st && st.id) || env;
+  const readOnly = !mayPlan(access, target);
+  const planOnly = !readOnly && !mayBuild(access, target);
+  const editAttached = !readOnly && !planOnly;
+  const key = draftKey(project, env);
   const [draft, setDraftState] = useState(null);
   const draftRef = useRef(null);
   const [baseSpec, setBaseSpec] = useState(null);
@@ -161,10 +169,10 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
     setOpenState(u);
     setReviewing(false);
     if (!isNew && navigate) {
-      const to = envPath(tenant, env, 'builder', itemOfUnit(u));
+      const to = envPath(project, env, 'builder', itemOfUnit(u));
       if (typeof location === 'undefined' || to !== location.pathname) navigate(to);
     }
-  }, [isNew, navigate, tenant, env]);
+  }, [isNew, navigate, project, env]);
   // The address changed (back, a link): select what it names.
   useEffect(() => {
     if (itemOfUnit(openRef.current) !== String(item || '')) { setOpenState(unitOfItem(item)); setReviewing(false); }
@@ -294,6 +302,7 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
   // first apply writes it.
   const setSecret = useCallback(async (name, value) => {
     if (readOnly) throw new Error('Your role does not allow this: it needs write on this environment.');
+    if (planOnly) throw new Error(PROTECTED_NOTICE);
     if (!isSecretName(name)) throw new Error(`${name} is not a secret name: a-z, 0-9, '.', '_' and '-'`);
     if (isNew) {
       pending.current.set(name, value);
@@ -305,7 +314,7 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
     edit(pinSecret(draftRef.current.spec, name, v.version));
     refreshSecrets();
     return v.version;
-  }, [env, isNew, edit, refreshSecrets, readOnly]);
+  }, [env, isNew, edit, refreshSecrets, readOnly, planOnly]);
 
   // ----------------------------------------------------------- derived --
   const spec = draft ? draft.spec : {};
@@ -390,18 +399,18 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
   if (!draft) return <p className="empty">Loading the draft…</p>;
 
   if (applied) {
-    return <Applied applied={applied} tenant={tenant} env={env} st={st} navigate={navigate}
+    return <Applied applied={applied} project={project} env={env} st={st} navigate={navigate}
       onAgain={() => { setApplied(null); draftRef.current = null; setDraftState(null); loadLatest(applied.number).catch((e) => setLoadErr(e.message)); }} />;
   }
 
   const empty = !readOnly && objectsOf(spec, 'services').length === 0 && objectsOf(spec, 'jobs').length === 0;
   const ctx = {
     spec, catalog, setSecret, isNew, knownSecrets, pins, httpSecrets: httpSecretsOf(secrets), httpSecretsErr: secretsErr, editSpec,
-    editAttached, tenant, env, navigate, sandboxes,
+    editAttached, project, env, navigate, sandboxes,
   };
   const review = !readOnly && (
     <ReviewPanel isNew={isNew} draft={draft} plan={plan} planning={planning || stale} groups={groups} findings={findings}
-      pinned={pinned} applyFindings={applyFindings} pins={pins} conflicts={conflicts ? conflicts.list.length : 0}
+      pinned={pinned} applyFindings={applyFindings} pins={pins} conflicts={conflicts ? conflicts.list.length : 0} planOnly={planOnly}
       changes={changes} next={words.next} onOpen={setOpen} onClose={() => setReviewing(false)}
       onApply={async (message, setBusy, setErr) => {
         setBusy(true);
@@ -412,7 +421,8 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
             setNotice(`Nothing changes: the draft equals deployment ${res.number}.`);
           } else {
             writeItem('localStorage', key, '');
-            if (isNew) navigate(envPath(tenant, draftRef.current.name));
+            // A new environment is listed in /auth/me once it is read again.
+            if (isNew) { reload().catch(() => {}); navigate(envPath(project, draftRef.current.name)); }
             else setApplied(res);
           }
         } catch (e) {
@@ -440,7 +450,7 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
 
   return (
     <div className={'builder' + (paneFirst ? ' pane-first' : '')}>
-      <Band words={words} readOnly={readOnly} isNew={isNew} draft={draft} plan={plan} planning={planning || stale}
+      <Band words={words} readOnly={readOnly} planOnly={planOnly} isNew={isNew} draft={draft} plan={plan} planning={planning || stale}
         changes={changes.length} view={view} setView={setView}
         undo={history.current.past.length ? undo : null} redo={history.current.future.length ? redo : null}
         onExport={exportDraft} onImport={(s) => { edit(s); setNotice('Imported: the review shows what it changes against the base.'); }}
@@ -479,7 +489,7 @@ export function Builder({ tenant, env, st, navigate, item = '' }) {
 // Band says what the builder edits: the draft of which deployment, from
 // which, how many changes, that nothing changes until it is deployed; and
 // carries the draft's actions and the way to its review.
-function Band({ words, readOnly, isNew, draft, plan, planning, changes, view, setView, undo, redo, onExport, onImport, onError,
+function Band({ words, readOnly, planOnly = false, isNew, draft, plan, planning, changes, view, setView, undo, redo, onExport, onImport, onError,
   onDiscard, latest, onName, onRebase, reviewing, onReview, conflicts }) {
   const answer = plan && plan.answer;
   const errors = answer ? severityCounts(answer.findings || []).error : 0;
@@ -502,6 +512,7 @@ function Band({ words, readOnly, isNew, draft, plan, planning, changes, view, se
                 : answer ? <span className="muted"><Icon name="check" size={11} /> the plan accepts it</span> : null)}
           <span className="muted">{readOnly
             ? 'Your role does not allow changes here: it needs write on this environment. You see the latest deployment\'s spec.'
+            : planOnly ? `${PROTECTED_NOTICE} You plan against it; the draft is kept in this browser.`
             : isNew ? 'Nothing exists until you deploy. The draft is kept in this browser.'
               : 'Nothing changes in the environment until you deploy. The draft is kept in this browser.'}</span>
         </div>
@@ -565,7 +576,7 @@ async function applyDraft({ draftRef, set, edit, isNew, env, answer, message, pe
       await api.createEnvironment(target, d.id);
     } catch (e) {
       if (e.status === 409 && e.body && e.body.code === 'name_taken') {
-        throw new Error(`the tenant has an environment ${target} already: choose another name`);
+        throw new Error(`the project has an environment ${target} already: choose another name`);
       }
       throw e;
     }
@@ -864,7 +875,7 @@ function Conflicts({ conflicts, onPick }) {
 // without a value, an acceptance of data loss or downtime, the message
 // the builder proposes, and the deploy.
 export function ReviewPanel({ isNew, draft, plan, planning, groups, findings = [], pinned, applyFindings, pins, conflicts = 0,
-  changes = [], next = 0, onApply, onOpen = () => {}, onClose }) {
+  changes = [], next = 0, onApply, onOpen = () => {}, onClose, planOnly = false }) {
   const answer = plan && plan.answer;
   const diff = answer && answer.diff ? answer.diff : [];
   const heavy = diff.filter((d) => heavyEffect(d.effect));
@@ -884,7 +895,7 @@ export function ReviewPanel({ isNew, draft, plan, planning, groups, findings = [
   const counts = severityCounts(all);
   const unresolved = pinned ? pinned.unresolved : [];
   const missing = (pins || []).filter((p) => p.missing).map((p) => p.name);
-  const block = deployBlock({ isNew, name: draft.name, planning, answer, diff, unresolved, heavy: heavy.length, ack, conflicts, busy });
+  const block = deployBlock({ isNew, name: draft.name, planning, answer, diff, unresolved, heavy: heavy.length, ack, conflicts, busy, planOnly });
   const open = (kind, name) => {
     const key = keyOfKind(kind);
     if (key) onOpen(unitKey(key, name));
@@ -1031,7 +1042,7 @@ function ChangeRow({ d, onOpen }) {
   );
 }
 
-function Applied({ applied, tenant, env, st, navigate, onAgain }) {
+function Applied({ applied, project, env, st, navigate, onAgain }) {
   const rollout = st && st.rollout && st.rollout.deployment === applied.number ? st.rollout : null;
   return (
     <div className="b-applied">
@@ -1041,10 +1052,10 @@ function Applied({ applied, tenant, env, st, navigate, onAgain }) {
           : <>It waits for its rollout ({applied.state}).</>}
       </p>
       {(applied.diff || []).length > 0 && <ul className="b-changes">{applied.diff.map((d) => (
-        <ChangeRow key={`${d.kind}/${d.name}`} d={d} onOpen={() => navigate(envPath(tenant, env, 'deployments', applied.number))} />))}</ul>}
+        <ChangeRow key={`${d.kind}/${d.name}`} d={d} onOpen={() => navigate(envPath(project, env, 'deployments', applied.number))} />))}</ul>}
       <div className="b-row">
-        <button onClick={() => navigate(envPath(tenant, env))}>The overview</button>
-        <button onClick={() => navigate(envPath(tenant, env, 'deployments', applied.number))}>Deployment {applied.number}</button>
+        <button onClick={() => navigate(envPath(project, env))}>The overview</button>
+        <button onClick={() => navigate(envPath(project, env, 'deployments', applied.number))}>Deployment {applied.number}</button>
         <button className="primary" onClick={onAgain}><Icon name="plus" size={13} /> New deployment</button>
       </div>
     </div>

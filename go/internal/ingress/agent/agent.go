@@ -214,7 +214,7 @@ type Agent struct {
 	repairs     uint64
 	state       *wire.State
 	tableAt     time.Time
-	cachedAt    time.Time // the savedAt of table-v3.json, as written or loaded
+	cachedAt    time.Time // the savedAt of table-v4.json, as written or loaded
 	tableWarnAt time.Time
 	// reachFailed: an attempt to reach the control plane (a join, a
 	// connection, a session) failed since Run started.
@@ -766,7 +766,7 @@ type Status struct {
 	Prefix          string     `json:"prefix,omitempty"`
 	Address         string     `json:"address,omitempty"`
 	AppsZone        string     `json:"appsZone,omitempty"`
-	TenantZone      string     `json:"tenantZone,omitempty"`
+	ProjectZone     string     `json:"projectZone,omitempty"`
 	AdmittedVersion uint64     `json:"admittedVersion"`
 	Connected       bool       `json:"connected"`
 	ControlPlane    string     `json:"controlPlane,omitempty"` // the address of the current connection
@@ -843,7 +843,7 @@ func (a *Agent) Status() Status {
 	if a.cur != nil {
 		st.ControlPlane = a.cur.addr
 		st.Instance = a.cur.hello.Instance
-		st.AppsZone, st.TenantZone = a.cur.hello.AppsZone, a.cur.hello.TenantZone
+		st.AppsZone, st.ProjectZone = a.cur.hello.AppsZone, a.cur.hello.ProjectZone
 	}
 	if a.state != nil {
 		st.TableSeq = a.state.Seq
@@ -851,7 +851,7 @@ func (a *Agent) Status() Status {
 		st.MeshVersion = a.state.Mesh.Version
 		st.AdmittedVersion = a.state.Self.AdmittedVersion
 		if st.AppsZone == "" {
-			st.AppsZone, st.TenantZone = a.state.Self.AppsZone, a.state.Self.TenantZone
+			st.AppsZone, st.ProjectZone = a.state.Self.AppsZone, a.state.Self.ProjectZone
 		}
 	}
 	if a.id != nil {

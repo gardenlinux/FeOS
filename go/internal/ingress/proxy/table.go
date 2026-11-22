@@ -65,7 +65,7 @@ type table struct {
 	// the routing from a heartbeat.
 	src   *wire.State
 	hosts map[string]*envRoutes
-	// zones are the zones of default hosts, the apps zone and the tenant
+	// zones are the zones of default hosts, the apps zone and the project
 	// zone (ADR 0031), lower case and without a trailing dot; "": none.
 	zones []string
 	// admitted is the version of the group ferun-ingress at which this
@@ -115,7 +115,7 @@ func envService(env, service string) string {
 // (canonical, "": none) and clients in the same order.
 type envRoutes struct {
 	id       string
-	tenant   string
+	project  string
 	routes   []wire.Route
 	prefixes []string
 	hosts    []string
@@ -384,7 +384,7 @@ func (t *table) add(er *envRoutes) {
 }
 
 func buildEnv(e wire.Env) *envRoutes {
-	er := &envRoutes{id: e.ID, tenant: e.Tenant, routes: slices.Clone(e.Routes), services: map[string]*service{},
+	er := &envRoutes{id: e.ID, project: e.Project, routes: slices.Clone(e.Routes), services: map[string]*service{},
 		access: e.Access, provider: e.Provider, signIn: signInURL(e.SignIn)}
 	segments := func(r wire.Route) int {
 		p := strings.Trim(r.Path, "/")
@@ -507,7 +507,7 @@ func (t *table) env(host string) *envRoutes {
 // zonesOf are the zones of default hosts that s names, canonical.
 func zonesOf(s wire.Self) []string {
 	var out []string
-	for _, z := range []string{s.AppsZone, s.TenantZone} {
+	for _, z := range []string{s.AppsZone, s.ProjectZone} {
 		if z = canonicalHost(z); z != "" {
 			out = append(out, z)
 		}
@@ -516,7 +516,7 @@ func zonesOf(s wire.Self) []string {
 }
 
 // underZone reports whether a canonical host lies under a zone of default
-// hosts: the apps zone or the tenant zone.
+// hosts: the apps zone or the project zone.
 func (t *table) underZone(host string) bool {
 	if t == nil {
 		return false

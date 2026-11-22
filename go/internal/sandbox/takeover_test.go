@@ -153,7 +153,7 @@ func TestFencedOutCreateTombstone(t *testing.T) {
 		done <- err
 	}()
 	waitClosed(t, arrived, "the create's call")
-	row, tombstoned, err := h.eng().Delete(bg, testTenant, sb.ID)
+	row, tombstoned, err := h.eng().Delete(bg, testProject, sb.ID)
 	if err != nil || !tombstoned || row.ID != sb.ID {
 		t.Fatalf("delete: %v %v", tombstoned, err)
 	}

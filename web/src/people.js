@@ -2,28 +2,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // People in the UI (ADR 0031): what /auth/me says decides what the UI
-// offers. An operator sees the operator's pages and acts in every tenant
-// as its admin; a person sees their tenants, and in a tenant what their
+// offers. An operator sees the operator's pages and acts in every project
+// as its admin; a person sees their projects, and in a project what their
 // roles allow. The UI offers only that; ferund decides anyway (403
 // role_required, 404 for what one may not see).
 
 import { createContext, useContext, useMemo } from 'react';
 
 // MeContext carries /auth/me to the views, and reload, which asks it
-// again (after a new tenant, an accepted invitation, a tenant left).
+// again (after a new project, an accepted invitation, a project left).
 export const MeContext = createContext({ me: null, reload: async () => {} });
 
 export function useMe() {
   return useContext(MeContext);
 }
 
-// useAccess is the sign-in's access to tenant and what it offers there.
-export function useAccess(tenant) {
+// useAccess is the sign-in's access to project and what it offers there.
+export function useAccess(project) {
   const { me } = useMe();
   return useMemo(() => {
-    const access = tenantAccess(me, tenant);
+    const access = projectAccess(me, project);
     return { ...access, can: can(access) };
-  }, [me, tenant]);
+  }, [me, project]);
 }
 
 // ROLES are the roles of a grant, each including the one before.
@@ -49,70 +49,117 @@ export function isOperator(me) {
   return !!(me && me.admin);
 }
 
-// actsInTenants tells whether the sign-in can act in tenants: a session
+// actsInProjects tells whether the sign-in can act in projects: a session
 // of the provider. A Basic sign-in (--admin-users) is an operator's
-// without a person, which the tenant routes do not take.
-export function actsInTenants(me) {
+// without a person, which the project routes do not take.
+export function actsInProjects(me) {
   return !!me && me.method !== 'basic';
 }
 
-// myTenants are /auth/me's tenants, sorted by name.
-export function myTenants(me) {
-  return [...((me && me.tenants) || [])]
-    .filter((t) => t && t.tenant)
-    .sort((a, b) => a.tenant.localeCompare(b.tenant));
+// myProjects are /auth/me's projects, sorted by name.
+export function myProjects(me) {
+  return [...((me && me.projects) || [])]
+    .filter((t) => t && t.project)
+    .sort((a, b) => a.project.localeCompare(b.project));
 }
 
-// tenantAccess is the sign-in's access to a tenant: whether it may enter
-// at all (member), its role on the tenant ('' with grants on
-// environments alone), its grants on environments, and whether it is an
-// operator's (admin in every tenant, as ferund has it).
-export function tenantAccess(me, name) {
-  const none = { tenant: name, member: false, role: '', environments: [], operator: false };
-  if (!me || !name || !actsInTenants(me)) return none;
-  const t = myTenants(me).find((x) => x.tenant === name);
+// projectAccess is the sign-in's access to a project as /auth/me answers
+// it (§2.3 of ferund's people answers): whether it may enter at all
+// (member), its effective role on the project ('' with roles on
+// environments alone), its environments, each with ferund's effective
+// role, protected, plan and delete, the account it is on, and whether it
+// is an operator's (admin in every project, as ferund answers it). The
+// console computes no role: it reads ferund's (ADR 0060).
+export function projectAccess(me, name) {
+  const none = { project: name, member: false, role: '', environments: [], operator: false, account: null };
+  if (!me || !name || !actsInProjects(me)) return none;
+  const t = myProjects(me).find((x) => x.project === name);
+  const account = (t && t.account) || null;
   if (isOperator(me)) {
-    return { tenant: name, member: true, role: 'admin', environments: (t && t.environments) || [], operator: true };
+    // ferund lists every live project for an operator, as admin; one
+    // made a moment ago is not listed until /auth/me is read again.
+    return { project: name, member: true, role: (t && t.role) || 'admin', environments: (t && t.environments) || [], operator: true, account };
   }
   if (!t) return none;
-  return { tenant: name, member: true, role: t.role || '', environments: t.environments || [], operator: false };
+  return { project: name, member: true, role: t.role || '', environments: t.environments || [], operator: false, account };
 }
 
-// envRole is the role on an environment (its name or ID): the higher of
-// the tenant grant and the grant on it.
+// envEntry is /auth/me's entry of an environment (its name or ID) in an
+// access: {id, name, role, protected, plan, delete}; null when it is not
+// listed, which is no role on it.
+export function envEntry(access, env) {
+  if (!env) return null;
+  return ((access && access.environments) || []).find((e) => e.id === env || e.name === env) || null;
+}
+
+// envRole is the effective role on an environment (its name or ID), as
+// ferund answers it: a protected one reads a project grant of read or
+// write as read (ADR 0060), an integration's call the lower of both
+// sides (ADR 0056). '' when the environment is not listed.
 export function envRole(access, env) {
-  const g = ((access && access.environments) || []).find((e) => e.id === env || e.name === env);
-  return higher((access && access.role) || '', g ? g.role : '');
+  const e = envEntry(access, env);
+  return (e && e.role) || '';
 }
 
-// mayBuild tells whether the deployment builder may change env (its ID
+// envCan is what the sign-in may do on an environment, every flag read
+// from ferund's answer: write and admin from the entry's role (write:
+// revert, tags, secrets, restarts, runs, checks, sandboxes, jobs and
+// route tokens, ADR 0056; admin: public and who it admits, its
+// protection, domains bound), del (delete and rename) from its delete,
+// plan from its plan (a plan against it, the protection aside), clone
+// from the project's role (write; a clone is never protected), and
+// protected; operator: the nodes are theirs to open.
+export function envCan(access, env) {
+  const e = envEntry(access, env);
+  const role = (e && e.role) || '';
+  return {
+    write: atLeast(role, 'write'),
+    admin: atLeast(role, 'admin'),
+    del: !!(e && e.delete),
+    clone: atLeast((access && access.role) || '', 'write'),
+    plan: !!(e && e.plan),
+    protected: !!(e && e.protected),
+    operator: !!(access && access.operator),
+  };
+}
+
+// mayBuild tells whether the deployment builder may deploy to env (its ID
 // or name; '' for a new environment, ADR 0032): a new one needs write on
-// the tenant, a deployment or a secret's value write on the environment
-// (envRole). Below that the builder is a read-only view.
+// the project, a deployment or a secret's value the effective write on
+// the environment.
 export function mayBuild(access, env) {
-  if (!env) return can(access).writeTenant;
-  return atLeast(envRole(access, env), 'write');
+  if (!env) return can(access).writeProject;
+  return envCan(access, env).write;
 }
 
-// can is what a tenant's pages offer for an access, by the routes' needs
+// mayPlan tells whether the builder may plan against env: a new one with
+// write on the project, an existing one where ferund says plan (the role
+// it would have were it not protected, ADR 0060). Below that the builder
+// is a read-only view.
+export function mayPlan(access, env) {
+  if (!env) return can(access).writeProject;
+  return envCan(access, env).plan;
+}
+
+// can is what a project's pages offer for an access, by the routes' needs
 // (go/internal/api: the route table).
 export function can(access) {
   const role = (access && access.role) || '';
   const member = !!(access && access.member);
   return {
-    // A tenant grant read: tools, the whole list of
+    // A project grant read: tools, the whole list of
     // environments. Sandboxes and jobs are their environment's (ADR
     // 0035): a member lists those it may read.
-    readTenant: atLeast(role, 'read'),
+    readProject: atLeast(role, 'read'),
     // write: environments made or deleted.
-    writeTenant: atLeast(role, 'write'),
+    writeProject: atLeast(role, 'write'),
     // admin: members' grants, invitations, tokens, the domains' claims,
     // the access providers (ADR 0054).
-    adminTenant: atLeast(role, 'admin'),
+    adminProject: atLeast(role, 'admin'),
     // Any member sees the environments it may read and the members.
     environments: member,
     members: member,
-    // A person leaves a tenant they hold grants in; an operator is no
+    // A person leaves a project they hold grants in; an operator is no
     // member to leave.
     leave: member && !(access && access.operator),
     // The nodes and the platform's pages are the operators' (admin
@@ -121,30 +168,30 @@ export function can(access) {
   };
 }
 
-// TENANT_NAV are a tenant's pages, in their groups, each with what it
+// PROJECT_NAV are a project's pages, in their groups, each with what it
 // needs of can(). The sidebar shows them while none of an environment's
-// pages is open (env: the environments, tenant: the tenant's own things;
-// manage: one entry, Tenant settings); in an environment it shows the
+// pages is open (env: the environments, project: the project's own things;
+// manage: one entry, Project settings); in an environment it shows the
 // environment with its objects, its sandboxes and its jobs (ADR 0035:
-// everything runs in an environment), and the tenant as one entry. Home
+// everything runs in an environment), and the project as one entry. Home
 // and the environments for every member (each sees those it may read),
 // the tokens for its admin. The access providers (ADR 0054) for every
 // member, since an environment's admin chooses among them; making one
-// is the tenant admin's.
-export const TENANT_NAV = [
+// is the project admin's.
+export const PROJECT_NAV = [
   { view: 'overview', label: 'Home', icon: 'home', path: '', needs: 'members', group: '' },
   { view: 'environments', label: 'Environments', icon: 'layers', path: '/environments', needs: 'environments', group: 'env', views: ['environments', 'newEnvironment'] },
-  { view: 'domains', label: 'Domains', icon: 'globe', path: '/domains', needs: 'members', group: 'tenant' },
-  { view: 'providers', label: 'Access providers', icon: 'lock', path: '/providers', needs: 'members', group: 'tenant', views: ['providers', 'newProvider'] },
+  { view: 'domains', label: 'Domains', icon: 'globe', path: '/domains', needs: 'members', group: 'project' },
+  { view: 'providers', label: 'Access providers', icon: 'lock', path: '/providers', needs: 'members', group: 'project', views: ['providers', 'newProvider'] },
   { view: 'members', label: 'People', icon: 'users', path: '/members', needs: 'members', group: 'manage' },
-  { view: 'tokens', label: 'Tokens', icon: 'key', path: '/tokens', needs: 'adminTenant', group: 'manage' },
+  { view: 'tokens', label: 'Tokens', icon: 'key', path: '/tokens', needs: 'adminProject', group: 'manage' },
   { view: 'usage', label: 'Usage', icon: 'gauge', path: '/usage', needs: 'members', group: 'manage' },
   { view: 'settings', label: 'General', icon: 'settings', path: '/settings', needs: 'members', group: 'manage' },
 ];
 
-// SETTINGS_NAV is the sidebar's one entry for the tenant's settings
+// SETTINGS_NAV is the sidebar's one entry for the project's settings
 // (the group manage): its pages are tabs of one another.
-export const SETTINGS_NAV = { view: 'tenantSettings', label: 'Tenant settings', icon: 'settings' };
+export const SETTINGS_NAV = { view: 'projectSettings', label: 'Project settings', icon: 'settings' };
 
 // PLATFORM_NAV are the operators' pages, the platform's space.
 export const PLATFORM_NAV = [
@@ -152,8 +199,10 @@ export const PLATFORM_NAV = [
   { view: 'ingresses', label: 'Ingresses', icon: 'route', path: '/ingresses', group: 'fleet' },
   { view: 'instances', label: 'Control plane', icon: 'network', path: '/instances', group: 'fleet' },
   { view: 'joinTokens', label: 'Join tokens', icon: 'ticket', path: '/join-tokens', group: 'fleet' },
-  { view: 'tenants', label: 'Tenants', icon: 'building', path: '/tenants', group: 'accounts' },
+  { view: 'accounts', label: 'Accounts', icon: 'building', path: '/accounts', group: 'accounts', views: ['accounts', 'account'] },
+  { view: 'projects', label: 'Projects', icon: 'folder', path: '/projects', group: 'accounts' },
   { view: 'people', label: 'People', icon: 'users', path: '/people', group: 'accounts' },
+  { view: 'integrations', label: 'Integrations', icon: 'plug', path: '/integrations', group: 'accounts' },
 ];
 
 export const PLATFORM_GROUPS = [
@@ -161,41 +210,45 @@ export const PLATFORM_GROUPS = [
   { key: 'accounts', label: 'Accounts' },
 ];
 
-// VIEW_NEEDS are what the tenant's pages outside the sidebar need: a
-// new environment's builder (ADR 0032) a tenant grant write, a new access
-// provider's form (ADR 0054) admin on the tenant, the tools' reference a
-// tenant grant. An HTTP secret is its environment's (ADR 0055): its
+// VIEW_NEEDS are what the project's pages outside the sidebar need: a
+// new environment's builder (ADR 0032) a project grant write, a new access
+// provider's form (ADR 0054) admin on the project, the tools' reference a
+// project grant. An HTTP secret is its environment's (ADR 0055): its
 // pages need the environment's grant, as the environment's other pages do.
-const VIEW_NEEDS = { newEnvironment: 'writeTenant', newProvider: 'adminTenant', tools: 'readTenant' };
+const VIEW_NEEDS = { newEnvironment: 'writeProject', newProvider: 'adminProject', tools: 'readProject' };
 
-// tenantNav is the tenant's pages that access offers.
-export function tenantNav(access) {
+// projectNav is the project's pages that access offers.
+export function projectNav(access) {
   const c = can(access);
-  return TENANT_NAV.filter((n) => c[n.needs]);
+  return PROJECT_NAV.filter((n) => c[n.needs]);
 }
 
-// OPERATOR_VIEWS are the operators' pages.
-export const OPERATOR_VIEWS = new Set(['nodes', 'node', 'joinTokens', 'instances', 'ingresses', 'people']);
+// OPERATOR_VIEWS are the operators' pages: the fleet's, every person and
+// the registered integrations (ADR 0056).
+export const OPERATOR_VIEWS = new Set(['nodes', 'node', 'joinTokens', 'instances', 'ingresses', 'people', 'integrations']);
 
 // viewGate decides a route for a sign-in: '' when the view may show,
 // 'operator' for an operator's page a person opened, 'basic' for a
-// tenant's page under a Basic sign-in, 'member' for a tenant the sign-in
-// is no member of (or that does not exist), 'role' for a tenant's page
-// its role does not offer.
+// project's page under a Basic sign-in, 'member' for a project the sign-in
+// is no member of (or that does not exist), 'role' for a project's page
+// its role does not offer, 'account' for an account whose page the
+// sign-in may not read (ADR 0059: its explicit members' and the
+// operators'; default's the operators').
 export function viewGate(me, route) {
   if (!route) return '';
   if (OPERATOR_VIEWS.has(route.view)) return isOperator(me) ? '' : 'operator';
-  if (!route.tenant) return '';
-  if (!actsInTenants(me)) return 'basic';
-  const access = tenantAccess(me, route.tenant);
+  if (route.view === 'account') return accountAccess(me, route.account).member ? '' : 'account';
+  if (!route.project) return '';
+  if (!actsInProjects(me)) return 'basic';
+  const access = projectAccess(me, route.project);
   if (!access.member) return 'member';
-  const nav = TENANT_NAV.find((n) => n.view === route.view);
+  const nav = PROJECT_NAV.find((n) => n.view === route.view);
   const needs = nav ? nav.needs : VIEW_NEEDS[route.view];
   if (needs && !can(access)[needs]) return 'role';
   return '';
 }
 
-// roleLabel names a tenant's role for a person: "admin", or
+// roleLabel names a project's role for a person: "admin", or
 // "environments" for grants on environments alone.
 export function roleLabel(t) {
   if (!t) return '';
@@ -203,12 +256,12 @@ export function roleLabel(t) {
   return (t.environments || []).length ? 'environments' : '';
 }
 
-// tenantHome is where a tenant opens: its overview, or for a person with
+// projectHome is where a project opens: its overview, or for a person with
 // grants on environments alone the environments.
-export function tenantHome(access) {
+export function projectHome(access) {
   const enc = encodeURIComponent;
-  if (access && access.member && !access.role) return `/tenants/${enc(access.tenant)}/environments`;
-  return `/tenants/${enc((access && access.tenant) || '')}`;
+  if (access && access.member && !access.role) return `/projects/${enc(access.project)}/environments`;
+  return `/projects/${enc((access && access.project) || '')}`;
 }
 
 // grantableRoles are the roles a principal may hand out: never above its
@@ -226,7 +279,7 @@ export function inviteLink(origin, inv) {
   return inv.token ? `${origin}/invite/${encodeURIComponent(inv.token)}` : '';
 }
 
-// QUOTA_ITEMS are the limits of a tenant (ADR 0031, "Quotas per tenant").
+// QUOTA_ITEMS are the limits of a project (ADR 0031, "Quotas per project").
 export const QUOTA_ITEMS = [
   { key: 'sandboxes', label: 'sandboxes' },
   { key: 'environments', label: 'environments' },
@@ -270,7 +323,7 @@ export function personLabel(m) {
 
 // scopeLabel names a grant's or an invitation's scope.
 export function scopeLabel(environment, envs) {
-  if (!environment) return 'the tenant';
+  if (!environment) return 'the project';
   const e = (envs || []).find((x) => x.id === environment || x.name === environment);
   return `environment ${e ? e.name : environment}`;
 }
@@ -281,4 +334,113 @@ export function invitationState(inv, now = Date.now()) {
   const exp = Date.parse(inv.expiresAt || '');
   if (!Number.isNaN(exp) && exp <= now) return 'expired';
   return 'open';
+}
+
+// ---------------------------------------------------------------- accounts --
+
+// myAccounts are /auth/me's accounts (ADR 0059), sorted by name: those
+// the person may put projects on or read; default without a row of its
+// own (explicit false) when it is open to them.
+export function myAccounts(me) {
+  return [...((me && me.accounts) || [])]
+    .filter((a) => a && a.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// accountAccess is the sign-in's access to an account: member when its
+// page is readable (an explicit row, or an operator's), its role
+// (member, admin; '' for none), whether it is closed, and operator.
+// Operators are admins of every account.
+export function accountAccess(me, name) {
+  const a = myAccounts(me).find((x) => x.name === name);
+  if (isOperator(me)) {
+    return { account: name, member: !!name, role: 'admin', explicit: true, closed: !!(a && a.closed), title: (a && a.title) || '', operator: true };
+  }
+  if (!a || !name) return { account: name, member: false, role: '', explicit: false, closed: false, title: '', operator: false };
+  return {
+    account: name, member: !!a.explicit, role: a.role || '', explicit: !!a.explicit, closed: !!a.closed, title: a.title || '', operator: false,
+  };
+}
+
+// accountsToMakeOn are the accounts a person may put a new project on:
+// the open ones of /auth/me, default first.
+export function accountsToMakeOn(me) {
+  const open = myAccounts(me).filter((a) => !a.closed);
+  return [...open.filter((a) => a.name === 'default'), ...open.filter((a) => a.name !== 'default')];
+}
+
+// moveTargets are the accounts a project on current may move to: open
+// ones other than current (ADR 0059: a closed account takes no project),
+// from accounts (/auth/me's for a person, the admin list for an
+// operator).
+export function moveTargets(accounts, current) {
+  return (accounts || []).filter((a) => a && a.name && !a.closed && a.name !== current)
+    .sort((a, b) => (a.name === 'default' ? -1 : b.name === 'default' ? 1 : a.name.localeCompare(b.name)));
+}
+
+// accountLabel names an account: its title and name, or the name alone.
+export function accountLabel(a) {
+  if (!a) return '';
+  return a.title && a.title !== a.name ? `${a.title} (${a.name})` : a.name || '';
+}
+
+// moveText says a move of an account's history (ADR 0059): where from
+// and to, and who moved it.
+export function moveText(m) {
+  if (!m) return '';
+  const by = m.by && m.by.name ? ` by ${m.by.name}` : '';
+  if (!m.from) return `${m.project} begins on ${accountLabel(m.to)}${by}`;
+  return `${m.project} moved from ${accountLabel(m.from)} to ${accountLabel(m.to)}${by}`;
+}
+
+// ------------------------------------------------------------ integrations --
+
+// integrationRoleText says what a role lets an integration do on a scope
+// (ADR 0056), one line per role up to it, and what it never does.
+// scope '' is the project, else an environment.
+export function integrationRoleText(role, scope = '') {
+  const env = !!scope;
+  const lines = [];
+  if (!atLeast(role, 'read')) return lines;
+  lines.push(env
+    ? 'reads the environment: its state, deployments, logs, traces and traffic'
+    : 'reads state, deployments, logs, traces and traffic of every environment');
+  if (atLeast(role, 'write')) {
+    lines.push(env
+      ? 'also deploys, reverts, sets secrets, runs jobs and sandboxes, restarts and mints route tokens in it'
+      : 'also makes, clones and deletes environments; deploys, reverts, sets secrets, runs jobs and sandboxes, restarts and mints route tokens in each; reads a protected one');
+  }
+  if (atLeast(role, 'admin')) {
+    lines.push(env
+      ? 'also publishes it and binds its domains'
+      : 'also claims and deletes domains and sets the access providers');
+  }
+  // On a protected environment (ADR 0060, §2.2): a project grant of
+  // write reads it, alone or for a person, unless a grant on it says
+  // more; admin on the project, or a grant on the environment, changes it
+  // only for a person it names, who may too.
+  if (!env && role === 'write') {
+    lines.push('On a protected environment it reads, alone or for a person, unless it holds a grant on it.');
+  } else if (atLeast(role, 'write')) {
+    lines.push('On a protected environment it reads alone; for a person it names it changes what both of you may.');
+  }
+  lines.push('Never: members, invitations, grants, tokens, the account, making or deleting a project. '
+    + 'A call it makes for a person does what both of you may do.');
+  return lines;
+}
+
+// madeByText names who gave a grant (ferund's madeBy and madeByName): the
+// name when ferund answers one, else the principal's kind.
+export function madeByText(madeBy, madeByName) {
+  if (madeByName) {
+    return String(madeBy || '').startsWith('integration:') && String(madeBy).includes('/person:')
+      ? `${madeByName}, through an integration` : madeByName;
+  }
+  const p = String(madeBy || '');
+  if (!p) return '';
+  if (p.startsWith('basic:')) return `operator ${p.slice(6)}`;
+  if (p.startsWith('token:')) return 'a project token';
+  if (p.startsWith('integration:')) return 'an integration';
+  if (p.startsWith('person:')) return 'a person';
+  return p;
 }

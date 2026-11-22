@@ -15,8 +15,8 @@
 //	SYSTEM_PROMPT_FILE (ConfigMap volume) path of the system prompt; without
 //	                   the file, defaultSystemPrompt
 //	FERUN_URL          ferund's base URL, default http://ferund.ferun.svc.cluster.local:8100
-//	FERUN_TOKEN        (Secret)    a FeRun tenant token, for provisioning
-//	FERUN_ENVIRONMENT  the tenant's environment the sandboxes are in (FeRun
+//	FERUN_TOKEN        (Secret)    a FeRun project token, for provisioning
+//	FERUN_ENVIRONMENT  the project's environment the sandboxes are in (FeRun
 //	                   ADR 0035), by name or ID; required with FERUN_URL
 //	OIDC_ISSUER        the IdP, https://id.fecode.dev/ (auth.go); unset, the
 //	                   chat is open to everybody: for development only
@@ -81,7 +81,7 @@ type config struct {
 	SystemPromptFile string
 	Port             string
 	FeRunURL         string // ferund's base URL; empty disables the sandbox tools
-	FeRunToken       string // FeRun tenant token, for provisioning
+	FeRunToken       string // FeRun project token, for provisioning
 	FeRunEnvironment string // the environment the sandboxes are in
 	OIDCIssuer       string
 	OIDCClientID     string

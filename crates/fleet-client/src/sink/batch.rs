@@ -383,7 +383,7 @@ mod tests {
             log_id: "abc".into(),
         };
         let labels: HashMap<String, String> = [
-            ("ferun.tenant", "acme"),
+            ("ferun.project", "acme"),
             ("ferun.replica", "0"),
             ("ferun.pod", "forged"),
         ]
@@ -398,8 +398,8 @@ mod tests {
                 ("ferun.log_id", "abc"),
                 ("ferun.node", "node-1"),
                 ("ferun.pod", "p1"),
+                ("ferun.project", "acme"),
                 ("ferun.replica", "0"),
-                ("ferun.tenant", "acme"),
             ])
         );
         // A pod's egress records (ADR 0028): their source, too.

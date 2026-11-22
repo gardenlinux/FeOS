@@ -17,44 +17,44 @@ import (
 )
 
 // Domains is the domains service (*domains.Service, ADR 0021): one method
-// per domain route, tenant class. nil: no domain route is registered.
+// per domain route, project class. nil: no domain route is registered.
 type Domains interface {
-	CreateDomain(ctx context.Context, tenant string, req domains.CreateRequest) (domains.Domain, error)
-	ListDomains(ctx context.Context, tenant, env string, labels map[string]string) (domains.List, error)
-	GetDomain(ctx context.Context, tenant, id string) (domains.Domain, error)
-	BindDomain(ctx context.Context, tenant, id, env string) (domains.Domain, error)
-	UnbindDomain(ctx context.Context, tenant, id string) (domains.Domain, error)
-	CheckDomain(ctx context.Context, tenant, id string) (domains.Domain, error)
-	DeleteDomain(ctx context.Context, tenant, id string) error
+	CreateDomain(ctx context.Context, project string, req domains.CreateRequest) (domains.Domain, error)
+	ListDomains(ctx context.Context, project, env string, labels map[string]string) (domains.List, error)
+	GetDomain(ctx context.Context, project, id string) (domains.Domain, error)
+	BindDomain(ctx context.Context, project, id, env string) (domains.Domain, error)
+	UnbindDomain(ctx context.Context, project, id string) (domains.Domain, error)
+	CheckDomain(ctx context.Context, project, id string) (domains.Domain, error)
+	DeleteDomain(ctx context.Context, project, id string) error
 }
 
-// domainRoutes registers the domains' routes, tenant class, each a thin
+// domainRoutes registers the domains' routes, project class, each a thin
 // adapter of a request to one method of Deps.Domains; none without the
 // service.
 //
-// A claim is the tenant's (ADR 0021): claiming, checking and deleting
-// need admin on the tenant; a binding admin on the environments it leaves
-// and joins, which the handler checks; the list and a domain answer what
-// the principal may read: every domain with read on the tenant, else
+// A claim is the project's (ADR 0021): claiming, checking and deleting
+// need admin on the project; a binding admin on the environments it leaves
+// and joins, which the handler checks, deleting a bound domain too; the list and a domain answer what
+// the principal may read: every domain with read on the project, else
 // those bound to an environment it reads.
-func (s *server) domainRoutes(tenant func(n need, pattern string, h apiHandler)) {
+func (s *server) domainRoutes(project func(n need, pattern string, h apiHandler)) {
 	if s.deps.Domains == nil {
 		return
 	}
 	bindings := need{role: admin, scope: scopeHandler}
-	tenant(onTenant(admin), "POST /api/v1/domains", s.createDomain)
-	tenant(member, "GET /api/v1/domains", s.listDomains)
-	tenant(member, "GET /api/v1/domains/{id}", s.getDomain)
-	tenant(onTenant(admin), "DELETE /api/v1/domains/{id}", s.deleteDomain)
-	tenant(bindings, "PUT /api/v1/domains/{id}/environment", s.bindDomain)
-	tenant(bindings, "DELETE /api/v1/domains/{id}/environment", s.unbindDomain)
-	tenant(onTenant(admin), "POST /api/v1/domains/{id}/check", s.checkDomain)
+	project(onProject(admin), "POST /api/v1/domains", s.createDomain)
+	project(member, "GET /api/v1/domains", s.listDomains)
+	project(member, "GET /api/v1/domains/{id}", s.getDomain)
+	project(onProject(admin), "DELETE /api/v1/domains/{id}", s.deleteDomain)
+	project(bindings, "PUT /api/v1/domains/{id}/environment", s.bindDomain)
+	project(bindings, "DELETE /api/v1/domains/{id}/environment", s.unbindDomain)
+	project(onProject(admin), "POST /api/v1/domains/{id}/check", s.checkDomain)
 }
 
 // mayReadDomain reports whether the request's principal may read d.
 func mayReadDomain(r *http.Request, d domains.Domain) bool {
-	t, _ := auth.TenantFrom(r.Context())
-	if t.MayOnTenant(read) {
+	t, _ := auth.ProjectFrom(r.Context())
+	if t.MayOnProject(read) {
 		return true
 	}
 	return d.Environment != nil && mayReadEnv(r, *d.Environment)
@@ -66,7 +66,7 @@ func errNoDomain() error { return apierr.New(http.StatusNotFound, "no such domai
 // visibleDomain reads the domain of the path for a principal that may
 // read it; 404 else.
 func (s *server) visibleDomain(r *http.Request) (domains.Domain, error) {
-	d, err := s.deps.Domains.GetDomain(r.Context(), tenantOf(r), r.PathValue("id"))
+	d, err := s.deps.Domains.GetDomain(r.Context(), projectOf(r), r.PathValue("id"))
 	if err != nil {
 		return domains.Domain{}, err
 	}
@@ -79,8 +79,8 @@ func (s *server) visibleDomain(r *http.Request) (domains.Domain, error) {
 // allowBinding checks admin on the environment a domain is bound to, if
 // any, and on the one it is to be bound to (ref, "" for none).
 func (s *server) allowBinding(r *http.Request, ref string) error {
-	t, _ := auth.TenantFrom(r.Context())
-	if t.MayOnTenant(admin) {
+	t, _ := auth.ProjectFrom(r.Context())
+	if t.EveryEnv(admin) {
 		return nil
 	}
 	d, err := s.visibleDomain(r)
@@ -107,7 +107,7 @@ func (s *server) createDomain(w http.ResponseWriter, r *http.Request) error {
 	if _, err := decodeJSON(r, &req); err != nil {
 		return err
 	}
-	d, err := s.deps.Domains.CreateDomain(r.Context(), tenantOf(r), req)
+	d, err := s.deps.Domains.CreateDomain(r.Context(), projectOf(r), req)
 	if err != nil {
 		return err
 	}
@@ -125,7 +125,7 @@ func (s *server) listDomains(w http.ResponseWriter, r *http.Request) error {
 		}
 		labels[k] = v
 	}
-	list, err := s.deps.Domains.ListDomains(r.Context(), tenantOf(r), r.URL.Query().Get("environment"), labels)
+	list, err := s.deps.Domains.ListDomains(r.Context(), projectOf(r), r.URL.Query().Get("environment"), labels)
 	if err != nil {
 		return err
 	}
@@ -147,8 +147,15 @@ func (s *server) getDomain(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, http.StatusOK, d)
 }
 
+// deleteDomain unbinds the domain on the way, so it needs what unbinding
+// needs besides admin on the project: admin on the environment it is
+// bound to, which an integration that names nobody lacks on a protected
+// one (ADR 0060).
 func (s *server) deleteDomain(w http.ResponseWriter, r *http.Request) error {
-	if err := s.deps.Domains.DeleteDomain(r.Context(), tenantOf(r), r.PathValue("id")); err != nil {
+	if err := s.allowBinding(r, ""); err != nil {
+		return err
+	}
+	if err := s.deps.Domains.DeleteDomain(r.Context(), projectOf(r), r.PathValue("id")); err != nil {
 		return err
 	}
 	return noContent(w, http.StatusNoContent)
@@ -163,7 +170,7 @@ func (s *server) bindDomain(w http.ResponseWriter, r *http.Request) error {
 	if err := s.allowBinding(r, req.Environment); err != nil {
 		return err
 	}
-	d, err := s.deps.Domains.BindDomain(r.Context(), tenantOf(r), r.PathValue("id"), req.Environment)
+	d, err := s.deps.Domains.BindDomain(r.Context(), projectOf(r), r.PathValue("id"), req.Environment)
 	if err != nil {
 		return err
 	}
@@ -174,7 +181,7 @@ func (s *server) unbindDomain(w http.ResponseWriter, r *http.Request) error {
 	if err := s.allowBinding(r, ""); err != nil {
 		return err
 	}
-	d, err := s.deps.Domains.UnbindDomain(r.Context(), tenantOf(r), r.PathValue("id"))
+	d, err := s.deps.Domains.UnbindDomain(r.Context(), projectOf(r), r.PathValue("id"))
 	if err != nil {
 		return err
 	}
@@ -182,7 +189,7 @@ func (s *server) unbindDomain(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *server) checkDomain(w http.ResponseWriter, r *http.Request) error {
-	d, err := s.deps.Domains.CheckDomain(r.Context(), tenantOf(r), r.PathValue("id"))
+	d, err := s.deps.Domains.CheckDomain(r.Context(), projectOf(r), r.PathValue("id"))
 	if err != nil {
 		return err
 	}

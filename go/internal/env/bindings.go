@@ -37,12 +37,12 @@ import (
 
 // HTTPBindings is what the environments need of the bindings
 // (*bindings.Service): whether they are on, the destination rule, and the
-// preflight of a binding resolved, for a tenant (an error while it has too
+// preflight of a binding resolved, for a project (an error while it has too
 // many in flight).
 type HTTPBindings interface {
 	Enabled() bool
 	CheckDestination(ctx context.Context, host string) error
-	PreflightHTTP(ctx context.Context, tenant string, b *fleetv1.HttpBinding, probe *bindings.HTTPProbe) (
+	PreflightHTTP(ctx context.Context, project string, b *fleetv1.HttpBinding, probe *bindings.HTTPProbe) (
 		*bindings.HTTPPreflightResult, error)
 	// OpenCredential is a version of an environment's credential as a pod
 	// receives it, under the binding's name (ADR 0033).
@@ -334,10 +334,10 @@ func (s *Service) sandboxHTTPNames(ctx context.Context, id podid.ID) ([]string, 
 // it, its secrets at their latest versions (what the next deployment would
 // pin), from this instance. 404 no_binding for a binding the latest
 // deployment does not have, 404 bindings_off without HTTP bindings, 429
-// too_many_preflights while the tenant has too many in flight.
-func (s *Service) CheckBinding(ctx context.Context, tenant, envRef, name string, req BindingCheckRequest) (
+// too_many_preflights while the project has too many in flight.
+func (s *Service) CheckBinding(ctx context.Context, project, envRef, name string, req BindingCheckRequest) (
 	*bindings.HTTPPreflightResult, error) {
-	e, err := resolveEnv(ctx, s.st, tenant, envRef, store.NoLock)
+	e, err := resolveEnv(ctx, s.st, project, envRef, store.NoLock)
 	if err != nil {
 		return nil, err
 	}
@@ -370,7 +370,7 @@ func (s *Service) CheckBinding(ctx context.Context, tenant, envRef, name string,
 		return &bindings.HTTPPreflightResult{Addresses: []string{},
 			Error: &bindings.HTTPPreflightError{Code: ce.Code, Message: ce.Msg}}, nil
 	}
-	return s.d.Bindings.PreflightHTTP(ctx, tenant, p, req.Probe)
+	return s.d.Bindings.PreflightHTTP(ctx, project, p, req.Probe)
 }
 
 // resolveCredential is a binding that names a credential of the

@@ -24,10 +24,10 @@ import (
 // Visit is a row of visits.
 type Visit struct {
 	ID, EnvID uuid.UUID
-	// Tenant is the environment's owner; Provider the provider's name
+	// Project is the environment's owner; Provider the provider's name
 	// (model.ProviderFerun for the builtin), ProviderKind its kind.
-	Tenant, Provider, ProviderKind string
-	Host, Subject, Email, Name     string
+	Project, Provider, ProviderKind string
+	Host, Subject, Email, Name      string
 	// Session is the provider's session the visit hangs on; "": none.
 	Session string
 	// PersonID is the person whose grant admits a visit of kind ferun;
@@ -48,14 +48,14 @@ type Visit struct {
 // Open reports whether the visit has not ended.
 func (v Visit) Open() bool { return v.EndedAt.IsZero() }
 
-const visitCols = `id, env_id, tenant, provider, provider_kind, host, subject, email, name, session, person_id,
+const visitCols = `id, env_id, project, provider, provider_kind, host, subject, email, name, session, person_id,
 	created_at, ends_at, asked_at, binding, ended_at, end_reason, now()`
 
 func scanVisit(row pgx.Row) (Visit, error) {
 	var v Visit
 	var person *uuid.UUID
 	var ended *time.Time
-	if err := row.Scan(&v.ID, &v.EnvID, &v.Tenant, &v.Provider, &v.ProviderKind, &v.Host, &v.Subject, &v.Email,
+	if err := row.Scan(&v.ID, &v.EnvID, &v.Project, &v.Provider, &v.ProviderKind, &v.Host, &v.Subject, &v.Email,
 		&v.Name, &v.Session, &person, &v.CreatedAt, &v.EndsAt, &v.AskedAt, &v.Binding, &ended, &v.EndReason,
 		&v.Now); err != nil {
 		return Visit{}, err
@@ -66,10 +66,10 @@ func scanVisit(row pgx.Row) (Visit, error) {
 
 // NewVisit is what an accepted challenge's visit is made of.
 type NewVisit struct {
-	ID, EnvID                            uuid.UUID
-	Tenant, Provider, ProviderKind, Host string
-	Subject, Email, Name, Session        string
-	PersonID                             uuid.UUID
+	ID, EnvID                             uuid.UUID
+	Project, Provider, ProviderKind, Host string
+	Subject, Email, Name, Session         string
+	PersonID                              uuid.UUID
 	// EndsAt is the provider's end; the visit ends at the earlier of it
 	// and now() + MaxVisit (zero: now() + MaxVisit).
 	EndsAt   time.Time
@@ -78,11 +78,11 @@ type NewVisit struct {
 
 // InsertVisit inserts a visit, open, asked now, without a binding.
 func (s *Store) InsertVisit(ctx context.Context, n NewVisit) (Visit, error) {
-	v, err := scanVisit(s.q.QueryRow(ctx, `INSERT INTO visits (id, env_id, tenant, provider, provider_kind, host,
+	v, err := scanVisit(s.q.QueryRow(ctx, `INSERT INTO visits (id, env_id, project, provider, provider_kind, host,
 			subject, email, name, session, person_id, ends_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
 			least(coalesce($12::timestamptz, 'infinity'), now() + $13::interval))
-		RETURNING `+visitCols, n.ID, n.EnvID, n.Tenant, n.Provider, n.ProviderKind, n.Host, n.Subject, n.Email, n.Name,
+		RETURNING `+visitCols, n.ID, n.EnvID, n.Project, n.Provider, n.ProviderKind, n.Host, n.Subject, n.Email, n.Name,
 		n.Session, nullUUID(n.PersonID), nullTime(n.EndsAt), interval(n.MaxVisit)))
 	if err != nil {
 		return Visit{}, insertError("insert visit "+n.ID.String(), err)
@@ -140,21 +140,21 @@ func (s *Store) EndEnvironmentVisits(ctx context.Context, env uuid.UUID, reason 
 	return int(tag.RowsAffected()), nil
 }
 
-// EndProviderVisits ends the open visits of a tenant's provider (of kind
-// tenant or oidc) with reason and returns how many.
-func (s *Store) EndProviderVisits(ctx context.Context, tenant, provider, reason string) (int, error) {
+// EndProviderVisits ends the open visits of a project's provider (of kind
+// project or oidc) with reason and returns how many.
+func (s *Store) EndProviderVisits(ctx context.Context, project, provider, reason string) (int, error) {
 	tag, err := s.q.Exec(ctx, `UPDATE visits SET ended_at = now(), end_reason = $3
-		WHERE tenant = $1 AND provider = $2 AND provider_kind <> 'ferun' AND ended_at IS NULL`, tenant, provider, reason)
+		WHERE project = $1 AND provider = $2 AND provider_kind <> 'ferun' AND ended_at IS NULL`, project, provider, reason)
 	if err != nil {
-		return 0, fmt.Errorf("end the visits of provider %s of %s: %w", provider, tenant, err)
+		return 0, fmt.Errorf("end the visits of provider %s of %s: %w", provider, project, err)
 	}
 	return int(tag.RowsAffected()), nil
 }
 
 // EndSessionVisits ends with reason the open visits of a provider's
-// session and returns how many: of kind ferun, every tenant's (tenant and
-// provider are ignored); of another kind, those of tenant's provider.
-func (s *Store) EndSessionVisits(ctx context.Context, kind, tenant, provider, session, reason string) (int, error) {
+// session and returns how many: of kind ferun, every project's (project and
+// provider are ignored); of another kind, those of project's provider.
+func (s *Store) EndSessionVisits(ctx context.Context, kind, project, provider, session, reason string) (int, error) {
 	if session == "" {
 		return 0, errors.New("end the visits of a session: no session")
 	}
@@ -165,8 +165,8 @@ func (s *Store) EndSessionVisits(ctx context.Context, kind, tenant, provider, se
 			WHERE provider_kind = $1 AND session = $2 AND ended_at IS NULL`
 	} else {
 		sql = `UPDATE visits SET ended_at = now(), end_reason = $3
-			WHERE provider_kind = $1 AND session = $2 AND ended_at IS NULL AND tenant = $4 AND provider = $5`
-		args = append(args, tenant, provider)
+			WHERE provider_kind = $1 AND session = $2 AND ended_at IS NULL AND project = $4 AND provider = $5`
+		args = append(args, project, provider)
 	}
 	tag, err := s.q.Exec(ctx, sql, args...)
 	if err != nil {

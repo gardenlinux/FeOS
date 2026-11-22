@@ -3,14 +3,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  ApiError, api, auth, basicHeader, forgetTenantTokens, getBasic, labelQuery, loginURL, notAvailable, onSignedOut,
-  request, setActiveTenant, setBasic,
+  ApiError, api, auth, basicHeader, forgetOldTokens, getBasic, labelQuery, loginURL, notAvailable, onSignedOut,
+  request, setActiveProject, setBasic,
 } from './api.js';
 import { fixture, requestOf, serveFixtures } from './testing/ferun.js';
 
 // The client's contract with ferund: X-Requested-With: ferun and
 // same-origin credentials on every request, Basic from this tab's
-// sessionStorage, the session in a tenant named by FeRun-Tenant (no
+// sessionStorage, the session in a project named by FeRun-Project (no
 // token in the browser), a 401 ending the sign-in.
 
 class MemoryStorage {
@@ -38,7 +38,7 @@ beforeEach(() => {
     const text = typeof a.body === 'string' ? a.body : JSON.stringify(a.body);
     return { ok: a.status >= 200 && a.status < 300, status: a.status, text: async () => text };
   }));
-  setActiveTenant('');
+  setActiveProject('');
 });
 
 afterEach(() => {
@@ -48,7 +48,7 @@ afterEach(() => {
 describe('request', () => {
   it('sends the CSRF header and same-origin credentials, JSON only with a body', async () => {
     await request('GET', '/api/v1/admin/nodes');
-    await request('POST', '/api/v1/admin/tenants', { body: { name: 'acme' } });
+    await request('POST', '/api/v1/admin/projects', { body: { name: 'acme' } });
     expect(calls[0].init.headers['X-Requested-With']).toBe('ferun');
     expect(calls[0].init.credentials).toBe('same-origin');
     expect(calls[0].init.headers['Content-Type']).toBeUndefined();
@@ -59,8 +59,8 @@ describe('request', () => {
   });
 
   it('throws ferund’s error text with the status', async () => {
-    answer(409, { error: 'tenant acme already exists' });
-    await expect(request('POST', '/x')).rejects.toMatchObject({ message: 'tenant acme already exists', status: 409 });
+    answer(409, { error: 'project acme already exists' });
+    await expect(request('POST', '/x')).rejects.toMatchObject({ message: 'project acme already exists', status: 409 });
     answer(503, 'not available on this instance');
     const e = await request('GET', '/y').catch((x) => x);
     expect(e).toBeInstanceOf(ApiError);
@@ -70,7 +70,7 @@ describe('request', () => {
 
 describe('sign-in', () => {
   it('loginURL carries the path to return to', () => {
-    expect(loginURL('/tenants/acme/sandboxes?x=1')).toBe('/auth/login?next=%2Ftenants%2Facme%2Fsandboxes%3Fx%3D1');
+    expect(loginURL('/projects/acme/sandboxes?x=1')).toBe('/auth/login?next=%2Fprojects%2Facme%2Fsandboxes%3Fx%3D1');
     expect(loginURL('')).toBe('/auth/login?next=%2F');
     expect(loginURL('/', ' Ann@Example.com ')).toBe('/auth/login?next=%2F&login_hint=Ann%40Example.com');
   });
@@ -145,27 +145,27 @@ describe('sign-in', () => {
   });
 });
 
-describe('the tenant, with the session', () => {
-  it('names the tenant in FeRun-Tenant and sends no token', async () => {
-    setActiveTenant('acme');
+describe('the project, with the session', () => {
+  it('names the project in FeRun-Project and sends no token', async () => {
+    setActiveProject('acme');
     answer(200, { sandboxes: [] });
     await api.listSandboxes();
     expect(calls[0].path).toBe('/api/v1/sandboxes');
-    expect(calls[0].init.headers['FeRun-Tenant']).toBe('acme');
+    expect(calls[0].init.headers['FeRun-Project']).toBe('acme');
     expect(calls[0].init.headers.Authorization).toBeUndefined();
     expect(calls[0].init.headers['X-Requested-With']).toBe('ferun');
     expect(calls[0].init.credentials).toBe('same-origin');
   });
 
-  it("reads a sandbox's activity in the tenant, with a source and a page bound (ADR 0031)", async () => {
-    setActiveTenant('acme');
+  it("reads a sandbox's activity in the project, with a source and a page bound (ADR 0031)", async () => {
+    setActiveProject('acme');
     await api.listActivity('0199f0b7-1c2d-7e3f-8a00-00000000e2e0', { source: 'traffic', beforeTsNs: '123' });
     expect(calls[0].path).toBe('/api/v1/sandboxes/0199f0b7-1c2d-7e3f-8a00-00000000e2e0/activity?limit=300&beforeTsNs=123&source=traffic');
-    expect(calls[0].init.headers['FeRun-Tenant']).toBe('acme');
+    expect(calls[0].init.headers['FeRun-Project']).toBe('acme');
   });
 
   it('a create names no sandbox ID: ferund mints it', async () => {
-    setActiveTenant('acme');
+    setActiveProject('acme');
     answer(201, { status: { sandboxId: 'abcdefghjkm' }, token: 't', created: true });
     const res = await api.createSandbox('img:1', 2, 512, { environment: 'kino-dev' });
     expect(calls[0].path).toBe('/api/v1/sandboxes');
@@ -175,7 +175,7 @@ describe('the tenant, with the session', () => {
   });
 
   it('a sandbox is made in an environment with what it reaches and its egress, never attachable (ADR 0035)', async () => {
-    setActiveTenant('acme');
+    setActiveProject('acme');
     answer(201, { status: { sandboxId: 'abcdefghjkm' } });
     await api.createSandbox('', 0, 0, { environment: 'kino-dev', reaches: [{ service: 'api', port: 'http' }, { addon: 'db' }],
       egress: 'none', attachable: true, securityGroups: ['default'] });
@@ -192,22 +192,22 @@ describe('the tenant, with the session', () => {
     expect(calls[2].path).toBe('/api/v1/sandboxes?environment=kino+dev');
   });
 
-  it("reads and writes the tenant's access providers by name, the client secret kept with {\"set\": true} (ADR 0054)", async () => {
-    setActiveTenant('acme');
-    const list = { providers: [{ name: 'ferun', kind: 'ferun', builtIn: true, environments: [] }], kinds: ['tenant'] };
+  it("reads and writes the project's access providers by name, the client secret kept with {\"set\": true} (ADR 0054)", async () => {
+    setActiveProject('acme');
+    const list = { providers: [{ name: 'ferun', kind: 'ferun', builtIn: true, environments: [] }], kinds: ['project'] };
     answer(200, list);
     expect(await api.listProviders()).toEqual(list);
     expect(calls[0].path).toBe('/api/v1/providers');
     expect(calls[0].init.method).toBe('GET');
-    expect(calls[0].init.headers['FeRun-Tenant']).toBe('acme');
+    expect(calls[0].init.headers['FeRun-Project']).toBe('acme');
     await api.getProvider('sso team');
     expect(calls[1].path).toBe('/api/v1/providers/sso%20team');
     expect(calls[1].init.method).toBe('GET');
-    answer(201, { name: 'fecode', kind: 'tenant' });
-    await api.putProvider('fecode', { kind: 'tenant', url: 'https://fecode.dev/api/v1/visit' });
+    answer(201, { name: 'fecode', kind: 'project' });
+    await api.putProvider('fecode', { kind: 'project', url: 'https://fecode.dev/api/v1/visit' });
     expect(calls[2].path).toBe('/api/v1/providers/fecode');
     expect(calls[2].init.method).toBe('PUT');
-    expect(JSON.parse(calls[2].init.body)).toEqual({ kind: 'tenant', url: 'https://fecode.dev/api/v1/visit' });
+    expect(JSON.parse(calls[2].init.body)).toEqual({ kind: 'project', url: 'https://fecode.dev/api/v1/visit' });
     const oidc = { kind: 'oidc', issuer: 'https://login.example.com/', clientId: 'abc', clientSecret: { set: true }, rule: { domains: ['example.com'] } };
     await api.putProvider('sso', oidc);
     expect(JSON.parse(calls[3].init.body)).toEqual(oidc);
@@ -236,7 +236,7 @@ describe('the tenant, with the session', () => {
   });
 
   it('reads the bindings\' use over a window, 24h unless named, and the workloads\' identities', async () => {
-    setActiveTenant('acme');
+    setActiveProject('acme');
     await api.bindingUsage('stage');
     await api.bindingUsage('stage', '1h');
     await api.identities('stage');
@@ -248,7 +248,7 @@ describe('the tenant, with the session', () => {
   });
 
   it('says who a publish admits, and unpublishes with {public: false} alone (ADR 0054)', async () => {
-    setActiveTenant('acme');
+    setActiveProject('acme');
     await api.setPublic('stage', true, { hostLabel: 'stage--kino', access: 'visitors', provider: 'fecode' });
     expect(JSON.parse(calls[0].init.body)).toEqual({ public: true, hostLabel: 'stage--kino', access: 'visitors', provider: 'fecode' });
     expect(calls[0].path).toBe('/api/v1/environments/stage/public');
@@ -262,7 +262,7 @@ describe('the tenant, with the session', () => {
   });
 
   it("lists an environment's jobs, filtered here too", async () => {
-    setActiveTenant('acme');
+    setActiveProject('acme');
     const jobs = [{ id: 'a', environment: { id: 'e1', name: 'kino-dev' } }, { id: 'b', environment: { id: 'e2', name: 'stage' } }];
     answer(200, { jobs });
     expect((await api.listJobs(['kind=report'], 'kino-dev')).jobs.map((j) => j.id)).toEqual(['a']);
@@ -276,93 +276,212 @@ describe('the tenant, with the session', () => {
   });
 
   it('a 401 ends the sign-in', async () => {
-    setActiveTenant('acme');
+    setActiveProject('acme');
     const heard = vi.fn();
     const off = onSignedOut(heard);
-    answer(401, { error: 'tenant bearer required' });
-    await expect(api.listSandboxes()).rejects.toThrow('tenant bearer required');
+    answer(401, { error: 'project bearer required' });
+    await expect(api.listSandboxes()).rejects.toThrow('project bearer required');
     expect(heard).toHaveBeenCalled();
     off();
   });
 
-  it('a tenant call without a tenant fails before the network', async () => {
-    setActiveTenant('');
-    await expect(api.listSandboxes()).rejects.toThrow('no tenant chosen');
+  it('a project call without a project fails before the network', async () => {
+    setActiveProject('');
+    await expect(api.listSandboxes()).rejects.toThrow('no project chosen');
     expect(calls).toHaveLength(0);
   });
 
   it('says a role_required refusal in the UI\'s words, and keeps the body', async () => {
-    setActiveTenant('acme');
-    answer(403, { error: 'this needs the role write on the tenant', code: 'role_required', role: 'write', scope: 'tenant' });
+    setActiveProject('acme');
+    answer(403, { error: 'this needs the role write on the project', code: 'role_required', role: 'write', scope: 'project' });
     const e = await api.pauseSandbox('abcdefghjkm').then(() => null, (x) => x);
-    expect(e).toMatchObject({ status: 403, message: 'Your role does not allow this: it needs write on this tenant.' });
+    expect(e).toMatchObject({ status: 403, message: 'Your role does not allow this: it needs write on this project.' });
     expect(e.body).toMatchObject({ code: 'role_required', role: 'write' });
     answer(403, { error: 'x', code: 'role_required', role: 'admin', scope: 'environment' });
     await expect(api.getEnvironment('e')).rejects.toThrow('it needs admin on this environment.');
   });
 
   it('tells a ferund without the route', () => {
-    expect(notAvailable(new ApiError('no such route: GET /api/v1/tenant/members', 404))).toBe(true);
-    expect(notAvailable(new ApiError('no such tenant', 404))).toBe(false);
+    expect(notAvailable(new ApiError('no such route: GET /api/v1/project/members', 404))).toBe(true);
+    expect(notAvailable(new ApiError('no such project', 404))).toBe(false);
     expect(notAvailable(new ApiError('no such route: x', 403))).toBe(false);
     expect(notAvailable(null)).toBe(false);
   });
 
-  it('forgets the tenant tokens an earlier UI kept', () => {
-    localStorage.setItem('ferun-tenants', JSON.stringify({ acme: 'tok-1' }));
+  it('forgets the project tokens an earlier UI kept', () => {
+    localStorage.setItem('ferun-tenants', JSON.stringify({ acme: 'tok-1' })); // KEEP-TENANT: the key an earlier UI wrote
     localStorage.setItem('ferun-theme', 'light');
-    forgetTenantTokens();
-    expect(localStorage.getItem('ferun-tenants')).toBeNull();
+    forgetOldTokens();
+    expect(localStorage.getItem('ferun-tenants')).toBeNull(); // KEEP-TENANT: the key an earlier UI wrote
     expect(localStorage.getItem('ferun-theme')).toBe('light');
   });
 
   it('the people\'s routes', async () => {
-    setActiveTenant('acme');
-    await api.createOwnTenant('mine');
+    setActiveProject('acme');
+    await api.createOwnProject('mine');
     await api.listMembers();
     await api.putGrant('p-1', { role: 'write' });
     await api.putGrant('p-1', { role: 'read', environment: 'env-1' });
     await api.deleteGrant('p-1');
     await api.deleteGrant('p-1', 'env-1');
-    await api.leaveTenant();
+    await api.leaveProject();
     await api.createInvitation({ role: 'read' });
     await api.createInvitation({ role: 'write', environment: 'env-1' });
     await api.revokeInvitation('i/1');
     await api.acceptInvitation('sec ret');
-    await api.mintTokenOfTenant({ label: 'ci', role: 'read', environment: 'env-1' });
-    await api.revokeTokenOfTenant('ab');
+    await api.mintTokenOfProject({ label: 'ci', role: 'read', environment: 'env-1' });
+    await api.revokeTokenOfProject('ab');
     await api.getQuota();
     expect(calls.map((c) => [c.init.method, c.path, c.init.body ? JSON.parse(c.init.body) : null])).toEqual([
-      ['POST', '/api/v1/tenants', { name: 'mine' }],
-      ['GET', '/api/v1/tenant/members', null],
-      ['PUT', '/api/v1/tenant/members/p-1/grants', { role: 'write' }],
-      ['PUT', '/api/v1/tenant/members/p-1/grants', { role: 'read', environment: 'env-1' }],
-      ['DELETE', '/api/v1/tenant/members/p-1/grants', null],
-      ['DELETE', '/api/v1/tenant/members/p-1/grants?environment=env-1', null],
-      ['POST', '/api/v1/tenant/leave', null],
-      ['POST', '/api/v1/tenant/invitations', { role: 'read' }],
-      ['POST', '/api/v1/tenant/invitations', { role: 'write', environment: 'env-1' }],
-      ['DELETE', '/api/v1/tenant/invitations/i%2F1', null],
+      ['POST', '/api/v1/projects', { name: 'mine' }],
+      ['GET', '/api/v1/project/members', null],
+      ['PUT', '/api/v1/project/members/p-1/grants', { role: 'write' }],
+      ['PUT', '/api/v1/project/members/p-1/grants', { role: 'read', environment: 'env-1' }],
+      ['DELETE', '/api/v1/project/members/p-1/grants', null],
+      ['DELETE', '/api/v1/project/members/p-1/grants?environment=env-1', null],
+      ['POST', '/api/v1/project/leave', null],
+      ['POST', '/api/v1/project/invitations', { role: 'read' }],
+      ['POST', '/api/v1/project/invitations', { role: 'write', environment: 'env-1' }],
+      ['DELETE', '/api/v1/project/invitations/i%2F1', null],
       ['POST', '/api/v1/invitations/sec%20ret/accept', null],
-      ['POST', '/api/v1/tenant/tokens', { label: 'ci', role: 'read', environment: 'env-1' }],
-      ['DELETE', '/api/v1/tenant/tokens/ab', null],
-      ['GET', '/api/v1/tenant/quota', null],
+      ['POST', '/api/v1/project/tokens', { label: 'ci', role: 'read', environment: 'env-1' }],
+      ['DELETE', '/api/v1/project/tokens/ab', null],
+      ['GET', '/api/v1/project/quota', null],
     ]);
-    // Making a tenant and accepting an invitation name no tenant.
-    expect(calls[0].init.headers['FeRun-Tenant']).toBeUndefined();
-    expect(calls[10].init.headers['FeRun-Tenant']).toBeUndefined();
-    expect(calls[1].init.headers['FeRun-Tenant']).toBe('acme');
+    // Making a project and accepting an invitation name no project.
+    expect(calls[0].init.headers['FeRun-Project']).toBeUndefined();
+    expect(calls[10].init.headers['FeRun-Project']).toBeUndefined();
+    expect(calls[1].init.headers['FeRun-Project']).toBe('acme');
   });
 
   it('admin token routes', async () => {
     answer(201, { token: 't', hashPrefix: 'abcd1234', createdAt: '2026-10-16T12:00:00Z' });
-    await api.createTenantToken('acme', 'fecode');
+    await api.createProjectToken('acme', 'fecode');
     answer(200, { revoked: true });
-    await api.revokeTenantToken('acme', 'ab/cd');
-    expect(calls[0].path).toBe('/api/v1/admin/tenants/acme/tokens');
+    await api.revokeProjectToken('acme', 'ab/cd');
+    expect(calls[0].path).toBe('/api/v1/admin/projects/acme/tokens');
     expect(JSON.parse(calls[0].init.body)).toEqual({ label: 'fecode' });
-    expect(calls[1].path).toBe('/api/v1/admin/tenants/acme/tokens/ab%2Fcd');
+    expect(calls[1].path).toBe('/api/v1/admin/projects/acme/tokens/ab%2Fcd');
     expect(calls[1].init.method).toBe('DELETE');
+  });
+});
+
+describe('integrations, protection and accounts (FeOS ADRs 0056, 0059, 0060)', () => {
+  const sent = () => calls.map((c) => [c.init.method, c.path, c.init.body ? JSON.parse(c.init.body) : null]);
+
+  it('the project\'s routes, with the session in the project', async () => {
+    setActiveProject('kino');
+    await api.putIntegrationGrant('fecode', { role: 'write' });
+    await api.putIntegrationGrant('fecode', { role: 'admin', environment: 'env-1' });
+    await api.deleteIntegrationGrant('fecode');
+    await api.deleteIntegrationGrant('fecode', 'env-1');
+    await api.putTokenGrant('3f9a', { role: 'write', environment: 'env-1' });
+    await api.deleteTokenGrant('3f9a', 'env-1');
+    await api.setProtected('prod', true);
+    await api.setProtected('prod', false);
+    await api.envPrincipals('prod');
+    await api.getProjectAccount();
+    await api.moveProject('cc-4711');
+    await api.mintRouteToken('prod');
+    expect(sent()).toEqual([
+      ['PUT', '/api/v1/project/integrations/fecode/grants', { role: 'write' }],
+      ['PUT', '/api/v1/project/integrations/fecode/grants', { role: 'admin', environment: 'env-1' }],
+      ['DELETE', '/api/v1/project/integrations/fecode/grants', null],
+      ['DELETE', '/api/v1/project/integrations/fecode/grants?environment=env-1', null],
+      ['PUT', '/api/v1/project/tokens/3f9a/grants', { role: 'write', environment: 'env-1' }],
+      ['DELETE', '/api/v1/project/tokens/3f9a/grants?environment=env-1', null],
+      ['PUT', '/api/v1/environments/prod/protected', { protected: true }],
+      ['PUT', '/api/v1/environments/prod/protected', { protected: false }],
+      ['GET', '/api/v1/environments/prod/principals', null],
+      ['GET', '/api/v1/project/account', null],
+      ['POST', '/api/v1/project/move', { account: 'cc-4711' }],
+      ['POST', '/api/v1/environments/prod/route-tokens', null],
+    ]);
+    for (const c of calls) expect(c.init.headers['FeRun-Project']).toBe('kino');
+  });
+
+  it('the person\'s routes name no project', async () => {
+    setActiveProject('kino');
+    await api.createOwnProject('mine', 'cc-4711');
+    await api.createOwnProject('other');
+    await api.listIntegrations();
+    await api.listAccounts();
+    await api.getAccount('cc-4711');
+    await api.putAccountMember('cc-4711', 'p-1', 'admin');
+    await api.deleteAccountMember('cc-4711', 'p-1');
+    await api.listAccountInvitations('cc-4711');
+    await api.createAccountInvitation('cc-4711', { role: 'member' });
+    await api.revokeAccountInvitation('cc-4711', 'i-1');
+    await api.getInvitation('t');
+    expect(sent()).toEqual([
+      ['POST', '/api/v1/projects', { name: 'mine', account: 'cc-4711' }],
+      ['POST', '/api/v1/projects', { name: 'other' }],
+      ['GET', '/api/v1/integrations', null],
+      ['GET', '/api/v1/accounts', null],
+      ['GET', '/api/v1/accounts/cc-4711', null],
+      ['PUT', '/api/v1/accounts/cc-4711/members/p-1', { role: 'admin' }],
+      ['DELETE', '/api/v1/accounts/cc-4711/members/p-1', null],
+      ['GET', '/api/v1/accounts/cc-4711/invitations', null],
+      ['POST', '/api/v1/accounts/cc-4711/invitations', { role: 'member' }],
+      ['DELETE', '/api/v1/accounts/cc-4711/invitations/i-1', null],
+      ['GET', '/api/v1/invitations/t', null],
+    ]);
+    for (const c of calls) expect(c.init.headers['FeRun-Project']).toBeUndefined();
+  });
+
+  it('the operators\' routes', async () => {
+    await api.listProjects();
+    await api.listProjects('cc-4711');
+    await api.createProject('p1', 'cc-4711');
+    await api.createProject('p2');
+    await api.adminMoveProject('p1', 'default');
+    await api.adminListIntegrations();
+    await api.adminPutIntegration('fecode', { title: 'FeCode', url: 'https://fecode.dev', subject: 'dd32' });
+    await api.adminPutIntegration('x', { title: 'X', url: '', issuer: 'https://id.example/', subject: 's' });
+    await api.adminDisableIntegration('fecode');
+    await api.adminEnableIntegration('fecode');
+    await api.adminDeleteIntegration('fecode');
+    await api.adminListAccounts();
+    await api.adminCreateAccount({ name: 'cc-4711', title: 'Team X', reference: 'CC 4711' });
+    await api.adminCreateAccount({ name: 'bare' });
+    await api.adminGetAccount('cc-4711');
+    await api.adminPatchAccount('cc-4711', { closed: true });
+    await api.adminDeleteAccount('bare');
+    await api.adminPutAccountMember('cc-4711', 'p-1', 'member');
+    await api.adminDeleteAccountMember('cc-4711', 'p-1');
+    expect(sent()).toEqual([
+      ['GET', '/api/v1/admin/projects', null],
+      ['GET', '/api/v1/admin/projects?account=cc-4711', null],
+      ['POST', '/api/v1/admin/projects', { name: 'p1', account: 'cc-4711' }],
+      ['POST', '/api/v1/admin/projects', { name: 'p2' }],
+      ['POST', '/api/v1/admin/projects/p1/move', { account: 'default' }],
+      ['GET', '/api/v1/admin/integrations', null],
+      ['PUT', '/api/v1/admin/integrations/fecode', { title: 'FeCode', url: 'https://fecode.dev', subject: 'dd32' }],
+      ['PUT', '/api/v1/admin/integrations/x', { title: 'X', url: '', issuer: 'https://id.example/', subject: 's' }],
+      ['POST', '/api/v1/admin/integrations/fecode/disable', null],
+      ['POST', '/api/v1/admin/integrations/fecode/enable', null],
+      ['DELETE', '/api/v1/admin/integrations/fecode', null],
+      ['GET', '/api/v1/admin/accounts', null],
+      ['POST', '/api/v1/admin/accounts', { name: 'cc-4711', title: 'Team X', reference: 'CC 4711' }],
+      ['POST', '/api/v1/admin/accounts', { name: 'bare' }],
+      ['GET', '/api/v1/admin/accounts/cc-4711', null],
+      ['PATCH', '/api/v1/admin/accounts/cc-4711', { closed: true }],
+      ['DELETE', '/api/v1/admin/accounts/bare', null],
+      ['PUT', '/api/v1/admin/accounts/cc-4711/members/p-1', { role: 'member' }],
+      ['DELETE', '/api/v1/admin/accounts/cc-4711/members/p-1', null],
+    ]);
+  });
+
+  it('never names a person: FeRun-Person is an integration\'s header (ADR 0056)', async () => {
+    setActiveProject('kino');
+    await api.listMembers();
+    await auth.me();
+    await api.createOwnProject('x');
+    await api.listProjects();
+    await api.setProtected('prod', true);
+    for (const c of calls) {
+      expect(Object.keys(c.init.headers).map((h) => h.toLowerCase())).not.toContain('ferun-person');
+    }
   });
 });
 
@@ -393,7 +512,7 @@ describe('the admin routes', () => {
   });
 });
 
-// The environments' routes, read as the tenant, answered with ferund's
+// The environments' routes, read as the project, answered with ferund's
 // fixtures: each request is the fixture's (method, path and query), each
 // answer comes back as ferund sends it, each refusal as an ApiError with
 // ferund's text and status.
@@ -402,7 +521,7 @@ describe('the environments routes', () => {
   const PREVIEW_ID = '0193c4d0-5e6f-7a01-8b2c-3d4e5f6a7b03';
 
   beforeEach(() => {
-    setActiveTenant('fecode');
+    setActiveProject('fecode');
   });
 
   // ask makes the call against the fixture and checks the request; the
@@ -422,7 +541,7 @@ describe('the environments routes', () => {
     const got = requestOf(calls[0]);
     if (exactQuery) expect(got).toEqual({ method: fx.method, path: fx.path, query: fx.query });
     else expect({ method: got.method, path: got.path }).toEqual({ method: fx.method, path: fx.path });
-    expect(calls[0].init.headers['FeRun-Tenant']).toBe('fecode');
+    expect(calls[0].init.headers['FeRun-Project']).toBe('fecode');
     const body = calls[0].init.body === undefined ? undefined : JSON.parse(calls[0].init.body);
     return { fx, out, err, body };
   }

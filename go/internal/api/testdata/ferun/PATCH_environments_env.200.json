@@ -21,6 +21,7 @@
     "hosts": [],
     "access": "anyone",
     "provider": "",
+    "protected": false,
     "rollout": null,
     "objects": [],
     "routes": [],

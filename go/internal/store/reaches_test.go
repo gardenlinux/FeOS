@@ -22,8 +22,8 @@ import (
 // and read back; the environment's reachers and what holds it.
 func TestOwnSandboxAndReaches(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
-	mkTenant(t, s, "other")
+	mkProject(t, s, "acme")
+	mkProject(t, s, "other")
 	dev := mkEnv(t, s, "acme", "dev")
 	preview := mkEnv(t, s, "acme", "preview")
 	sb := mkSandboxIn(t, s, "acme", dev.ID, podid.Mint())
@@ -33,9 +33,9 @@ func TestOwnSandboxAndReaches(t *testing.T) {
 		t.Fatalf("in dev %+v %v", got, err)
 	}
 	if _, err := s.GetOwnSandbox(bg, "other", sb.ID); !errors.Is(err, store.ErrNoRow) {
-		t.Fatalf("another tenant's %v", err)
+		t.Fatalf("another project's %v", err)
 	}
-	// An instance row is not a sandbox of the tenant's.
+	// An instance row is not a sandbox of the project's.
 	inst := mkInstance(t, s, dev)
 	if _, err := s.GetOwnSandbox(bg, "acme", inst.ID); !errors.Is(err, store.ErrNoRow) {
 		t.Fatalf("instance %v", err)
@@ -90,12 +90,12 @@ func TestOwnSandboxAndReaches(t *testing.T) {
 		row, err := tx.CreateMintedSandbox(bg, func(id podid.ID) store.NewSandbox {
 			return store.NewSandbox{ID: id, Owner: "acme", Image: "img", VCPUs: 1, MemoryMiB: 512, EnvironmentID: dev.ID,
 				Reaches: spec.Reaches{All: true}, Egress: none, PodTemplate: &model.PodTemplate{}, IdleAfterS: &idle,
-				TenantJob: true}
+				ProjectJob: true}
 		})
 		if err != nil {
 			return err
 		}
-		r, err := tx.InsertTenantJob(bg, store.TenantJob{ID: row.ID, Owner: "acme", EnvID: dev.ID,
+		r, err := tx.InsertProjectJob(bg, store.ProjectJob{ID: row.ID, Owner: "acme", EnvID: dev.ID,
 			Reaches: spec.Reaches{All: true}, Egress: none, RequestHash: "h", Image: "img", ImageRef: "img"}, nil,
 			time.Minute)
 		if err == nil && (!r.Reaches.All || r.Egress.EffectiveMode() != spec.EgressNone) {
@@ -113,10 +113,10 @@ func TestOwnSandboxAndReaches(t *testing.T) {
 	for _, r := range reachers {
 		by[r.ID] = r
 	}
-	if r := by[sb.ID]; !r.Reaches.All || r.TenantJob || r.Egress != nil {
+	if r := by[sb.ID]; !r.Reaches.All || r.ProjectJob || r.Egress != nil {
 		t.Fatalf("sandbox %+v", r)
 	}
-	if r := by[job]; !r.TenantJob || !r.Reaches.All || r.Egress.EffectiveMode() != spec.EgressNone {
+	if r := by[job]; !r.ProjectJob || !r.Reaches.All || r.Egress.EffectiveMode() != spec.EgressNone {
 		t.Fatalf("job %+v", r)
 	}
 	if r, ok := by[made.ID]; !ok || r.Egress.EffectiveMode() != spec.EgressRestricted {
@@ -159,7 +159,7 @@ func TestOwnSandboxAndReaches(t *testing.T) {
 // the next create or restore; its gen stays, a stale read is refused.
 func TestDropLegacyGroups(t *testing.T) {
 	s, _ := newStore(t)
-	mkTenant(t, s, "acme")
+	mkProject(t, s, "acme")
 	dev := mkEnv(t, s, "acme", "dev")
 	sb := mkSandboxIn(t, s, "acme", dev.ID, podid.Mint())
 	legacy := "sg-" + uuid.NewString()

@@ -67,14 +67,14 @@ func TestAttachedTLSBindings(t *testing.T) {
 		return 0, false, nil
 	})
 	sbID = podid.Mint()
-	sb := h.sandboxAs(testTenant, sbID)
+	sb := h.sandboxAs(testProject, sbID)
 	if err := os.MkdirAll(filepath.Join(n1.PodDir(sb.ID), "app"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if got := h.pod("n1", sb.ID).GetSpec().GetTlsBindings(); len(got) != 0 {
 		t.Fatalf("the sandbox's pod has TLS bindings before any service: %v", got)
 	}
-	env := h.envOf(testTenant, "dev")
+	env := h.envOf(testProject, "dev")
 
 	r1 := h.apply(env.ID, attachedTLSSpec(sb.ID, false))
 	h.waitDeployment(env.ID, r1, model.DeploymentDeployed, 90*time.Second)
@@ -106,9 +106,16 @@ func TestAttachedTLSBindings(t *testing.T) {
 	}
 	// The addon admits the sandbox's workload as svc.
 	own := model.SandboxWorkloadGroupID(sb.ID.String())
+	// The valkey addon's tls step may run after postgres': the last of
+	// postgres' own is the one that counts.
 	eventually(t, 20*time.Second, "the sandbox's grant", func() bool {
-		s := execs.step("tls")
-		return len(s) > 0 && strings.Contains(s[len(s)-1].Env["FERUN_PG_IDENT"], `OU=`+own+`$"  svc`)
+		ident := ""
+		for _, c := range execs.step("tls") {
+			if v, ok := c.Env["FERUN_PG_IDENT"]; ok {
+				ident = v
+			}
+		}
+		return strings.Contains(ident, `OU=`+own+`$"  svc`)
 	})
 
 	// A second attached service in the sandbox: valkey's name sorts first,

@@ -49,7 +49,7 @@ application printed.
   delete soft-deletes every version, so that the pods of older
   deployments still resolve it; a new deployment, a revert among them,
   cannot pin a deleted secret.
-- **System secrets** carry the prefix `addon.`, which a tenant's secret
+- **System secrets** carry the prefix `addon.`, which a project's secret
   cannot: an addon's credentials are generated once at its first
   deployment, version one, and never changed (ADR 0040).
 - The log tails `ferund` keeps, of incidents and of job runs, are
@@ -88,7 +88,7 @@ application printed.
   answer read from the running pod as it is; the tails `ferund` keeps
   are redacted, as far as matching the values and their URL-escaped form
   reaches.
-- A tenant's job's secrets are sealed in its own record and dropped when
+- A project's job's secrets are sealed in its own record and dropped when
   it ends (ADR 0041).
 
 ## History

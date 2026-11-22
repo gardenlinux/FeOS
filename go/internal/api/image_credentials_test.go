@@ -29,7 +29,7 @@ func TestSandboxImageCredentials(t *testing.T) {
 	}
 	e := newEnv(t, envOptions{sealer: sl})
 	alice := model.RegistryCredentials{Username: "alice", Password: "s3cret"}
-	w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.tenantToken),
+	w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.projectToken),
 		map[string]any{"environment": "box", "image": "ghcr.io/acme/app:1", "imageCredentials": alice})
 	expect(t, w, http.StatusCreated, "")
 	if bytes.Contains(w.Body.Bytes(), []byte("s3cret")) || bytes.Contains(w.Body.Bytes(), []byte("imageCredentials")) {
@@ -72,34 +72,34 @@ func TestSandboxImageCredentials(t *testing.T) {
 	if got := opened(); got != alice {
 		t.Fatalf("kept %+v", got)
 	}
-	w = e.do("GET", "/api/v1/sandboxes/"+id.String(), bearerOf(e.tenantToken), nil)
+	w = e.do("GET", "/api/v1/sandboxes/"+id.String(), bearerOf(e.projectToken), nil)
 	expect(t, w, http.StatusOK, "")
 	if bytes.Contains(w.Body.Bytes(), []byte("s3cret")) || bytes.Contains(w.Body.Bytes(), []byte("alice")) {
 		t.Fatalf("a read shows the credentials: %s", w.Body)
 	}
 
 	bob := model.RegistryCredentials{Username: "bob", Password: "rotated"}
-	expect(t, e.do("PUT", "/api/v1/sandboxes/"+id.String()+"/image-credentials", bearerOf(e.tenantToken), bob),
+	expect(t, e.do("PUT", "/api/v1/sandboxes/"+id.String()+"/image-credentials", bearerOf(e.projectToken), bob),
 		http.StatusNoContent, "")
 	if got := opened(); got != bob {
 		t.Fatalf("after the PUT: %+v", got)
 	}
-	expect(t, e.do("PUT", "/api/v1/sandboxes/"+id.String()+"/image-credentials", bearerOf(e.tenantToken),
+	expect(t, e.do("PUT", "/api/v1/sandboxes/"+id.String()+"/image-credentials", bearerOf(e.projectToken),
 		map[string]string{"username": "bob"}), http.StatusBadRequest, errBody("imageCredentials: image credentials need a username and a password"))
-	expect(t, e.do("DELETE", "/api/v1/sandboxes/"+id.String()+"/image-credentials", bearerOf(e.tenantToken), nil),
+	expect(t, e.do("DELETE", "/api/v1/sandboxes/"+id.String()+"/image-credentials", bearerOf(e.projectToken), nil),
 		http.StatusNoContent, "")
 	if got := opened(); !got.Anonymous() {
 		t.Fatalf("after the DELETE: %+v", got)
 	}
-	expect(t, e.do("POST", "/api/v1/sandboxes", bearerOf(e.tenantToken),
+	expect(t, e.do("POST", "/api/v1/sandboxes", bearerOf(e.projectToken),
 		map[string]any{"environment": "box", "imageCredentials": map[string]string{"password": "x"}}), http.StatusBadRequest, errBody("imageCredentials: image credentials need a username and a password"))
 
 	// Without a key, credentials are refused, and a create without them
 	// works as before.
 	plain := newEnv(t, envOptions{})
-	expect(t, plain.do("POST", "/api/v1/sandboxes", bearerOf(plain.tenantToken),
+	expect(t, plain.do("POST", "/api/v1/sandboxes", bearerOf(plain.projectToken),
 		map[string]any{"environment": "box", "imageCredentials": alice}), http.StatusServiceUnavailable,
 		errBody("image credentials need --secret-key-file on the control plane"))
-	expect(t, plain.do("POST", "/api/v1/sandboxes", bearerOf(plain.tenantToken), map[string]any{"environment": "box"}),
+	expect(t, plain.do("POST", "/api/v1/sandboxes", bearerOf(plain.projectToken), map[string]any{"environment": "box"}),
 		http.StatusCreated, "")
 }

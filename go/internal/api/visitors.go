@@ -19,7 +19,7 @@ import (
 )
 
 // ferund's routes of visitors (ADR 0054, docs/architecture/control-plane.md,
-// "Visitors"): a tenant's access providers (tenant class), the challenges
+// "Visitors"): a project's access providers (project class), the challenges
 // a provider opens, accepts and rejects and the visits it reads (provider
 // class), and ferun-auth's own routes (auth class). Each handler decodes
 // its body into the visits service's types, says who calls (a
@@ -34,7 +34,7 @@ const maxVisitorBody = 64 << 10
 // visitorRoutes registers the routes of visitors, only with the visits
 // service: without it (ferund without --secret-key-file) they fall to the
 // /api/ catch-all, 404 no such route.
-func (s *server) visitorRoutes(tenant func(n need, pattern string, h apiHandler),
+func (s *server) visitorRoutes(project func(n need, pattern string, h apiHandler),
 	add func(c class, pattern string, h http.Handler), public func(pattern string, h http.Handler)) {
 	v := s.deps.Visitors
 	if vs, ok := v.(*visits.Service); v == nil || (ok && vs == nil) {
@@ -43,13 +43,13 @@ func (s *server) visitorRoutes(tenant func(n need, pattern string, h apiHandler)
 	provider := func(pattern string, h apiHandler) { add(classProvider, pattern, s.provider(h)) }
 	authOnly := func(pattern string, h apiHandler) { add(classAuth, pattern, s.authOnly(h)) }
 
-	// The tenant's providers: every principal of the tenant reads them
+	// The project's providers: every principal of the project reads them
 	// (an environment's admin chooses among them), its admins make,
 	// change and delete them.
-	tenant(member, "GET /api/v1/providers", s.listProviders)
-	tenant(member, "GET /api/v1/providers/{provider}", s.getProvider)
-	tenant(onTenant(admin), "PUT /api/v1/providers/{provider}", s.putProvider)
-	tenant(onTenant(admin), "DELETE /api/v1/providers/{provider}", s.deleteProvider)
+	project(member, "GET /api/v1/providers", s.listProviders)
+	project(member, "GET /api/v1/providers/{provider}", s.getProvider)
+	project(onProject(admin), "PUT /api/v1/providers/{provider}", s.putProvider)
+	project(onProject(admin), "DELETE /api/v1/providers/{provider}", s.deleteProvider)
 
 	// A provider's side of a sign-in, and its read of a visit.
 	provider("POST /api/v1/challenges/open", s.openChallenge)
@@ -57,13 +57,13 @@ func (s *server) visitorRoutes(tenant func(n need, pattern string, h apiHandler)
 	provider("POST /api/v1/challenges/reject", s.rejectChallenge)
 	provider("GET /api/v1/visits/{visit}", s.getVisit)
 
-	// The key ferund signs its questions to the providers of kind tenant
+	// The key ferund signs its questions to the providers of kind project
 	// with, for them to verify: public, as the ingress's /.ferun/keys.
 	public("GET /api/v1/visit-keys", s.wrap(s.visitKeys))
 
 	// ferun-auth's own: an issuer's back-channel logout.
 	authOnly("POST /api/v1/visits/end", s.endVisits)
-	authOnly("GET /api/v1/oidc-providers/{tenant}/{provider}", s.oidcProvider)
+	authOnly("GET /api/v1/oidc-providers/{project}/{provider}", s.oidcProvider)
 }
 
 // decodeVisitorBody reads a visitors route's body (at most
@@ -82,25 +82,25 @@ func decodeVisitorBody(r *http.Request, v any) error {
 }
 
 // callerOf is who calls a provider route: ferun-auth (its service
-// token), or a tenant's principal, which answers only where it is admin
+// token), or a project's principal, which answers only where it is admin
 // on the environment.
 func callerOf(r *http.Request) visits.Caller {
 	if svc, ok := auth.ServiceFrom(r.Context()); ok {
 		return visits.Caller{Auth: true, MadeBy: "service:" + svc.ID.String()}
 	}
-	t, _ := auth.TenantFrom(r.Context())
+	t, _ := auth.ProjectFrom(r.Context())
 	return visits.Caller{
-		Tenant: t.Name,
-		Admin:  func(env uuid.UUID) bool { return t.EnvRole(env) >= auth.RoleAdmin },
-		MadeBy: t.Principal.String(),
+		Project: t.Name,
+		Admin:   func(env uuid.UUID) bool { return t.EnvRole(env) >= auth.RoleAdmin },
+		MadeBy:  t.Principal.String(),
 	}
 }
 
-// listProviders is GET /api/v1/providers: the tenant's providers, ferun
+// listProviders is GET /api/v1/providers: the project's providers, ferun
 // first, the kinds this installation serves and the redirect URI of
 // ferun-auth.
 func (s *server) listProviders(w http.ResponseWriter, r *http.Request) error {
-	out, err := s.deps.Visitors.ListProviders(r.Context(), tenantOf(r))
+	out, err := s.deps.Visitors.ListProviders(r.Context(), projectOf(r))
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func (s *server) listProviders(w http.ResponseWriter, r *http.Request) error {
 
 // getProvider is GET /api/v1/providers/{provider}.
 func (s *server) getProvider(w http.ResponseWriter, r *http.Request) error {
-	p, err := s.deps.Visitors.GetProvider(r.Context(), tenantOf(r), r.PathValue("provider"))
+	p, err := s.deps.Visitors.GetProvider(r.Context(), projectOf(r), r.PathValue("provider"))
 	if err != nil {
 		return err
 	}
@@ -118,18 +118,18 @@ func (s *server) getProvider(w http.ResponseWriter, r *http.Request) error {
 
 // putProvider is PUT /api/v1/providers/{provider}: 201 with the provider
 // made, 200 with one changed or found as asked. A make or a change is an
-// activity row of the tenant; a PUT that changes nothing (FeCode's
+// activity row of the project; a PUT that changes nothing (FeCode's
 // registration at every start) is none.
 func (s *server) putProvider(w http.ResponseWriter, r *http.Request) error {
 	var in visits.ProviderIn
 	if err := decodeVisitorBody(r, &in); err != nil {
 		return err
 	}
-	ctx, tenant, name := r.Context(), tenantOf(r), r.PathValue("provider")
-	t, _ := auth.TenantFrom(ctx)
+	ctx, project, name := r.Context(), projectOf(r), r.PathValue("provider")
+	t, _ := auth.ProjectFrom(ctx)
 	by := t.Principal.String()
-	before, beforeErr := s.deps.Visitors.GetProvider(ctx, tenant, name)
-	p, created, err := s.deps.Visitors.PutProvider(ctx, tenant, name, in, by)
+	before, beforeErr := s.deps.Visitors.GetProvider(ctx, project, name)
+	p, created, err := s.deps.Visitors.PutProvider(ctx, project, name, in, by)
 	if err != nil {
 		return err
 	}
@@ -145,7 +145,7 @@ func (s *server) putProvider(w http.ResponseWriter, r *http.Request) error {
 		if created {
 			verb = "made"
 		}
-		s.record(ctx, store.ActivityRow{TenantID: tenant, Kind: "access_provider_put", Category: "credential",
+		s.record(ctx, store.ActivityRow{ProjectID: project, Kind: "access_provider_put", Category: "credential",
 			Name:   fmt.Sprintf("access provider %s (%s) %s by %s", p.Name, p.Kind, verb, by),
 			Detail: detail(map[string]any{"provider": p.Name, "kind": p.Kind, "created": created, "by": by})})
 	}
@@ -161,14 +161,14 @@ func sameProvider(a, b visits.Provider) bool {
 }
 
 // deleteProvider is DELETE /api/v1/providers/{provider}: {"deleted":
-// true}, an activity row of the tenant.
+// true}, an activity row of the project.
 func (s *server) deleteProvider(w http.ResponseWriter, r *http.Request) error {
-	ctx, tenant, name := r.Context(), tenantOf(r), r.PathValue("provider")
-	if err := s.deps.Visitors.DeleteProvider(ctx, tenant, name); err != nil {
+	ctx, project, name := r.Context(), projectOf(r), r.PathValue("provider")
+	if err := s.deps.Visitors.DeleteProvider(ctx, project, name); err != nil {
 		return err
 	}
 	by := auth.MadeBy(ctx)
-	s.record(ctx, store.ActivityRow{TenantID: tenant, Kind: "access_provider_deleted", Category: "credential",
+	s.record(ctx, store.ActivityRow{ProjectID: project, Kind: "access_provider_deleted", Category: "credential",
 		Name:   fmt.Sprintf("access provider %s deleted by %s", name, by),
 		Detail: detail(map[string]any{"provider": name, "by": by})})
 	return writeJSON(w, http.StatusOK, struct {
@@ -248,11 +248,11 @@ func (s *server) endVisits(w http.ResponseWriter, r *http.Request) error {
 	}{n})
 }
 
-// oidcProvider is GET /api/v1/oidc-providers/{tenant}/{provider}: a
-// tenant's provider of kind oidc with its secret, to verify its issuer's
+// oidcProvider is GET /api/v1/oidc-providers/{project}/{provider}: a
+// project's provider of kind oidc with its secret, to verify its issuer's
 // back-channel logout.
 func (s *server) oidcProvider(w http.ResponseWriter, r *http.Request) error {
-	p, err := s.deps.Visitors.OIDCProvider(r.Context(), r.PathValue("tenant"), r.PathValue("provider"))
+	p, err := s.deps.Visitors.OIDCProvider(r.Context(), r.PathValue("project"), r.PathValue("provider"))
 	if err != nil {
 		return err
 	}
@@ -260,7 +260,7 @@ func (s *server) oidcProvider(w http.ResponseWriter, r *http.Request) error {
 }
 
 // visitKeys answers the token key as a JWKS (GET /api/v1/visit-keys), the
-// document the ingress serves at /.ferun/keys: a provider of kind tenant
+// document the ingress serves at /.ferun/keys: a provider of kind project
 // verifies ferund's signed questions with it (ADR 0054).
 func (s *server) visitKeys(w http.ResponseWriter, r *http.Request) error {
 	jwks, err := s.deps.Visitors.JWKS(r.Context())

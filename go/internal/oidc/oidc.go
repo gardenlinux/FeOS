@@ -32,6 +32,11 @@ const (
 	// jwksRefetchEvery bounds the refetches of the key set for an unknown
 	// key id.
 	jwksRefetchEvery = time.Minute
+	// failedRetryAfter is how long a failed discovery, or a failed fetch of
+	// the key set while none is held, is answered from its failure: any
+	// request with a JWT bearer reaches the provider through these, and
+	// it is asked again at most this often.
+	failedRetryAfter = 5 * time.Second
 	// providerTimeout bounds every call to the provider.
 	providerTimeout = 10 * time.Second
 	// clockSkew is the leeway of exp and iat.
@@ -110,8 +115,15 @@ type Provider struct {
 	mu     sync.Mutex
 	disc   *Discovery
 	discAt time.Time
-	keys   []verifyKey
-	keysAt time.Time // the last fetch of the key set, successful or not
+	// discErr is the last discovery's failure, at discErrAt; nil after a
+	// success.
+	discErr   error
+	discErrAt time.Time
+	keys      []verifyKey
+	keysAt    time.Time // the last fetch of the key set, successful or not
+	// keysErr is the last fetch's failure of the key set; nil after a
+	// success.
+	keysErr error
 }
 
 // New returns the provider of cfg's client.
@@ -140,7 +152,24 @@ func (p *Provider) Discovery(ctx context.Context) (*Discovery, error) {
 		p.mu.Unlock()
 		return d, nil
 	}
+	if err := p.discErr; err != nil && p.now().Sub(p.discErrAt) < failedRetryAfter {
+		p.mu.Unlock()
+		return nil, err
+	}
 	p.mu.Unlock()
+	d, err := p.discover(ctx)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err != nil {
+		p.discErr, p.discErrAt = err, p.now()
+		return nil, err
+	}
+	p.disc, p.discAt, p.discErr = d, p.now(), nil
+	return d, nil
+}
+
+// discover fetches the discovery document and checks it.
+func (p *Provider) discover(ctx context.Context) (*Discovery, error) {
 	u := strings.TrimSuffix(p.cfg.Issuer, "/") + "/.well-known/openid-configuration"
 	var d Discovery
 	if err := p.getJSON(ctx, u, "", &d); err != nil {
@@ -152,21 +181,23 @@ func (p *Provider) Discovery(ctx context.Context) (*Discovery, error) {
 	if d.AuthorizationEndpoint == "" || d.TokenEndpoint == "" || d.JWKSURI == "" {
 		return nil, providerErr("discovery lacks the authorization, token or JWKS endpoint")
 	}
-	p.mu.Lock()
-	p.disc, p.discAt = &d, p.now()
-	p.mu.Unlock()
 	return &d, nil
 }
 
-// keySet returns the provider's keys, fetched when there are none. With
-// refresh (a token of an unknown key id: the provider may have rotated),
-// the set is fetched again unless that happened less than a minute ago.
+// keySet returns the provider's keys, fetched when there are none (a
+// fetch that failed less than failedRetryAfter ago answers with its
+// failure). With refresh (a token of an unknown key id: the provider may
+// have rotated), the set is fetched again unless that happened less than
+// a minute ago.
 func (p *Provider) keySet(ctx context.Context, d *Discovery, refresh bool) ([]verifyKey, error) {
 	p.mu.Lock()
-	keys, at := p.keys, p.keysAt
+	keys, at, lastErr := p.keys, p.keysAt, p.keysErr
 	p.mu.Unlock()
 	if len(keys) > 0 && (!refresh || p.now().Sub(at) < jwksRefetchEvery) {
 		return keys, nil
+	}
+	if len(keys) == 0 && lastErr != nil && p.now().Sub(at) < failedRetryAfter {
+		return nil, providerErr("key set: %w", lastErr)
 	}
 	var raw json.RawMessage
 	err := p.getJSON(ctx, d.JWKSURI, "", &raw)
@@ -177,7 +208,7 @@ func (p *Provider) keySet(ctx context.Context, d *Discovery, refresh bool) ([]ve
 		}
 	}
 	p.mu.Lock()
-	p.keysAt = p.now()
+	p.keysAt, p.keysErr = p.now(), err
 	if err == nil {
 		p.keys = keys
 	}
@@ -371,6 +402,74 @@ func (p *Provider) Verify(ctx context.Context, d *Discovery, raw, nonce string) 
 		return IDToken{}, Refused("the token names no subject")
 	}
 	return IDToken{Raw: raw, Claims: c}, nil
+}
+
+// AccessClaims are the claims of a verified access token of the client
+// credentials grant: an integration's (FeOS ADR 0056).
+type AccessClaims struct {
+	// Sub is the token's subject, ClientID its client_id; they are equal.
+	Sub, ClientID string
+	Claims        Claims
+}
+
+// VerifyAccessToken checks an access token that a client got for itself
+// (the client credentials grant, RFC 9068): its signature by the
+// provider's keys (the key set fetched again once for an unknown key id,
+// at most once a minute), iss exactly the issuer, aud holding audience
+// exactly, exp present and not more than 60 s past, iat (when present) and
+// nbf (when present) not more than 60 s ahead, and a sub and a client_id
+// that are equal: a person's access token, whatever its audience, is
+// refused. A refusal is *ErrRefused with a fixed reason; the provider's
+// keys out of reach *ErrProvider.
+func (p *Provider) VerifyAccessToken(ctx context.Context, raw, audience string) (AccessClaims, error) {
+	d, err := p.Discovery(ctx)
+	if err != nil {
+		return AccessClaims{}, err
+	}
+	keys, err := p.keySet(ctx, d, false)
+	if err != nil {
+		return AccessClaims{}, err
+	}
+	payload, err := verifyJWS(raw, keys)
+	if errors.Is(err, errUnknownKey) {
+		if keys, err = p.keySet(ctx, d, true); err != nil {
+			return AccessClaims{}, err
+		}
+		payload, err = verifyJWS(raw, keys)
+	}
+	if err != nil {
+		return AccessClaims{}, err
+	}
+	var c Claims
+	if err := json.Unmarshal(payload, &c); err != nil {
+		return AccessClaims{}, Refused("the token's claims are not a JSON object")
+	}
+	if iss := c.Str("iss"); iss != p.cfg.Issuer {
+		return AccessClaims{}, refusedf("the token's issuer is not the configured one", "%q is not %q", iss, p.cfg.Issuer)
+	}
+	if audience == "" || !slices.Contains(c.Strs("aud"), audience) {
+		return AccessClaims{}, refusedf("the token is not for this API (aud)", "%q does not hold %q", c.Strs("aud"), audience)
+	}
+	now := p.now()
+	exp, ok := c.num("exp")
+	if !ok || !now.Add(-clockSkew).Before(unixSeconds(exp)) {
+		return AccessClaims{}, Refused("the token has expired")
+	}
+	if iat, ok := c.num("iat"); !ok || !unixSeconds(iat).Before(now.Add(clockSkew)) {
+		return AccessClaims{}, Refused("the token has no iat or is issued in the future")
+	}
+	if nbf, ok := c.num("nbf"); ok && !unixSeconds(nbf).Before(now.Add(clockSkew)) {
+		return AccessClaims{}, Refused("the token is not valid yet (nbf)")
+	}
+	sub, client := c.Str("sub"), c.Str("client_id")
+	if sub == "" {
+		return AccessClaims{}, Refused("the token names no subject")
+	}
+	if client != sub {
+		return AccessClaims{}, refusedf("the token is not a client's own (client_id is not sub)", "client_id %q, sub %q",
+			client, sub)
+	}
+	return AccessClaims{Sub: sub, ClientID: client, Claims: c}, nil
 }
 
 // The back-channel logout token's fixed parts (OpenID Connect Back-Channel

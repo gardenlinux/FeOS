@@ -86,7 +86,8 @@ func TestDependencies(t *testing.T) {
 	}
 	const mod = "github.com/gardenlinux/feos/go/"
 	allowed := map[string]bool{mod + "cmd/ferun-auth": true, mod + "internal/ferunauth": true, mod + "internal/oidc": true,
-		mod + "internal/egress": true, mod + "internal/seal": true, mod + "internal/visit": true}
+		mod + "internal/egress": true, mod + "internal/seal": true, mod + "internal/visit": true,
+		mod + "internal/config/oldnames": true}
 	for _, p := range strings.Fields(string(out)) {
 		switch {
 		case strings.Contains(p, "github.com/jackc/pgx"), strings.HasPrefix(p, "google.golang.org/grpc"):

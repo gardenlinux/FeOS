@@ -128,11 +128,11 @@ func TestEnvironments(t *testing.T) {
 		return 0, false, nil
 	})
 
-	env, err := c.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: tenant, Name: "dev"})
+	env, err := c.st.InsertEnvironment(bg, store.NewEnvironment{ID: uuid.New(), Owner: project, Name: "dev"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := c.call(a, "POST", "/api/v1/sandboxes", tenantAuth, `{"environment":"dev"}`)
+	r := c.call(a, "POST", "/api/v1/sandboxes", projectAuth, `{"environment":"dev"}`)
 	if r.code != http.StatusCreated {
 		t.Fatalf("create a sandbox: %d %s", r.code, r.body)
 	}
@@ -210,11 +210,11 @@ func TestEnvironments(t *testing.T) {
 
 	// The API refuses to delete the environment while its sandbox is in it
 	// (ADR 0035).
-	if r := c.call(a, "DELETE", "/api/v1/environments/dev", tenantAuth, ""); r.code != http.StatusConflict ||
+	if r := c.call(a, "DELETE", "/api/v1/environments/dev", projectAuth, ""); r.code != http.StatusConflict ||
 		!strings.Contains(r.body, `"code":"environment_in_use"`) || !strings.Contains(r.body, sb.id.String()) {
 		t.Fatalf("delete with a sandbox: %d %s", r.code, r.body)
 	}
-	// Deleting (as a tenant's deletion does), the environment takes its
+	// Deleting (as a project's deletion does), the environment takes its
 	// instance, process and names along and leaves the sandbox running;
 	// it goes, with its group and name table, once the sandbox has.
 	c.sql(`UPDATE environments SET deleting = true WHERE id = $1`, env.ID)
@@ -231,7 +231,7 @@ func TestEnvironments(t *testing.T) {
 	if out := c.run(a, sb, "echo alive"); strings.TrimSpace(out) != "alive" {
 		t.Errorf("the sandbox in the deleted environment: %q", out)
 	}
-	if r := c.call(a, "DELETE", sb.path(""), tenantAuth, ""); r.code != http.StatusOK {
+	if r := c.call(a, "DELETE", sb.path(""), projectAuth, ""); r.code != http.StatusOK {
 		t.Fatalf("delete the sandbox: %d %s", r.code, r.body)
 	}
 	eventually(t, 60*time.Second, "the environment gone", func() bool {

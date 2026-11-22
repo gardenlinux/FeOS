@@ -42,7 +42,7 @@ func TestSpecUse(t *testing.T) {
 // Check refuses the first resource that use and ask pass, with the limit
 // and the use; what ask does not ask for passes, however far over.
 func TestCheck(t *testing.T) {
-	l := store.TenantLimits{Sandboxes: ptr(2), VCPUs: ptr(4), MemoryMiB: ptr(int64(1024))}
+	l := store.ProjectLimits{Sandboxes: ptr(2), VCPUs: ptr(4), MemoryMiB: ptr(int64(1024))}
 	if err := Check(l, Use{Sandboxes: 1, VCPUs: 2}, Use{Sandboxes: 1, VCPUs: 2, MemoryMiB: 512}); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestCheck(t *testing.T) {
 	if err := Check(l, Use{Sandboxes: 9, MemoryMiB: 9999}, Use{Environments: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := Check(store.TenantLimits{Environments: ptr(0)}, Use{}, Use{Environments: 1}); err == nil {
+	if err := Check(store.ProjectLimits{Environments: ptr(0)}, Use{}, Use{Environments: 1}); err == nil {
 		t.Fatal("a limit of 0 let one through")
 	}
 }
@@ -63,14 +63,14 @@ func TestCheck(t *testing.T) {
 // A deployment is an error finding when it brings a sum past the limit
 // and asks for more than the current one.
 func TestSpecFindings(t *testing.T) {
-	l := store.TenantLimits{VCPUs: ptr(4)}
+	l := store.ProjectLimits{VCPUs: ptr(4)}
 	small := &spec.Spec{Services: map[string]spec.Service{"a": {Image: "x", Replicas: ptr(2)}}}
 	big := &spec.Spec{Services: map[string]spec.Service{"a": {Image: "x", Replicas: ptr(5)}}}
 	if fs := SpecFindings(l, Use{VCPUs: 2}, nil, small); len(fs) != 0 {
 		t.Fatalf("small %+v", fs)
 	}
 	fs := SpecFindings(l, Use{VCPUs: 2}, small, big)
-	if len(fs) != 1 || fs[0].Severity != spec.SeverityError || !strings.Contains(fs[0].Problem, "brings the tenant to 7 of its limit 4") {
+	if len(fs) != 1 || fs[0].Severity != spec.SeverityError || !strings.Contains(fs[0].Problem, "brings the project to 7 of its limit 4") {
 		t.Fatalf("big %+v", fs)
 	}
 	// Over already (a lowered limit): no more is fine, less too.

@@ -333,7 +333,7 @@ export function actionProblem(e) {
     return `${text} — a new run starts once it ends; try again then.`;
   }
   if (e && e.status === 409 && code === 'not_ready') return `${text} — the job's deployment is not ready yet.`;
-  if (e && e.status === 422 && code === 'unknown_provider') return `${text} — make it on the tenant's Access providers first.`;
+  if (e && e.status === 422 && code === 'unknown_provider') return `${text} — make it on the project's Access providers first.`;
   return text;
 }
 
@@ -433,7 +433,7 @@ export function newestFirst(...pages) {
 // that the environment's default host answers 404 (ADR 0021).
 const SERVED_STATES = new Set(['served', 'dns-moved']);
 
-// envDomains are the tenant's domains bound to an environment: a
+// envDomains are the project's domains bound to an environment: a
 // domain names the one it is bound to by its ID (GET /api/v1/domains,
 // "environment"), null while unbound.
 export function envDomains(domains, st) {

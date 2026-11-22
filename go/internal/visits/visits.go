@@ -63,13 +63,13 @@ type Service struct {
 	log   *slog.Logger
 	rl    *rateLog
 	kinds []string
-	// judge is the rule of the addresses of the providers of kind tenant
+	// judge is the rule of the addresses of the providers of kind project
 	// (--deny-prefix, ADR 0028), at their PUT and at every call.
 	judge func(netip.Addr) error
 	// roots verify the providers' certificates; nil (the system's) but
 	// in tests.
 	roots *x509.CertPool
-	// client calls the providers of kind tenant (§1.9): made once, with
+	// client calls the providers of kind project (§1.9): made once, with
 	// roots.
 	client *http.Client
 
@@ -103,7 +103,7 @@ func newService(cfg Config, d Deps, roots *x509.CertPool) (*Service, error) {
 	s := &Service{cfg: cfg, d: d, st: d.Store, log: cfg.Log, rl: newRateLog(cfg.Log), roots: roots,
 		judge: egress.Rule{Deny: deny}.Judge}
 	s.client = egress.Client(s.judge, visit.AskTimeout, false, roots)
-	s.kinds = []string{model.ProviderKindTenant}
+	s.kinds = []string{model.ProviderKindProject}
 	if cfg.AuthURL != "" && cfg.Issuer != "" {
 		s.kinds = append(s.kinds, model.ProviderKindFerun)
 	}
@@ -114,7 +114,7 @@ func newService(cfg Config, d Deps, roots *x509.CertPool) (*Service, error) {
 }
 
 // Kinds are the kinds of providers this installation serves, in the order
-// tenant, ferun, oidc: tenant always, ferun with ferun-auth and the
+// project, ferun, oidc: project always, ferun with ferun-auth and the
 // installation's issuer, oidc with ferun-auth.
 func (s *Service) Kinds() []string { return slices.Clone(s.kinds) }
 
@@ -185,7 +185,7 @@ func (s *Service) Keys(ctx context.Context) (*visit.Keys, error) {
 }
 
 // JWKS is the token key's public half as a JWKS, the document the
-// ingress serves at /.ferun/keys: what a provider of kind tenant verifies
+// ingress serves at /.ferun/keys: what a provider of kind project verifies
 // ferund's questions with (GET /api/v1/visit-keys).
 func (s *Service) JWKS(ctx context.Context) ([]byte, error) {
 	keys, err := s.Keys(ctx)
@@ -243,10 +243,10 @@ func (r *rateLog) warn(kind, msg string, args ...any) {
 
 // Caller is who calls a provider route.
 type Caller struct {
-	Auth   bool                     // ferun-auth's service token
-	Tenant string                   // a tenant principal's tenant; "" with Auth
-	Admin  func(env uuid.UUID) bool // whether the tenant principal is admin on env; nil with Auth
-	MadeBy string                   // the principal, for answered_by
+	Auth    bool                     // ferun-auth's service token
+	Project string                   // a project principal's project; "" with Auth
+	Admin   func(env uuid.UUID) bool // whether the project principal is admin on env; nil with Auth
+	MadeBy  string                   // the principal, for answered_by
 }
 
 // Rule is an oidc provider's rule over the ID token's claims: exactly one
@@ -290,8 +290,8 @@ type Provider struct {
 	ClientSecret *Secret `json:"clientSecret,omitempty"`
 	Rule         *Rule   `json:"rule,omitempty"`
 	// RedirectURI and BackchannelURI, for kind oidc with ferun-auth, are
-	// what the tenant registers at its issuer: ferun-auth's
-	// /callback/<tenant>/<provider> and /backchannel/<tenant>/<provider>.
+	// what the project registers at its issuer: ferun-auth's
+	// /callback/<project>/<provider> and /backchannel/<project>/<provider>.
 	RedirectURI    string   `json:"redirectUri,omitempty"`
 	BackchannelURI string   `json:"backchannelUri,omitempty"`
 	Environments   []EnvRef `json:"environments"`
@@ -307,10 +307,10 @@ type ProviderList struct {
 
 // EnvView is an environment as a provider sees it.
 type EnvView struct {
-	ID     string            `json:"id"`
-	Name   string            `json:"name"`
-	Tenant string            `json:"tenant"`
-	Labels map[string]string `json:"labels"`
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Project string            `json:"project"`
+	Labels  map[string]string `json:"labels"`
 }
 
 // ProviderRef names a provider and its kind.
@@ -375,15 +375,15 @@ type Visit struct {
 
 // EndSession is the body of POST /api/v1/visits/end.
 type EndSession struct {
-	Tenant   string `json:"tenant,omitempty"`
+	Project  string `json:"project,omitempty"`
 	Provider string `json:"provider"`
 	Session  string `json:"session"`
 }
 
-// OIDCProvider is a tenant's oidc provider for ferun-auth's back-channel
+// OIDCProvider is a project's oidc provider for ferun-auth's back-channel
 // logout.
 type OIDCProvider struct {
-	Tenant       string `json:"tenant"`
+	Project      string `json:"project"`
 	Name         string `json:"name"`
 	Issuer       string `json:"issuer"`
 	ClientID     string `json:"clientId"`

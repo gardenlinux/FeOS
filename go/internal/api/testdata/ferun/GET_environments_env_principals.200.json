@@ -1,0 +1,59 @@
+{
+  "method": "GET",
+  "path": "/api/v1/environments/stage/principals",
+  "query": {},
+  "status": 200,
+  "request": null,
+  "response": {
+    "principals": [
+      {
+        "kind": "person",
+        "id": "0199a0b1-0000-7000-8000-000000000001",
+        "label": "ada \u003cada@example.test\u003e",
+        "projectRole": "admin",
+        "environmentRole": "",
+        "losesWrite": false
+      },
+      {
+        "kind": "person",
+        "id": "0199a0b1-0000-7000-8000-000000000002",
+        "label": "sw \u003csw@example.test\u003e",
+        "projectRole": "write",
+        "environmentRole": "write",
+        "losesWrite": false
+      },
+      {
+        "kind": "person",
+        "id": "0199a0b1-0000-7000-8000-000000000003",
+        "label": "tw \u003ctw@example.test\u003e",
+        "projectRole": "write",
+        "environmentRole": "",
+        "losesWrite": true
+      },
+      {
+        "kind": "token",
+        "id": "3f9a1c2b7d4e0000000000000000000000000000000000000000000000000001",
+        "label": "test",
+        "projectRole": "admin",
+        "environmentRole": "",
+        "losesWrite": false
+      },
+      {
+        "kind": "token",
+        "id": "3f9a1c2b7d4e0000000000000000000000000000000000000000000000000002",
+        "label": "landscape release",
+        "projectRole": "write",
+        "environmentRole": "",
+        "losesWrite": true
+      },
+      {
+        "kind": "integration",
+        "id": "fecode",
+        "label": "Integration fecode",
+        "projectRole": "write",
+        "environmentRole": "",
+        "losesWrite": true
+      }
+    ]
+  }
+}

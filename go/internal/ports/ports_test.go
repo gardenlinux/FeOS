@@ -46,7 +46,7 @@ func wantAnswer(t *testing.T, what string, code int, retry, body string, wantCod
 
 // The forward class: the bad paths, the token only from Authorization,
 // the answers of an absent sandbox for unknown and foreign tokens, a
-// tenant's token refused as no sandbox token, failed lookups, and the
+// project's token refused as no sandbox token, failed lookups, and the
 // Kubernetes ports.
 func TestForwardClass(t *testing.T) {
 	w := newWorld(t)
@@ -73,30 +73,30 @@ func TestForwardClass(t *testing.T) {
 	code, retry, body = w.do("GET", w.front.URL+"/fwd/not-a-uuid/5173/", nil, "")
 	wantAnswer(t, "not a uuid", code, retry, body, 404, "", textNoSandbox)
 
-	// A tenant's token, of the sandbox's owner or not, is told what the
+	// A project's token, of the sandbox's owner or not, is told what the
 	// door takes, on both mounts and whatever the path's sandbox.
 	const stranger = "stranger"
-	if _, _, err := w.env.Store.CreateTenant(context.Background(), stranger); err != nil {
+	if _, _, err := w.env.Store.CreateProject(context.Background(), stranger); err != nil {
 		t.Fatal(err)
 	}
-	for _, tenant := range []string{toolstest.Tenant, stranger} {
-		tenantToken := "tenant-token-of-" + tenant
-		if _, err := w.env.Store.CreateTenantToken(context.Background(), store.HashToken(tenantToken), tenant,
+	for _, project := range []string{toolstest.Project, stranger} {
+		projectToken := "project-token-of-" + project
+		if _, err := w.env.Store.CreateProjectToken(context.Background(), store.HashToken(projectToken), project,
 			"ci"); err != nil {
 			t.Fatal(err)
 		}
-		asTenant := http.Header{"Authorization": {"Bearer " + tenantToken}}
+		asProject := http.Header{"Authorization": {"Bearer " + projectToken}}
 		for _, u := range []string{w.url(guestPort, "/"), w.url(guestPort, ""),
 			w.front.URL + "/fwd/not-a-uuid/5173/", w.front.URL + "/api/v1/sandboxes/" + id + "/ports/5173/x"} {
-			code, retry, body = w.do("GET", u, asTenant, "")
-			wantAnswer(t, tenant+"'s token "+u, code, retry, body, 401, "", textNoToken)
+			code, retry, body = w.do("GET", u, asProject, "")
+			wantAnswer(t, project+"'s token "+u, code, retry, body, 401, "", textNoToken)
 		}
 	}
-	// A failed lookup of the tenant's token is no verdict on the token.
-	w.failTenantLookup.Store(true)
+	// A failed lookup of the project's token is no verdict on the token.
+	w.failProjectLookup.Store(true)
 	code, retry, body = w.do("GET", w.url(guestPort, "/"), http.Header{"Authorization": {"Bearer nope"}}, "")
-	wantAnswer(t, "tenant lookup", code, retry, body, 500, "", textLookupFailed)
-	w.failTenantLookup.Store(false)
+	wantAnswer(t, "project lookup", code, retry, body, 500, "", textLookupFailed)
+	w.failProjectLookup.Store(false)
 
 	w.failLookup.Store(true)
 	code, retry, body = w.do("GET", w.url(guestPort, "/"), nil, "")

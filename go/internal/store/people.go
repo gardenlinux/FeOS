@@ -16,7 +16,7 @@ import (
 
 // This file holds the typed queries of people and their grants (ADR 0031,
 // migration 0027): people, grants, and what a principal may do in a
-// tenant.
+// project.
 
 // Person is a row of people: someone who signed in through the provider.
 type Person struct {
@@ -79,10 +79,10 @@ func (s *Store) SetPersonDisabled(ctx context.Context, id uuid.UUID, disabled bo
 }
 
 // Grant is a row of grants: a principal's role in a scope. Exactly one of
-// PersonID and TokenHash is set; EnvironmentID uuid.Nil is the tenant.
+// PersonID and TokenHash is set; EnvironmentID uuid.Nil is the project.
 type Grant struct {
 	ID            int64
-	TenantID      string
+	ProjectID     string
 	PersonID      uuid.UUID
 	TokenHash     string
 	EnvironmentID uuid.UUID
@@ -92,13 +92,13 @@ type Grant struct {
 	UpdatedAt     time.Time
 }
 
-const grantCols = "id, tenant_id, person_id, token_hash, environment_id, role, made_by, created_at, updated_at"
+const grantCols = "id, project_id, person_id, token_hash, environment_id, role, made_by, created_at, updated_at"
 
 func scanGrant(row pgx.Row) (Grant, error) {
 	var g Grant
 	var person, env *uuid.UUID
 	var token *string
-	if err := row.Scan(&g.ID, &g.TenantID, &person, &token, &env, &g.Role, &g.MadeBy, &g.CreatedAt,
+	if err := row.Scan(&g.ID, &g.ProjectID, &person, &token, &env, &g.Role, &g.MadeBy, &g.CreatedAt,
 		&g.UpdatedAt); err != nil {
 		return Grant{}, err
 	}
@@ -108,16 +108,16 @@ func scanGrant(row pgx.Row) (Grant, error) {
 
 // PutGrant gives the grant's principal its role in its scope: a new grant,
 // or the role and made_by of the one the principal holds there. An
-// environment of another tenant, or an unknown tenant, person or token, is
+// environment of another project, or an unknown project, person or token, is
 // ErrNoRow.
 func (s *Store) PutGrant(ctx context.Context, g Grant) (Grant, error) {
-	out, err := scanGrant(s.q.QueryRow(ctx, `INSERT INTO grants (tenant_id, person_id, token_hash, environment_id,
+	out, err := scanGrant(s.q.QueryRow(ctx, `INSERT INTO grants (project_id, person_id, token_hash, environment_id,
 			role, made_by)
 		SELECT $1, $2, $3, $4, $5, $6
 		WHERE $4::uuid IS NULL OR EXISTS (SELECT 1 FROM environments WHERE id = $4 AND owner = $1)
-		ON CONFLICT (tenant_id, (coalesce(person_id::text, token_hash)), (coalesce(environment_id::text, '')))
+		ON CONFLICT (project_id, (coalesce(person_id::text, token_hash)), (coalesce(environment_id::text, '')))
 		DO UPDATE SET role = excluded.role, made_by = excluded.made_by, updated_at = now()
-		RETURNING `+grantCols, g.TenantID, nullUUID(g.PersonID), nullString(g.TokenHash), nullUUID(g.EnvironmentID),
+		RETURNING `+grantCols, g.ProjectID, nullUUID(g.PersonID), nullString(g.TokenHash), nullUUID(g.EnvironmentID),
 		g.Role, g.MadeBy))
 	if errors.Is(err, pgx.ErrNoRows) || isForeignKeyViolation(err) {
 		return Grant{}, ErrNoRow
@@ -125,24 +125,24 @@ func (s *Store) PutGrant(ctx context.Context, g Grant) (Grant, error) {
 	return out, err
 }
 
-// ListGrants returns a tenant's grants, the tenant's before the
+// ListGrants returns a project's grants, the project's before the
 // environments', oldest first.
-func (s *Store) ListGrants(ctx context.Context, tenant string) ([]Grant, error) {
-	rows, err := s.q.Query(ctx, "SELECT "+grantCols+` FROM grants WHERE tenant_id = $1
-		ORDER BY environment_id NULLS FIRST, created_at, id`, tenant)
+func (s *Store) ListGrants(ctx context.Context, project string) ([]Grant, error) {
+	rows, err := s.q.Query(ctx, "SELECT "+grantCols+` FROM grants WHERE project_id = $1
+		ORDER BY environment_id NULLS FIRST, created_at, id`, project)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (Grant, error) { return scanGrant(r) })
 }
 
-// DeleteGrant removes a grant of tenant. It reports whether there was one.
-func (s *Store) DeleteGrant(ctx context.Context, tenant string, id int64) (bool, error) {
-	tag, err := s.q.Exec(ctx, "DELETE FROM grants WHERE tenant_id = $1 AND id = $2", tenant, id)
+// DeleteGrant removes a grant of project. It reports whether there was one.
+func (s *Store) DeleteGrant(ctx context.Context, project string, id int64) (bool, error) {
+	tag, err := s.q.Exec(ctx, "DELETE FROM grants WHERE project_id = $1 AND id = $2", project, id)
 	return tag.RowsAffected() > 0, err
 }
 
-// RoleAt is a role in a scope: EnvironmentID uuid.Nil is the tenant.
+// RoleAt is a role in a scope: EnvironmentID uuid.Nil is the project.
 type RoleAt struct {
 	Role          string
 	EnvironmentID uuid.UUID
@@ -161,15 +161,15 @@ func collectRoles(rows pgx.Rows, err error) ([]RoleAt, error) {
 	})
 }
 
-// TokenAccess resolves a tenant token: its tenant and its roles there, its
-// own (minted with it) and those of its grants, ignoring a tenant being
+// TokenAccess resolves a project token: its project and its roles there, its
+// own (minted with it) and those of its grants, ignoring a project being
 // deleted; model.ErrUnknownToken when it is none.
 func (s *Store) TokenAccess(ctx context.Context, hash string) (string, []RoleAt, error) {
-	var tenant string
+	var project string
 	var role string
 	var env *uuid.UUID
-	err := s.q.QueryRow(ctx, `SELECT t.tenant_id, t.role, t.environment_id FROM tenant_tokens t
-		JOIN tenants n ON n.id = t.tenant_id WHERE t.hash = $1 AND n.deleting_at IS NULL`, hash).Scan(&tenant, &role, &env)
+	err := s.q.QueryRow(ctx, `SELECT t.project_id, t.role, t.environment_id FROM project_tokens t
+		JOIN projects n ON n.id = t.project_id WHERE t.hash = $1 AND n.deleting_at IS NULL`, hash).Scan(&project, &role, &env)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil, model.ErrUnknownToken
 	}
@@ -177,93 +177,93 @@ func (s *Store) TokenAccess(ctx context.Context, hash string) (string, []RoleAt,
 		return "", nil, err
 	}
 	roles, err := collectRoles(s.q.Query(ctx, `SELECT role, environment_id FROM grants
-		WHERE tenant_id = $1 AND token_hash = $2`, tenant, hash))
+		WHERE project_id = $1 AND token_hash = $2`, project, hash))
 	if err != nil {
 		return "", nil, err
 	}
-	return tenant, append([]RoleAt{{Role: role, EnvironmentID: uuidOf(env)}}, roles...), nil
+	return project, append([]RoleAt{{Role: role, EnvironmentID: uuidOf(env)}}, roles...), nil
 }
 
-// PersonAccess returns a person's grants in a tenant that exists and is
+// PersonAccess returns a person's grants in a project that exists and is
 // not being deleted, and whether it does.
-func (s *Store) PersonAccess(ctx context.Context, tenant string, person uuid.UUID) ([]RoleAt, bool, error) {
+func (s *Store) PersonAccess(ctx context.Context, project string, person uuid.UUID) ([]RoleAt, bool, error) {
 	var exists bool
-	if err := s.q.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM tenants WHERE id = $1 AND deleting_at IS NULL)",
-		tenant).Scan(&exists); err != nil || !exists {
+	if err := s.q.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM projects WHERE id = $1 AND deleting_at IS NULL)",
+		project).Scan(&exists); err != nil || !exists {
 		return nil, false, err
 	}
 	roles, err := collectRoles(s.q.Query(ctx, `SELECT role, environment_id FROM grants
-		WHERE tenant_id = $1 AND person_id = $2`, tenant, person))
+		WHERE project_id = $1 AND person_id = $2`, project, person))
 	return roles, true, err
 }
 
-// PersonTenantGrant is one grant of a person, with its environment's name,
+// PersonProjectGrant is one grant of a person, with its environment's name,
 // as /auth/me lists them.
-type PersonTenantGrant struct {
-	Tenant          string
+type PersonProjectGrant struct {
+	Project         string
 	Role            string
-	EnvironmentID   uuid.UUID // uuid.Nil: the tenant
+	EnvironmentID   uuid.UUID // uuid.Nil: the project
 	EnvironmentName string
 }
 
-// PersonGrants returns a person's grants in the tenants that are not being
-// deleted, by tenant, the tenant's grant first, then by environment name.
-func (s *Store) PersonGrants(ctx context.Context, person uuid.UUID) ([]PersonTenantGrant, error) {
-	rows, err := s.q.Query(ctx, `SELECT g.tenant_id, g.role, g.environment_id, coalesce(e.name, '')
-		FROM grants g JOIN tenants t ON t.id = g.tenant_id AND t.deleting_at IS NULL
+// PersonGrants returns a person's grants in the projects that are not being
+// deleted, by project, the project's grant first, then by environment name.
+func (s *Store) PersonGrants(ctx context.Context, person uuid.UUID) ([]PersonProjectGrant, error) {
+	rows, err := s.q.Query(ctx, `SELECT g.project_id, g.role, g.environment_id, coalesce(e.name, '')
+		FROM grants g JOIN projects t ON t.id = g.project_id AND t.deleting_at IS NULL
 		LEFT JOIN environments e ON e.id = g.environment_id
-		WHERE g.person_id = $1 ORDER BY g.tenant_id, g.environment_id IS NOT NULL, e.name`, person)
+		WHERE g.person_id = $1 ORDER BY g.project_id, g.environment_id IS NOT NULL, e.name`, person)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (PersonTenantGrant, error) {
-		var g PersonTenantGrant
+	return pgx.CollectRows(rows, func(r pgx.CollectableRow) (PersonProjectGrant, error) {
+		var g PersonProjectGrant
 		var env *uuid.UUID
-		err := r.Scan(&g.Tenant, &g.Role, &env, &g.EnvironmentName)
+		err := r.Scan(&g.Project, &g.Role, &env, &g.EnvironmentName)
 		g.EnvironmentID = uuidOf(env)
 		return g, err
 	})
 }
 
-// LiveTenantNames returns the names of the tenants that are not being
-// deleted, in order: an operator's tenants.
-func (s *Store) LiveTenantNames(ctx context.Context) ([]string, error) {
-	rows, err := s.q.Query(ctx, "SELECT id FROM tenants WHERE deleting_at IS NULL ORDER BY id")
+// LiveProjectNames returns the names of the projects that are not being
+// deleted, in order: an operator's projects.
+func (s *Store) LiveProjectNames(ctx context.Context) ([]string, error) {
+	rows, err := s.q.Query(ctx, "SELECT id FROM projects WHERE deleting_at IS NULL ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
-// EnvironmentRef resolves an environment of tenant by its ID or its name
+// EnvironmentRef resolves an environment of project by its ID or its name
 // (the path's {env}) to its ID, for the role checks; ErrNoRow when the
-// tenant has none of that ID or name.
-func (s *Store) EnvironmentRef(ctx context.Context, tenant, ref string) (uuid.UUID, error) {
+// project has none of that ID or name.
+func (s *Store) EnvironmentRef(ctx context.Context, project, ref string) (uuid.UUID, error) {
 	var id uuid.UUID
 	q := "SELECT id FROM environments WHERE owner = $1 AND name = $2"
 	var arg any = ref
 	if u, err := uuid.Parse(ref); err == nil && len(ref) == 36 {
 		q, arg = "SELECT id FROM environments WHERE owner = $1 AND id = $2", u
 	}
-	err := s.q.QueryRow(ctx, q, tenant, arg).Scan(&id)
+	err := s.q.QueryRow(ctx, q, project, arg).Scan(&id)
 	return id, noRow(err, ErrNoRow)
 }
 
 // personMayVisit is the condition of PersonMayVisit on the people row p:
-// not disabled, with a grant on tenant $2 itself or on environment $3,
-// and tenant $2 not being deleted.
-const personMayVisit = `p.disabled_at IS NULL AND EXISTS (SELECT 1 FROM grants g JOIN tenants t ON t.id = g.tenant_id
-	WHERE g.person_id = p.id AND g.tenant_id = $2 AND t.deleting_at IS NULL
+// not disabled, with a grant on project $2 itself or on environment $3,
+// and project $2 not being deleted.
+const personMayVisit = `p.disabled_at IS NULL AND EXISTS (SELECT 1 FROM grants g JOIN projects t ON t.id = g.project_id
+	WHERE g.person_id = p.id AND g.project_id = $2 AND t.deleting_at IS NULL
 		AND (g.environment_id IS NULL OR g.environment_id = $3))`
 
 // PersonMayVisit reports whether the person of (issuer, sub) may visit
-// environment env of tenant with the provider ferun (ADR 0054): not
-// disabled, with a grant on the tenant or on env (every role is at least
-// read), in a tenant not being deleted; and returns the person's ID. It
+// environment env of project with the provider ferun (ADR 0054): not
+// disabled, with a grant on the project or on env (every role is at least
+// read), in a project not being deleted; and returns the person's ID. It
 // only reads: no people row is ever made here.
-func (s *Store) PersonMayVisit(ctx context.Context, issuer, sub, tenant string, env uuid.UUID) (uuid.UUID, bool, error) {
+func (s *Store) PersonMayVisit(ctx context.Context, issuer, sub, project string, env uuid.UUID) (uuid.UUID, bool, error) {
 	var id uuid.UUID
-	err := s.q.QueryRow(ctx, `SELECT p.id FROM people p WHERE p.issuer = $1 AND p.sub = $4 AND `+personMayVisit, issuer, tenant, env, sub).Scan(&id)
+	err := s.q.QueryRow(ctx, `SELECT p.id FROM people p WHERE p.issuer = $1 AND p.sub = $4 AND `+personMayVisit, issuer, project, env, sub).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, false, nil
 	}
@@ -274,9 +274,9 @@ func (s *Store) PersonMayVisit(ctx context.Context, issuer, sub, tenant string, 
 }
 
 // PersonMayVisitByID is PersonMayVisit for the person of a visit.
-func (s *Store) PersonMayVisitByID(ctx context.Context, person uuid.UUID, tenant string, env uuid.UUID) (bool, error) {
+func (s *Store) PersonMayVisitByID(ctx context.Context, person uuid.UUID, project string, env uuid.UUID) (bool, error) {
 	var ok bool
 	err := s.q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM people p WHERE p.id = $1 AND `+personMayVisit+`)`,
-		person, tenant, env).Scan(&ok)
+		person, project, env).Scan(&ok)
 	return ok, err
 }

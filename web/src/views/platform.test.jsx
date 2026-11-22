@@ -15,7 +15,7 @@ import {
 } from './platformData.js';
 
 // The platform's pages: the nodes' bookings and a drain's preview, the
-// ingresses, join tokens of two kinds, a tenant's limits and zone, the
+// ingresses, join tokens of two kinds, a project's limits and zone, the
 // people, the control plane's versions; from the admin API's answers
 // (go/internal/api/admin.go, members.go, quotas.go).
 
@@ -177,7 +177,7 @@ describe('join tokens', () => {
   });
 });
 
-describe('a tenant\'s limits and zone', () => {
+describe('a project\'s limits and zone', () => {
   it('fills the form with none as empty and 0 as a limit', () => {
     expect(limitsForm({ sandboxes: 0, memoryMib: 4096 }))
       .toEqual({ sandboxes: '0', environments: '', runningJobs: '', vcpus: '', memoryMib: '4096' });
@@ -195,7 +195,7 @@ describe('a tenant\'s limits and zone', () => {
     expect(limitsText({ sandboxes: 50, environments: 0, memoryMib: 65536 })).toBe('50 sandboxes · 0 envs · 64 GiB');
   });
 
-  it('knows the zones the tenants name', () => {
+  it('knows the zones the projects name', () => {
     expect(knownZones([{ zone: 'b.example' }, { zone: 'a.example' }, { zone: '' }, { zone: 'b.example' }]))
       .toEqual(['a.example', 'b.example']);
   });
@@ -246,7 +246,7 @@ describe('the control plane', () => {
   });
 });
 
-describe('mintTenantToken', () => {
+describe('mintProjectToken', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('sends the role and the environment, and leaves out what is empty', async () => {
@@ -256,9 +256,9 @@ describe('mintTenantToken', () => {
       calls.push({ path, init });
       return { ok: true, status: 201, text: async () => '{"token":"t"}' };
     }));
-    await api.mintTenantToken('acme', { label: 'ci', role: 'read', environment: 'prod' });
-    await api.mintTenantToken('acme', { label: 'x' });
-    expect(calls[0].path).toBe('/api/v1/admin/tenants/acme/tokens');
+    await api.mintProjectToken('acme', { label: 'ci', role: 'read', environment: 'prod' });
+    await api.mintProjectToken('acme', { label: 'x' });
+    expect(calls[0].path).toBe('/api/v1/admin/projects/acme/tokens');
     expect(JSON.parse(calls[0].init.body)).toEqual({ label: 'ci', role: 'read', environment: 'prod' });
     expect(JSON.parse(calls[1].init.body)).toEqual({ label: 'x' });
   });

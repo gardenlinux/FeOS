@@ -111,7 +111,7 @@ a:hover { text-decoration: underline; }
 .brand-name { font-size: 21px; }
 .brand-name b, .login-name b { font-weight: 400; color: var(--accent); }
 
-/* the tenant switcher, at the head of the topbar's trail */
+/* the project switcher, at the head of the topbar's trail */
 .switcher { position: relative; flex: none; }
 .switch {
   justify-content: flex-start; gap: 7px; padding: 6px 10px; max-width: 360px; font-size: 13.5px;
@@ -124,12 +124,12 @@ a:hover { text-decoration: underline; }
 .switch .icon:last-child { color: var(--muted); flex: none; }
 .switch-menu {
   position: absolute; z-index: 30; left: 0; top: calc(100% + 4px);
-  /* one size, whatever the tenant holds: the lists scroll, never sideways */
+  /* one size, whatever the project holds: the lists scroll, never sideways */
   display: grid; grid-template-columns: 2fr 3fr; width: 640px; height: 360px; max-height: calc(100vh - 80px);
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, .35); overflow: hidden;
 }
-/* tenants on the left (40 %), the chosen one's environments on the right */
+/* projects on the left (40 %), the chosen one's environments on the right */
 .switch-col { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 4px; }
 .switch-col + .switch-col { border-left: 1px solid var(--border-soft); }
 .switch-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
@@ -863,7 +863,7 @@ a.button.block { display: flex; width: 100%; margin-top: 14px; }
 .feedrow .col-time, .feedrow .sbxref, .feedrow .evkind { flex: none; width: auto; }
 .feedrow .evdesc { flex: 1; }
 .nowrap { white-space: nowrap; }
-.tenantchip-name { display: inline-flex; align-items: center; gap: 5px; }
+.projectchip-name { display: inline-flex; align-items: center; gap: 5px; }
 
 /* ------------------------------------------------------------- environments -- */
 .badge.bad { color: var(--danger); border-color: rgba(239,84,73,.45); }
@@ -1203,7 +1203,7 @@ button.labelchip:hover { border-color: var(--accent); color: var(--text); }
 [data-theme="light"] .badge.bad, [data-theme="light"] .tabcount { border-color: rgba(207,54,43,.45); }
 
 /* ---------------------------------------------------------------- people -- */
-.tenantchip .badge { margin-left: auto; }
+.projectchip .badge { margin-left: auto; }
 .grantchip {
   display: inline-flex; align-items: center; gap: 2px; margin: 0 6px 4px 0; padding: 1px 4px 1px 8px;
   border: 1px solid var(--border); border-radius: 999px; white-space: nowrap;

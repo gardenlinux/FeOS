@@ -9,5 +9,5 @@
     "Host": "expensa-stage.boxed.fecode.dev"
   },
   "responseContentType": "text/plain; charset=utf-8",
-  "note": "plain text; a tenant token is refused the same way"
+  "note": "plain text; a project token is refused the same way"
 }

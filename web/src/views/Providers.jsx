@@ -17,18 +17,18 @@ import {
 import '../styles/credentials.css';
 import '../styles/providers.css';
 
-// The tenant's access providers (ADR 0054): who vouches for the visitors
+// The project's access providers (ADR 0054): who vouches for the visitors
 // of its environments that admit visitors. The list, ferun first (built
 // in: the installation's sign-in, admitting people with a grant on the
 // environment); a provider's page with its definition, the environments
 // that name it and its delete; the form of a new one or a change, for
-// its own service (kind tenant) or an OpenID Connect issuer (kind oidc).
+// its own service (kind project) or an OpenID Connect issuer (kind oidc).
 // Every member reads them, since an environment's admin chooses among
-// them; making, changing and deleting one is the tenant admin's.
+// them; making, changing and deleting one is the project admin's.
 
 const POLL_MS = 10000;
 
-const ADMIN_REASON = 'needs admin on this tenant';
+const ADMIN_REASON = 'needs admin on this project';
 
 // WHAT is what a provider is, in one sentence.
 const WHAT = 'Who may open an environment that admits visitors: a provider signs them in and vouches for them, and is asked again while they stay.';
@@ -40,11 +40,11 @@ const NOT_SERVED = 'not served by this installation';
 // once.
 let saved = null;
 
-export function Providers({ tenant, sel, isNew, edit, navigate }) {
-  if (isNew) return <ProviderEditor tenant={tenant} name="" navigate={navigate} />;
-  if (sel && edit && sel !== FERUN) return <ProviderEditor key={sel} tenant={tenant} name={sel} navigate={navigate} />;
-  if (sel) return <ProviderPage key={sel} tenant={tenant} name={sel} navigate={navigate} />;
-  return <ProviderList tenant={tenant} navigate={navigate} />;
+export function Providers({ project, sel, isNew, edit, navigate }) {
+  if (isNew) return <ProviderEditor project={project} name="" navigate={navigate} />;
+  if (sel && edit && sel !== FERUN) return <ProviderEditor key={sel} project={project} name={sel} navigate={navigate} />;
+  if (sel) return <ProviderPage key={sel} project={project} name={sel} navigate={navigate} />;
+  return <ProviderList project={project} navigate={navigate} />;
 }
 
 // go is a link's click that navigates.
@@ -64,7 +64,7 @@ function useProviderList() {
 
 // ------------------------------------------------------------------ list --
 
-function ProviderList({ tenant, navigate }) {
+function ProviderList({ project, navigate }) {
   const [list, setList] = useState(null);
   const [err, setErr] = useState(null);
   const load = useCallback(async () => {
@@ -76,20 +76,20 @@ function ProviderList({ tenant, navigate }) {
     }
   }, []);
   usePoll(load, POLL_MS);
-  return <ProviderListView tenant={tenant} list={list} err={err} navigate={navigate} />;
+  return <ProviderListView project={project} list={list} err={err} navigate={navigate} />;
 }
 
 // ProviderListView is the list as read: {providers, kinds},
 // or the read's error.
-export function ProviderListView({ tenant, list, err, navigate }) {
-  const { can: c } = useAccess(tenant);
-  const toNew = newProviderPath(tenant);
+export function ProviderListView({ project, list, err, navigate }) {
+  const { can: c } = useAccess(project);
+  const toNew = newProviderPath(project);
   const head = (
     <PageHead kind="Connect" title="Access providers"
       actions={(
-        <a className={'button primary' + (c.adminTenant ? '' : ' disabled')} href={toNew}
-          title={c.adminTenant ? 'your own service, or an OpenID Connect issuer' : ADMIN_REASON}
-          onClick={(e) => { e.preventDefault(); if (c.adminTenant) navigate(toNew); }}>
+        <a className={'button primary' + (c.adminProject ? '' : ' disabled')} href={toNew}
+          title={c.adminProject ? 'your own service, or an OpenID Connect issuer' : ADMIN_REASON}
+          onClick={(e) => { e.preventDefault(); if (c.adminProject) navigate(toNew); }}>
           <Icon name="plus" size={14} /> New provider</a>)}
       facts={<span>{WHAT}</span>} />
   );
@@ -110,7 +110,7 @@ export function ProviderListView({ tenant, list, err, navigate }) {
             <tbody>
               {providers.map((p) => {
                 const ok = served(p.kind, kinds);
-                const to = providerPath(tenant, p.name);
+                const to = providerPath(project, p.name);
                 return (
                   <tr key={p.name} className={'clickable' + (ok ? '' : ' prov-off')} onClick={() => navigate(to)}>
                     <td>
@@ -130,7 +130,7 @@ export function ProviderListView({ tenant, list, err, navigate }) {
           </table></div>)}
         {list && providers.filter((p) => !p.builtIn).length === 0 && (
           <div className="cred-empty">
-            <p>No provider of the tenant&apos;s own yet. An environment that admits visitors names ferun, the sign-in of this
+            <p>No provider of the project&apos;s own yet. An environment that admits visitors names ferun, the sign-in of this
               installation, or one made here: your own service, which knows its people, or an OpenID Connect issuer with a
               rule over who it signs in.</p>
           </div>)}
@@ -141,7 +141,7 @@ export function ProviderListView({ tenant, list, err, navigate }) {
 
 // ------------------------------------------------------------------ page --
 
-function ProviderPage({ tenant, name, navigate }) {
+function ProviderPage({ project, name, navigate }) {
   const sum = useSummary();
   const list = useProviderList();
   const [p, setP] = useState(null);
@@ -160,16 +160,16 @@ function ProviderPage({ tenant, name, navigate }) {
     }
   }, [name]);
   usePoll(load, POLL_MS);
-  const deleted = () => { sum.refresh(); navigate(providerPath(tenant)); };
+  const deleted = () => { sum.refresh(); navigate(providerPath(project)); };
   return (
-    <ProviderView tenant={tenant} name={name} p={p} err={err} note={note} kinds={list ? list.kinds || [] : null}
+    <ProviderView project={project} name={name} p={p} err={err} note={note} kinds={list ? list.kinds || [] : null}
       navigate={navigate} onDeleted={deleted} />
   );
 }
 
 // ProviderView is a provider's page as read (p, or the read's error).
-export function ProviderView({ tenant, name, p, err, note, kinds, navigate, onDeleted }) {
-  const { can: c } = useAccess(tenant);
+export function ProviderView({ project, name, p, err, note, kinds, navigate, onDeleted }) {
+  const { can: c } = useAccess(project);
   const [delErr, setDelErr] = useState('');
   const [armed, arm, disarm] = useArm();
   if (err && notAvailable(err)) return <div className="creds"><NotAvailable what="Access providers" /></div>;
@@ -177,24 +177,24 @@ export function ProviderView({ tenant, name, p, err, note, kinds, navigate, onDe
     return (
       <div className="creds">
         <PageHead kind="Access provider" title={name} mono />
-        <p className="empty">No provider <span className="mono">{name}</span> in this tenant. <a href={providerPath(tenant)}
-          onClick={go(navigate, providerPath(tenant))}>All providers</a></p>
+        <p className="empty">No provider <span className="mono">{name}</span> in this project. <a href={providerPath(project)}
+          onClick={go(navigate, providerPath(project))}>All providers</a></p>
       </div>
     );
   }
   if (!p) return err ? <ErrBox error={err.message} /> : <p className="empty">Loading…</p>;
   const builtIn = p.builtIn || p.name === FERUN;
   const ok = served(p.kind, kinds);
-  const why = c.adminTenant ? undefined : ADMIN_REASON;
+  const why = c.adminProject ? undefined : ADMIN_REASON;
   const envs = p.environments || [];
   return (
     <div className="creds">
       <PageHead kind="Access provider" title={p.name} mono
         state={builtIn ? <span className="badge acc">built in</span> : <span className="badge">{kindLabel(p.kind)}</span>}
         actions={!builtIn && (
-          <a className={'button primary' + (c.adminTenant ? '' : ' disabled')} href={providerPath(tenant, p.name, true)}
+          <a className={'button primary' + (c.adminProject ? '' : ' disabled')} href={providerPath(project, p.name, true)}
             title={why || 'change it'}
-            onClick={(e) => { e.preventDefault(); if (c.adminTenant) navigate(providerPath(tenant, p.name, true)); }}>
+            onClick={(e) => { e.preventDefault(); if (c.adminProject) navigate(providerPath(project, p.name, true)); }}>
             <Icon name="settings" size={14} /> Edit</a>)}
         facts={(
           <>
@@ -221,7 +221,7 @@ export function ProviderView({ tenant, name, p, err, note, kinds, navigate, onDe
             : (
               <ul className="prov-envs">
                 {envs.map((e) => {
-                  const to = envPath(tenant, e.name, 'access');
+                  const to = envPath(project, e.name, 'access');
                   return <li key={e.id}><a className="mono" href={to} onClick={go(navigate, to)}>{e.name}</a></li>;
                 })}
               </ul>)}
@@ -234,7 +234,7 @@ export function ProviderView({ tenant, name, p, err, note, kinds, navigate, onDe
           <p className="muted small">Refused while an environment names it: publish those with another provider, or open them
             to anyone, first.</p>
           <ErrBox error={delErr} />
-          <ArmButton armKey="delete" armed={armed} arm={arm} disarm={disarm} disabled={!c.adminTenant} title={why}
+          <ArmButton armKey="delete" armed={armed} arm={arm} disarm={disarm} disabled={!c.adminProject} title={why}
             icon="trash" confirmLabel={`delete ${p.name}?`}
             onConfirm={async () => {
               setDelErr('');
@@ -263,9 +263,9 @@ export function ProviderDefinition({ p }) {
   const rows = [];
   if (p.kind === 'ferun') {
     rows.push(['issuer', 'the sign-in of this installation (ferun-auth)']);
-    rows.push(['rule', 'a grant of at least read on the environment or the tenant, asked at every renewal']);
+    rows.push(['rule', 'a grant of at least read on the environment or the project, asked at every renewal']);
   }
-  if (p.kind === 'tenant') {
+  if (p.kind === 'project') {
     rows.push(['address', <span className="mono cred-up">{p.url}</span>]);
     rows.push(['asked', 'with each renewal of a visit, at most once in 8 minutes: a POST of the visit\'s ID, signed by ferund (its key at /api/v1/visit-keys)']);
   }
@@ -287,7 +287,7 @@ export function ProviderDefinition({ p }) {
 
 // ------------------------------------------------------------------ form --
 
-function ProviderEditor({ tenant, name, navigate }) {
+function ProviderEditor({ project, name, navigate }) {
   const list = useProviderList();
   const [p, setP] = useState(null);
   const [err, setErr] = useState(null);
@@ -299,13 +299,13 @@ function ProviderEditor({ tenant, name, navigate }) {
   }, [name]);
   if (err && notAvailable(err)) return <div className="creds"><NotAvailable what="Access providers" /></div>;
   if (name && !p) return err ? <ErrBox error={err.message} /> : <p className="empty">Loading…</p>;
-  return <ProviderForm tenant={tenant} p={p} kinds={list ? list.kinds || [] : null} navigate={navigate} />;
+  return <ProviderForm project={project} p={p} kinds={list ? list.kinds || [] : null} navigate={navigate} />;
 }
 
 // ProviderForm makes a provider (p null) or changes p, whose client
 // secret an empty field keeps.
-export function ProviderForm({ tenant, p, kinds, navigate }) {
-  const { can: c } = useAccess(tenant);
+export function ProviderForm({ project, p, kinds, navigate }) {
+  const { can: c } = useAccess(project);
   const sum = useSummary();
   const [f, setF] = useState(() => (p ? formOf(p) : emptyForm()));
   const [bad, setBad] = useState('');
@@ -313,8 +313,8 @@ export function ProviderForm({ tenant, p, kinds, navigate }) {
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const editing = !!p;
   const name = editing ? p.name : f.name.trim();
-  const back = editing ? providerPath(tenant, p.name) : providerPath(tenant);
-  const why = c.adminTenant ? undefined : ADMIN_REASON;
+  const back = editing ? providerPath(project, p.name) : providerPath(project);
+  const why = c.adminProject ? undefined : ADMIN_REASON;
 
   const save = async (e) => {
     e.preventDefault();
@@ -335,7 +335,7 @@ export function ProviderForm({ tenant, p, kinds, navigate }) {
       await api.putProvider(name, body);
       saved = { name, created: !editing };
       sum.refresh();
-      navigate(providerPath(tenant, name));
+      navigate(providerPath(project, name));
     } catch (e2) {
       setBad(e2.body && e2.body.code ? `${e2.body.code}: ${e2.message}` : e2.message);
     } finally {
@@ -359,7 +359,7 @@ export function ProviderForm({ tenant, p, kinds, navigate }) {
         actions={(
           <>
             <a className="button ghost" href={back} onClick={go(navigate, back)}>Cancel</a>
-            <button type="submit" className="primary" disabled={!c.adminTenant || saving} title={why}>
+            <button type="submit" className="primary" disabled={!c.adminProject || saving} title={why}>
               <Icon name="check" size={14} /> {saving ? 'Saving…' : 'Save'}</button>
           </>)}
         facts={<span>{WHAT}</span>} />
@@ -369,7 +369,7 @@ export function ProviderForm({ tenant, p, kinds, navigate }) {
           <label className="cred-field">
             <span className="cred-label">name</span>
             <input className="mono" value={f.name} onChange={set('name')} placeholder="members" autoFocus />
-            <span className="cred-hint">A DNS label; environments name it. ferun is taken: it is every tenant&apos;s.</span>
+            <span className="cred-hint">A DNS label; environments name it. ferun is taken: it is every project&apos;s.</span>
           </label>)}
         <div className="cred-field">
           <span className="cred-label">kind</span>
@@ -383,11 +383,11 @@ export function ProviderForm({ tenant, p, kinds, navigate }) {
             })}
           </span>
         </div>
-        {f.kind === 'tenant' && (
+        {f.kind === 'project' && (
           <>
             {textInput('url', 'address', 'https://app.example.com/api/visit',
               'One address of your service: the browser comes there with a challenge (a GET), ferund with a visit (a POST of '
-              + '{"visit": "<id>"}) at each renewal. Your service reads both with a tenant token that is admin on the environment, '
+              + '{"visit": "<id>"}) at each renewal. Your service reads both with a project token that is admin on the environment, '
               + 'and answers ferund {"admitted": true} or {"admitted": false}. An address on the public internet: ferund does not '
               + 'dial the cluster\'s or the nodes\' networks.')}
           </>)}

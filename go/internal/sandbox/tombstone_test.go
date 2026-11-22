@@ -203,7 +203,7 @@ func TestDeleteThenCreateSameID(t *testing.T) {
 		}
 		return nil
 	})
-	row, tombstoned, err := e.Delete(bg, testTenant, sb.ID)
+	row, tombstoned, err := e.Delete(bg, testProject, sb.ID)
 	if err != nil || !tombstoned || row.ClientState != model.StateRunning {
 		t.Fatalf("delete: %+v %v %v", row, tombstoned, err)
 	}
@@ -215,7 +215,7 @@ func TestDeleteThenCreateSameID(t *testing.T) {
 		t.Fatalf("tombstones %+v", ts)
 	}
 	// An unknown sandbox is not found.
-	_, _, err = e.Delete(bg, testTenant, podid.Mint())
+	_, _, err = e.Delete(bg, testProject, podid.Mint())
 	wantErr(t, err, model.ErrNotFound, "unknown sandbox")
 
 	// Created again at once: a new incarnation, kept off n1 until the
@@ -250,44 +250,44 @@ func TestDeleteThenCreateSameID(t *testing.T) {
 	}
 }
 
-func TestDeleteTenant(t *testing.T) {
+func TestDeleteProject(t *testing.T) {
 	h := newHarness(t)
 	h.addNode("n1")
 	e := h.eng()
 	a := h.running(512)
 	b := h.sandbox(512)
-	// Another tenant's request does not find the sandbox.
+	// Another project's request does not find the sandbox.
 	_, _, err := e.Delete(bg, "someone-else", a.ID)
 	wantErr(t, err, model.ErrNotFound, "unknown sandbox "+a.ID.String())
-	existed, err := e.DeleteTenant(bg, testTenant)
+	existed, err := e.DeleteProject(bg, testProject)
 	if err != nil || !existed {
-		t.Fatalf("delete tenant: %v %v", existed, err)
+		t.Fatalf("delete project: %v %v", existed, err)
 	}
 	for _, id := range []podid.ID{a.ID, b.ID} {
 		if _, err := h.st.GetSandbox(bg, id); !errors.Is(err, model.ErrNotFound) {
 			t.Fatalf("sandbox %s stayed: %v", id, err)
 		}
 	}
-	// The tenant stays while it has environments, which the
+	// The project stays while it has environments, which the
 	// environments' controller deletes; the next pass then deletes it.
-	if tn, err := h.st.GetTenant(bg, testTenant); err != nil || !tn.Deleting() {
-		t.Fatalf("tenant %+v %v", tn, err)
+	if tn, err := h.st.GetProject(bg, testProject); err != nil || !tn.Deleting() {
+		t.Fatalf("project %+v %v", tn, err)
 	}
-	h.exec("DELETE FROM environments WHERE owner = $1", testTenant)
-	if err := e.tenantDeletion(bg); err != nil {
+	h.exec("DELETE FROM environments WHERE owner = $1", testProject)
+	if err := e.projectDeletion(bg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.st.GetTenant(bg, testTenant); !errors.Is(err, store.ErrNoRow) {
-		t.Fatalf("tenant stayed: %v", err)
+	if _, err := h.st.GetProject(bg, testProject); !errors.Is(err, store.ErrNoRow) {
+		t.Fatalf("project stayed: %v", err)
 	}
 	h.noPod("n1", a.ID)
-	existed, err = e.DeleteTenant(bg, "nobody")
+	existed, err = e.DeleteProject(bg, "nobody")
 	if err != nil || existed {
-		t.Fatalf("unknown tenant: %v %v", existed, err)
+		t.Fatalf("unknown project: %v %v", existed, err)
 	}
 
 	// The leader's loop finishes a deletion that a request began.
-	if _, _, err := h.st.CreateTenant(bg, "t2"); err != nil {
+	if _, _, err := h.st.CreateProject(bg, "t2"); err != nil {
 		t.Fatal(err)
 	}
 	c, _, err := h.st.CreateSandbox(bg, store.NewSandbox{ID: podid.Mint(), Owner: "t2", Image: testImage, VCPUs: 1, MemoryMiB: 512,
@@ -295,18 +295,18 @@ func TestDeleteTenant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.exec("UPDATE tenants SET deleting_at = now() WHERE id = 't2'")
-	if err := e.tenantDeletion(bg); err != nil {
+	h.exec("UPDATE projects SET deleting_at = now() WHERE id = 't2'")
+	if err := e.projectDeletion(bg); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.st.GetSandbox(bg, c.ID); !errors.Is(err, model.ErrNotFound) {
 		t.Fatalf("the loop left a sandbox: %v", err)
 	}
 	h.exec("DELETE FROM environments WHERE owner = 't2'")
-	if err := e.tenantDeletion(bg); err != nil {
+	if err := e.projectDeletion(bg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.st.GetTenant(bg, "t2"); !errors.Is(err, store.ErrNoRow) {
-		t.Fatalf("the loop left the tenant: %v", err)
+	if _, err := h.st.GetProject(bg, "t2"); !errors.Is(err, store.ErrNoRow) {
+		t.Fatalf("the loop left the project: %v", err)
 	}
 }

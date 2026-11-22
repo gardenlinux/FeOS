@@ -70,16 +70,16 @@ func checkNewEnv(name, id string, labels map[string]string) (uuid.UUID, error) {
 // its write: the transaction runs again.
 var errRace = errors.New("another request created the environment first")
 
-// insertEnv inserts an environment in tx (whose tenant it locked): the
+// insertEnv inserts an environment in tx (whose project it locked): the
 // existing one and false when idempotent and the same ID and name are
-// the tenant's already; 409 id_taken or name_taken otherwise.
-func insertEnv(ctx context.Context, tx *store.Store, tenant string, id uuid.UUID, name string, labels map[string]string,
+// the project's already; 409 id_taken or name_taken otherwise.
+func insertEnv(ctx context.Context, tx *store.Store, project string, id uuid.UUID, name string, labels map[string]string,
 	idempotent bool) (store.Environment, bool, error) {
 	byID, err := tx.GetEnvironment(ctx, id)
 	switch {
-	case err == nil && idempotent && byID.Owner == tenant && byID.Name == name:
+	case err == nil && idempotent && byID.Owner == project && byID.Name == name:
 		return byID, false, nil
-	case err == nil && byID.Owner == tenant && byID.Name == name:
+	case err == nil && byID.Owner == project && byID.Name == name:
 		return store.Environment{}, false, apierr.WithCode(http.StatusConflict, CodeIDTaken,
 			"an environment of id %s exists", id)
 	case err == nil:
@@ -88,13 +88,13 @@ func insertEnv(ctx context.Context, tx *store.Store, tenant string, id uuid.UUID
 	case !errors.Is(err, store.ErrNoRow):
 		return store.Environment{}, false, err
 	}
-	if _, err := tx.LockEnvironmentByName(ctx, tenant, name, store.NoLock); err == nil {
+	if _, err := tx.LockEnvironmentByName(ctx, project, name, store.NoLock); err == nil {
 		return store.Environment{}, false, apierr.WithCode(http.StatusConflict, CodeNameTaken,
 			"an environment named %s exists with another id", name)
 	} else if !errors.Is(err, store.ErrNoRow) {
 		return store.Environment{}, false, err
 	}
-	e, err := tx.InsertEnvironment(ctx, store.NewEnvironment{ID: id, Owner: tenant, Name: name, Labels: labels})
+	e, err := tx.InsertEnvironment(ctx, store.NewEnvironment{ID: id, Owner: project, Name: name, Labels: labels})
 	if errors.Is(err, store.ErrExists) {
 		return store.Environment{}, false, errRace
 	}
@@ -149,9 +149,10 @@ func secretRefPaths(sp spec.Spec) map[string][]string {
 // its attached services (and the routes to them), which run in a
 // sandbox of the source, without its routes that have a host, which is
 // the source's (ADR 0045: the clone has no domain and no label yet), and
-// with its secrets and its bindings' credentials pinned to nothing (the
-// clone's own versions are pinned, and a credential's upstream and mode
-// are its version's).
+// carried to the clone (spec.Portable, ADR 0058): its secrets keep what
+// the code expects of them and are pinned to no version, its bindings'
+// credentials too (the clone's own versions are pinned, and a
+// credential's upstream and mode are its version's).
 func cloneSpec(stored []byte) ([]byte, []spec.Finding, error) {
 	sp, err := parseStored(stored)
 	if err != nil {
@@ -182,23 +183,26 @@ func cloneSpec(stored []byte) ([]byte, []spec.Finding, error) {
 				Remedy:  "pass a spec that routes it on a host of the new environment"})
 		}
 	}
-	for name := range sp.Secrets {
-		sp.Secrets[name] = spec.SecretRef{}
-	}
-	for name, b := range sp.Bindings {
-		if ref := b.CredentialRef; ref != nil {
-			b.CredentialRef = &spec.CredentialRef{Name: ref.Name}
-			b.Upstream, b.Mode = "", ""
-			sp.Bindings[name] = b
-		}
-	}
-	b, err := json.Marshal(sp)
+	// The secrets keep what the code expects and the bindings their
+	// credentials' names; versions and upstreams are the source's.
+	b, err := json.Marshal(spec.Portable(*sp))
 	return b, fs, err
 }
 
+// cloneRemedy is the remedy of a secret or credential the new
+// environment lacks: pass, the JSON field that copies it; a YAML clone
+// has no such field and copies none (ADR 0057).
+func cloneRemedy(format spec.Format, what, pass string) string {
+	if format == spec.FormatYAML {
+		return "a YAML clone copies no " + what + ": clone with JSON and " + pass
+	}
+	return pass
+}
+
 // clone is Clone.
-func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneRequest) (EnvStatus, error) {
-	src, err := resolveEnv(ctx, s.st, tenant, ref, store.NoLock)
+func (s *Service) clone(ctx context.Context, project, ref string, req CloneRequest, format spec.Format) (EnvStatus,
+	error) {
+	src, err := resolveEnv(ctx, s.st, project, ref, store.NoLock)
 	if err != nil {
 		return EnvStatus{}, err
 	}
@@ -210,11 +214,11 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		return EnvStatus{}, err
 	}
 	// A taken ID is refused before anything is planned under it: it may
-	// be another tenant's environment. insertEnv checks again.
+	// be another project's environment. insertEnv checks again.
 	if req.ID != "" {
 		byID, err := s.st.GetEnvironment(ctx, id)
 		switch {
-		case err == nil && byID.Owner == tenant && byID.Name == req.Name:
+		case err == nil && byID.Owner == project && byID.Name == req.Name:
 			return EnvStatus{}, apierr.WithCode(http.StatusConflict, CodeIDTaken, "an environment of id %s exists", id)
 		case err == nil:
 			return EnvStatus{}, apierr.WithCode(http.StatusConflict, CodeIDTaken,
@@ -247,10 +251,24 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		srcRel = &r
 	}
 	raw := []byte(req.Spec)
+	// A YAML spec is read once, as the JSON it stands for; one that does
+	// not read is refused with the findings of its reading. An empty one
+	// is none: the source's deployment is cloned.
+	unread := false
+	if format == spec.FormatYAML && len(bytes.TrimSpace(raw)) > 0 {
+		j, yfs := spec.YAMLToJSON(raw)
+		if spec.HasErrors(yfs) {
+			fs = append(fs, yfs...)
+			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: "spec", Problem: "the spec cannot be read",
+				Remedy: "fix the findings above"})
+			unread = true
+		}
+		raw = j
+	}
 	// stored: the clone applies its source's deployment, whose bindings
 	// stated in its spec it accepts as they ran (ADR 0055).
 	stored := false
-	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
+	if !unread && (len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null") {
 		raw, stored = nil, true
 		if srcRel == nil {
 			fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: "deployment",
@@ -288,7 +306,8 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		c.CreatedBy = auth.MadeBy(ctx)
 		creds = append(creds, c)
 		vcCreds[name] = spec.CredentialInfo{Latest: 1,
-			Versions: map[int]spec.CredentialTemplate{1: {Upstream: c.Upstream, Mode: c.Mode}}}
+			Versions: map[int]spec.CredentialTemplate{1: {Upstream: c.Upstream, Mode: c.Mode,
+				ForwardedHost: c.ForwardedHost}}}
 		return true, nil
 	}
 	for _, name := range slices.Sorted(maps.Keys(req.Secrets)) {
@@ -384,7 +403,8 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		c.CreatedBy = auth.MadeBy(ctx)
 		creds = append(creds, c)
 		vcCreds[name] = spec.CredentialInfo{Latest: 1,
-			Versions: map[int]spec.CredentialTemplate{1: {Upstream: c.Upstream, Mode: c.Mode}}}
+			Versions: map[int]spec.CredentialTemplate{1: {Upstream: c.Upstream, Mode: c.Mode,
+				ForwardedHost: c.ForwardedHost}}}
 	}
 
 	// A credential the spec names that is not copied: said here, with the
@@ -404,7 +424,8 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 				noCred[path] = true
 				fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: path,
 					Problem: "the new environment has no credential " + ref.Name,
-					Remedy:  fmt.Sprintf(`pass credentials: {"%s": {"copy": true}}`, ref.Name)})
+					Remedy: cloneRemedy(format, "credential",
+						fmt.Sprintf(`pass credentials: {"%s": {"copy": true}}`, ref.Name))})
 			}
 		}
 	}
@@ -420,9 +441,13 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 					continue
 				}
 				if slices.Contains(spec.ReferencedHTTP(sp), name) {
+					if sp.Secrets[name].Type == spec.SecretTypeValue {
+						continue // the plan's finding at secrets.<name>.type says it
+					}
 					fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: refs[name][0],
 						Problem: "the new environment has no HTTP secret " + name,
-						Remedy:  fmt.Sprintf(`pass secrets: {"%s": {"copy": true}}`, name)})
+						Remedy: cloneRemedy(format, "secret", fmt.Sprintf(`pass secrets: {"%s": {"copy": true}}`, name)) +
+							"; the spec's code expects " + spec.HTTPSecretToMake(sp, name)})
 					// Validate says no more of it.
 					for _, path := range refs[name] {
 						noCred[path] = true
@@ -431,7 +456,7 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 				}
 				fs = append(fs, spec.Finding{Severity: spec.SeverityError, Path: refs[name][0],
 					Problem: "the new environment has no secret " + name,
-					Remedy:  fmt.Sprintf(`pass secrets: {"%s": {"copy": true}} or a value`, name)})
+					Remedy:  cloneRemedy(format, "secret", fmt.Sprintf(`pass secrets: {"%s": {"copy": true}} or a value`, name))})
 				// Validate says no more of it.
 				vcSecrets[name] = spec.SecretInfo{Latest: 1, Versions: []int{1}}
 			}
@@ -441,7 +466,8 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 	// The plan, as deployment 1 of an environment that is not there yet.
 	var norm spec.Spec
 	if raw != nil {
-		p, err := s.plan(ctx, tenant, store.Environment{ID: id, Owner: tenant, Name: req.Name}, raw, nil, spec.ModeApply,
+		p, err := s.plan(ctx, project, store.Environment{ID: id, Owner: project, Name: req.Name}, raw, spec.FormatJSON,
+			nil, spec.ModeApply,
 			vcSecrets, vcCreds, stored)
 		if err != nil {
 			return EnvStatus{}, err
@@ -474,7 +500,7 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 	}
 	author := req.Author
 	if author == "" {
-		author = tenant
+		author = project
 	}
 	var annotations map[string]string
 	if srcRel != nil {
@@ -482,7 +508,7 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 	}
 	var row store.Environment
 	err = s.inTxRetry(ctx, func(tx *store.Store) error {
-		t, err := lockQuota(ctx, tx, tenant)
+		t, err := lockQuota(ctx, tx, project)
 		if err != nil {
 			return err
 		}
@@ -493,7 +519,7 @@ func (s *Service) clone(ctx context.Context, tenant, ref string, req CloneReques
 		if err := checkQuota(ctx, tx, t, quota.Use{Environments: 1}, id, nil, next); err != nil {
 			return err
 		}
-		e, _, err := insertEnv(ctx, tx, tenant, id, req.Name, req.Labels, false)
+		e, _, err := insertEnv(ctx, tx, project, id, req.Name, req.Labels, false)
 		if err != nil {
 			return err
 		}

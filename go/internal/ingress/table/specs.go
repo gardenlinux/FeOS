@@ -25,7 +25,7 @@ var ErrSpec = errors.New("no usable deployment spec")
 // ErrTooLarge is wrapped by the error of an environment whose entry in
 // the table would take more than MaxEnvBytes coded. Like an environment
 // without a usable spec, it is left out of the table, so that no
-// tenant's environments can make the table's messages too large for the
+// project's environments can make the table's messages too large for the
 // ingress (wire.PartBytes, wire.MaxMessageBytes).
 var ErrTooLarge = errors.New("the environment is too large for the ingress's table")
 

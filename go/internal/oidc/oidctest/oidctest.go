@@ -140,6 +140,11 @@ type Provider struct {
 	Mutate      func(claims, header map[string]any)
 	Corrupt     func(token string) string
 	JWKSFetches int
+	// DiscoveryFetches counts the discovery document's fetches.
+	DiscoveryFetches int
+	// DiscoveryDown and JWKSDown make discovery and the key set answer
+	// 503.
+	DiscoveryDown, JWKSDown bool
 	// UserinfoSub overrides the sub of userinfo.
 	UserinfoSub string
 }
@@ -172,6 +177,11 @@ func New(t *testing.T, alg string) *Provider {
 func (p *Provider) discovery(w http.ResponseWriter, _ *http.Request) {
 	p.Mu.Lock()
 	defer p.Mu.Unlock()
+	p.DiscoveryFetches++
+	if p.DiscoveryDown {
+		http.Error(w, "down", http.StatusServiceUnavailable)
+		return
+	}
 	iss := p.Issuer
 	if p.DiscoveryIssuer != "" {
 		iss = p.DiscoveryIssuer
@@ -193,6 +203,10 @@ func (p *Provider) jwks(w http.ResponseWriter, _ *http.Request) {
 	p.Mu.Lock()
 	defer p.Mu.Unlock()
 	p.JWKSFetches++
+	if p.JWKSDown {
+		http.Error(w, "down", http.StatusServiceUnavailable)
+		return
+	}
 	keys := []map[string]string{}
 	for _, k := range p.Published {
 		keys = append(keys, k.JWK())
@@ -329,6 +343,35 @@ func (p *Provider) LogoutToken(over map[string]any) string {
 	p.Mu.Unlock()
 	return signer.Sign(p.T, map[string]any{"alg": signer.Alg, "kid": signer.Kid, "typ": "logout+jwt"}, payload)
 }
+
+// AccessToken signs an access token of the client credentials grant, as
+// Hydra issues one with access_token_strategy jwt (RFC 9068), for the
+// client sub with claims over the valid defaults (aud
+// https://run.example.test, an hour; nil deletes one).
+func (p *Provider) AccessToken(sub string, over map[string]any) string {
+	p.T.Helper()
+	now := time.Now().Unix()
+	c := map[string]any{"iss": p.Issuer, "sub": sub, "client_id": sub, "aud": []string{AccessAudience},
+		"iat": now, "nbf": now, "exp": now + 3600, "jti": RandomString(p.T), "scp": []string{}}
+	for k, v := range over {
+		if v == nil {
+			delete(c, k)
+		} else {
+			c[k] = v
+		}
+	}
+	payload, err := json.Marshal(c)
+	if err != nil {
+		p.T.Fatal(err)
+	}
+	p.Mu.Lock()
+	signer := p.Signer
+	p.Mu.Unlock()
+	return signer.Sign(p.T, map[string]any{"alg": signer.Alg, "kid": signer.Kid, "typ": "at+jwt"}, payload)
+}
+
+// AccessAudience is the audience of AccessToken's tokens by default.
+const AccessAudience = "https://run.example.test"
 
 // AdminClaims are an admin's claims as the provider sends them.
 func AdminClaims() map[string]any {

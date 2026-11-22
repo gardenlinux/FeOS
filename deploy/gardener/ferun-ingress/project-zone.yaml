@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: SAP SE or an SAP affiliate company and IronCore contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# The project zone's wildcard (ADR 0031), only with PROJECT_ZONE: the hosts
+# of the projects people make, <label>.${PROJECT_ZONE}. The instances mount
+# project-wildcard-tls beside apps-wildcard-tls and serve it for every name
+# it covers. The issuer's DNS-01 token must edit the zone that holds
+# ${PROJECT_ZONE}; the operator publishes *.${PROJECT_ZONE} A <address> of
+# the Service ferun-ingress, DNS only.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: project-wildcard
+  namespace: ferun-ingress
+spec:
+  secretName: project-wildcard-tls
+  dnsNames:
+    - "*.${PROJECT_ZONE}"
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer

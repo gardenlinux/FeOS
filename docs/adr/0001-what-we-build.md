@@ -3,7 +3,7 @@
 **Status:** Accepted · **Date:** 2026-10-14
 
 Agent sandboxes and a container as a service (CaaS) are two products on
-one platform. Both run untrusted code of many tenants, so both run on the
+one platform. Both run untrusted code of many projects, so both run on the
 same unit, the pod: a Firecracker microVM with `feos-guest` and one or
 more containers, which can be suspended to a snapshot and resumed, in
 place or on another node. FeOS is everything that runs on a node and
@@ -26,8 +26,8 @@ We offer two things:
   as services without operating a cluster. Many services are idle most
   of the time, too.
 
-Both run untrusted code of many tenants in containers, and both need a
-stronger boundary between tenants than a shared kernel gives. Both are
+Both run untrusted code of many projects in containers, and both need a
+stronger boundary between projects than a shared kernel gives. Both are
 idle most of the time, so what an idle workload costs shapes the platform
 as much as isolation does.
 
@@ -50,7 +50,7 @@ node of someone's cluster.
 ### The pod is the unit
 
 A node runs **pods**: a Firecracker microVM that runs `feos-guest` and one
-or more containers (ADR 0004). The VM is the boundary between tenants, the
+or more containers (ADR 0004). The VM is the boundary between projects, the
 container the boundary around the workload. An isolated container is a
 pod with one container. A pod can be suspended to a snapshot and resumed
 (ADR 0008).
@@ -65,7 +65,7 @@ services.
 
 ### The control plane is central
 
-Tenants, tokens, the registry of sandboxes and services, placement, the
+Projects, tokens, the registry of sandboxes and services, placement, the
 policies that pause, hibernate and scale to zero, and the front doors (a
 REST API, MCP, HTTP to the ports of pods) run centrally and replicated,
 in programs of their own (ADR 0015; the ingress, ADR 0021; the sink,
@@ -80,7 +80,7 @@ usually changes both sides at once. They live in one repository
 
 ### Requirements
 
-1. **Isolation.** The VM is the boundary between tenants. No control
+1. **Isolation.** The VM is the boundary between projects. No control
    surface is reachable without authentication; a pod reaches only what
    is declared for it (ADR 0012); no credential enters a pod (ADR 0014).
 2. **Cheap suspend.** Suspending is frequent: it writes what changed, not
@@ -107,7 +107,7 @@ usually changes both sides at once. They live in one repository
   own** that takes released FeOS artifacts. Every feature that crosses the
   API would become a change, a release and a version bump on two sides.
 - **A runtime per product**: microVMs for sandboxes, containers on a shared
-  kernel for CaaS. Two runtimes to build, and CaaS tenants are no more
+  kernel for CaaS. Two runtimes to build, and CaaS projects are no more
   trusted than agents.
 - **Kubernetes with a VM runtime** as the platform, a pod per sandbox. The
   sandbox system measured a constant 1 to 1.5 s added to every resume, and

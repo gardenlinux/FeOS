@@ -25,12 +25,12 @@ const sinkPage = 500
 // sinkLog reads the last lines lines of a stream's main container from
 // the sink (ADR 0026), oldest first, within answerLog's budget: sel names
 // the stream (instance=<sandbox ID>, or job=<ID>), since its start. It
-// asks with the caller's own token or session (auth.Tenant.PassOn), so
+// asks with the caller's own token or session (auth.Project.PassOn), so
 // that the sink answers what the caller may read only. ok is false
 // without --sink-url or either, when the sink fails, and when it has no
 // line: the caller reads the node then.
 func (c *Controller) sinkLog(ctx context.Context, key, value string, since time.Time, lines int) ([]string, bool) {
-	t, _ := auth.TenantFrom(ctx)
+	t, _ := auth.ProjectFrom(ctx)
 	if c.d.SinkURL == "" || !t.Passable() || lines <= 0 {
 		return nil, false
 	}
@@ -85,7 +85,7 @@ type sinkLine struct {
 
 // sinkPage asks the sink for one page: its lines, oldest first, and the
 // cursor to the older page ("": none).
-func (c *Controller) sinkPage(ctx context.Context, t auth.Tenant, q url.Values) ([]sinkLine, string, error) {
+func (c *Controller) sinkPage(ctx context.Context, t auth.Project, q url.Values) ([]sinkLine, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(c.d.SinkURL, "/")+"/api/v1/logs?"+q.Encode(), nil)
 	if err != nil {
 		return nil, "", err

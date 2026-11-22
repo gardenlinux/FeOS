@@ -120,7 +120,7 @@ func TestTraceContinued(t *testing.T) {
 		t.Errorf("record's span %s/%s/%s %q %x, want %s/%s/%s", r.TraceID, r.SpanID, r.ParentSpanID, r.TraceState,
 			r.TraceFlags, id, span, parent)
 	}
-	if r.Env != testEnv || r.Tenant != "acme" || r.Service != "web" || r.Instance != "w1" || r.Host != testHost ||
+	if r.Env != testEnv || r.Project != "acme" || r.Service != "web" || r.Instance != "w1" || r.Host != testHost ||
 		r.Method != "GET" || r.Path != "/x" || r.Status != http.StatusOK || r.Outcome != "2xx" || r.Attempts != 1 ||
 		r.ClientIP != "127.0.0.1" || r.UserAgent != "test-agent" || r.BytesOut == 0 || r.DurationNs <= 0 ||
 		r.Proto != "HTTP/1.1" || r.Time.IsZero() {

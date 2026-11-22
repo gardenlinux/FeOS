@@ -3,12 +3,15 @@
 
 // Package spec is the deployment spec of an environment (ADR 0018): the
 // wire format a client sends to plan or apply a deployment, and ferund's
-// treatment of it, which is pure (no database, no node, no registry):
+// treatment of it, which is pure (no database, no node, no registry).
+// The format itself, its types, Parse and MergePatch, is FeRun's published
+// module github.com/gardenlinux/feos/go/ferun/spec (ADR 0057), which
+// published.go names under the same names; judging it is this package's:
 //
 //   - Parse reads a spec strictly: unknown fields anywhere are error
 //     findings, never ignored.
 //   - Validate checks it against the rules of the contract's §3, looking
-//     up what lies outside the spec (the tenant's sandboxes, the
+//     up what lies outside the spec (the project's sandboxes, the
 //     environment's secrets, the addon types, the images' resolution)
 //     through a ValidateContext the caller filled beforehand.
 //   - Normalise fills the defaults, makes the runtime explicit, writes
@@ -19,6 +22,10 @@
 //     the effect on the running pods; secret values never appear in a
 //     spec, versions do.
 //   - MergePatch applies an RFC 7396 merge patch to a spec document.
+//
+// The bounds and defaults of a spec (limits.go) are this package's too:
+// the plan's findings name them, and the module keeps none but the size
+// Parse applies.
 //
 // The security groups of ADR 0034 are objects of the spec (groups.go):
 // Normalise writes their defaults, Validate checks their rules, the

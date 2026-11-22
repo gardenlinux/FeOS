@@ -3,7 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  api, auth, forgetTenantTokens, onSignedOut, setActiveTenant, setBasic,
+  api, auth, forgetOldTokens, onSignedOut, setActiveProject, setBasic,
 } from './api.js';
 import { readItem, writeItem } from './storage.js';
 import { Icon } from './Icon.jsx';
@@ -14,10 +14,10 @@ import {
 } from './routes.js';
 import { shortId } from './format.js';
 import { SignIn } from './views/SignIn.jsx';
-import { TenantGate } from './views/TenantGate.jsx';
-import { InviteAccept, Members, MyTenants, RoleBadge, Tokens } from './views/People.jsx';
+import { ProjectGate } from './views/ProjectGate.jsx';
+import { InviteAccept, Members, MyProjects, RoleBadge, Tokens } from './views/People.jsx';
 import { Home } from './views/Home.jsx';
-import { Tenants } from './views/Tenants.jsx';
+import { Projects } from './views/Projects.jsx';
 import { Tools } from './views/Tools.jsx';
 import { Environments } from './views/Environments.jsx';
 import { NewEnvironment } from './views/NewEnvironment.jsx';
@@ -28,8 +28,11 @@ import { Instances } from './views/Instances.jsx';
 import { Moved } from './views/Moved.jsx';
 import { Domains } from './views/Domains.jsx';
 import { Providers } from './views/Providers.jsx';
-import { TenantSettings, Usage } from './views/TenantPages.jsx';
+import { ProjectSettings, Usage } from './views/ProjectPages.jsx';
 import { Ingresses, PlatformPeople } from './views/Platform.jsx';
+import { Accounts } from './views/Accounts.jsx';
+import { Account } from './views/Account.jsx';
+import { Integrations } from './views/Integrations.jsx';
 import { Palette, usePaletteKey } from './views/Palette.jsx';
 import { SummaryProvider, useSummary } from './summary.jsx';
 import { entries } from './search.js';
@@ -40,18 +43,19 @@ import { sandboxMeta, sideSandboxes } from './views/sandboxes.js';
 import { jobTone, onItsWay } from './views/jobs.js';
 import { EnvStatusProvider, useEnvStatus } from './envstatus.jsx';
 import './styles/shell.css';
+import './styles/people.css';
 import { ToneDot } from './views/Environments.jsx';
 import {
-  MeContext, SETTINGS_NAV, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, atLeast, can, envRole, higher, isOperator, myTenants,
-  tenantAccess, tenantHome, tenantNav, viewGate,
+  MeContext, SETTINGS_NAV, OPERATOR_VIEWS, PLATFORM_GROUPS, PLATFORM_NAV, actsInProjects, can, envCan, isOperator, myProjects,
+  projectAccess, projectHome, projectNav, viewGate,
 } from './people.js';
 
-// The management UI of FeRun, the tenants' console (ADR 0031). Before
+// The management UI of FeRun, the projects' console (ADR 0031). Before
 // anything else it asks ferund who is signed in (/auth/me: the person,
-// whether an operator, their tenants with their roles) and how one signs
+// whether an operator, their projects with their roles) and how one signs
 // in (/auth/config); signed out, or once a call is answered 401, it shows
 // the sign-in screen. /auth/me decides what the UI offers (people.js):
-// operators get the operators' pages, everyone their tenants.
+// operators get the operators' pages, everyone their projects.
 
 // ME_POLL_MS is how often the UI asks /auth/me again, so that a grant
 // given or taken elsewhere shows.
@@ -103,7 +107,7 @@ export default function App() {
     try {
       const [config, me] = await Promise.all([auth.config(), auth.me()]);
       if (!me) setBasic('');
-      forgetTenantTokens();
+      forgetOldTokens();
       setSession({ phase: me ? 'in' : 'out', config, me });
     } catch (e) {
       setSession({ phase: 'error', error: e.message });
@@ -127,9 +131,9 @@ export default function App() {
   }, [signedIn, reload]);
   const meCtx = useMemo(() => ({ me: session.me || null, reload }), [session.me, reload]);
 
-  // The tenant the route acts as, set during render: the views' effects
+  // The project the route acts as, set during render: the views' effects
   // run before this component's, and call the API at once.
-  setActiveTenant(route.tenant || '');
+  setActiveProject(route.project || '');
 
   if (session.phase === 'loading') return <div className="login"><p className="muted">Loading…</p></div>;
   if (session.phase === 'error') {
@@ -165,39 +169,43 @@ export default function App() {
     location.assign(to);
   };
 
-  const access = tenantAccess(me, route.tenant);
-  const tenantCan = can(access);
+  const access = projectAccess(me, route.project);
+  const projectCan = can(access);
   return (
     <MeContext.Provider value={meCtx}>
-    <SummaryProvider tenant={needsGate ? '' : route.tenant || ''} can={tenantCan}>
+    <SummaryProvider project={needsGate ? '' : route.project || ''} can={projectCan}>
     <Shell route={route} navigate={navigate} me={me} onSignOut={signOut}>
-      {route.view === 'tenants' && (operator
-        ? <Tenants key={location.search} navigate={navigate} />
-        : <MyTenants key={location.search} navigate={navigate} />)}
+      {route.view === 'projects' && (operator
+        ? <Projects key={location.search} navigate={navigate} />
+        : <MyProjects key={location.search} navigate={navigate} />)}
       {route.view === 'invite' && <InviteAccept key={route.token} token={route.token} navigate={navigate} />}
-      {needsGate && <TenantGate key={route.tenant} reason={gate} tenant={route.tenant} navigate={navigate} />}
-      {!needsGate && route.view === 'overview' && <Home key={route.tenant} tenant={route.tenant} navigate={navigate} />}
+      {route.view === 'accounts' && <Accounts key={location.search} navigate={navigate} />}
+      {!needsGate && route.view === 'account' && <Account key={route.account} name={route.account} navigate={navigate} />}
+      {needsGate && <ProjectGate key={route.project || route.account} reason={gate} project={route.project}
+        account={route.account} navigate={navigate} />}
+      {!needsGate && route.view === 'overview' && <Home key={route.project} project={route.project} navigate={navigate} />}
       {!needsGate && route.view === 'moved' && <Moved route={route} navigate={navigate} />}
-      {!needsGate && route.view === 'tools' && <Tools key={route.tenant} />}
-      {!needsGate && route.view === 'domains' && <Domains key={route.tenant} tenant={route.tenant} sel={route.sel} navigate={navigate} />}
+      {!needsGate && route.view === 'tools' && <Tools key={route.project} />}
+      {!needsGate && route.view === 'domains' && <Domains key={route.project} project={route.project} sel={route.sel} navigate={navigate} />}
       {!needsGate && (route.view === 'providers' || route.view === 'newProvider') && (
-        <Providers key={route.tenant} tenant={route.tenant} sel={route.view === 'newProvider' ? '' : route.sel}
+        <Providers key={route.project} project={route.project} sel={route.view === 'newProvider' ? '' : route.sel}
           isNew={route.view === 'newProvider'} edit={route.tab === 'edit'} navigate={navigate} />)}
       {!needsGate && SETTINGS_VIEWS.has(route.view) && <SettingsTabs route={route} me={me} navigate={navigate} />}
-      {!needsGate && route.view === 'members' && <Members key={route.tenant} tenant={route.tenant} navigate={navigate} />}
-      {!needsGate && route.view === 'tokens' && <Tokens key={route.tenant} tenant={route.tenant} />}
-      {!needsGate && route.view === 'usage' && <Usage key={route.tenant} tenant={route.tenant} navigate={navigate} />}
-      {!needsGate && route.view === 'settings' && <TenantSettings key={route.tenant} tenant={route.tenant} navigate={navigate} />}
+      {!needsGate && route.view === 'members' && <Members key={route.project} project={route.project} navigate={navigate} />}
+      {!needsGate && route.view === 'tokens' && <Tokens key={route.project} project={route.project} />}
+      {!needsGate && route.view === 'usage' && <Usage key={route.project} project={route.project} navigate={navigate} />}
+      {!needsGate && route.view === 'settings' && <ProjectSettings key={route.project} project={route.project} navigate={navigate} />}
       {!needsGate && route.view === 'environments' && (
-        <Environments key={route.tenant} tenant={route.tenant} env={route.env} tab={route.tab} item={route.item}
+        <Environments key={route.project} project={route.project} env={route.env} tab={route.tab} item={route.item}
           otab={route.otab} replica={route.replica} search={route.search} navigate={navigate} />)}
-      {!needsGate && route.view === 'newEnvironment' && <NewEnvironment key={route.tenant} tenant={route.tenant} navigate={navigate} />}
+      {!needsGate && route.view === 'newEnvironment' && <NewEnvironment key={route.project} project={route.project} navigate={navigate} />}
       {!needsGate && route.view === 'nodes' && <Nodes navigate={navigate} />}
       {!needsGate && route.view === 'node' && <NodeDetail key={route.node} node={route.node} tab={route.tab} navigate={navigate} />}
       {!needsGate && route.view === 'joinTokens' && <JoinTokens />}
       {!needsGate && route.view === 'instances' && <Instances />}
       {!needsGate && route.view === 'ingresses' && <Ingresses navigate={navigate} />}
       {!needsGate && route.view === 'people' && <PlatformPeople navigate={navigate} />}
+      {!needsGate && route.view === 'integrations' && <Integrations navigate={navigate} />}
     </Shell>
     </SummaryProvider>
     </MeContext.Provider>
@@ -207,14 +215,15 @@ export default function App() {
 // ------------------------------------------------------------------ shell --
 
 // platformSpace tells whether a route is in the operators' space: their
-// pages, and the list of every tenant.
+// pages, the list of every project, and the accounts (ADR 0059; a
+// person's accounts are not the platform's space).
 function platformSpace(route, operator) {
-  return OPERATOR_VIEWS.has(route.view) || (operator && route.view === 'tenants');
+  return OPERATOR_VIEWS.has(route.view) || (operator && ['projects', 'accounts', 'account'].includes(route.view));
 }
 
-// lastEnvKey stores the environment last open in a tenant: the sidebar
-// keeps its pages while one is on the tenant's other pages.
-const lastEnvKey = (tenant) => `ferun-env/${tenant}`;
+// lastEnvKey stores the environment last open in a project: the sidebar
+// keeps its pages while one is on the project's other pages.
+const lastEnvKey = (project) => `ferun-env/${project}`;
 
 // Shell is the sidebar, the topbar and the page, and the search above
 // them.
@@ -225,16 +234,16 @@ function Shell({ route, navigate, me, onSignOut, children }) {
   const summary = useSummary();
   const operator = isOperator(me);
   useEffect(() => {
-    if (route.tenant && route.view === 'environments' && route.env) writeItem('localStorage', lastEnvKey(route.tenant), route.env);
-  }, [route.tenant, route.view, route.env]);
-  const env = route.tenant ? chosenEnv(route, summary.environments, readItem('localStorage', lastEnvKey(route.tenant))) : null;
+    if (route.project && route.view === 'environments' && route.env) writeItem('localStorage', lastEnvKey(route.project), route.env);
+  }, [route.project, route.view, route.env]);
+  const env = route.project ? chosenEnv(route, summary.environments, readItem('localStorage', lastEnvKey(route.project))) : null;
   const all = useMemo(() => entries({
-    tenant: route.tenant || '',
-    nav: route.tenant ? tenantNav(tenantAccess(me, route.tenant)) : [],
+    project: route.project || '',
+    nav: route.project ? projectNav(projectAccess(me, route.project)) : [],
     platform: operator ? PLATFORM_NAV : [],
-    tenants: myTenants(me),
+    projects: myProjects(me),
     summary,
-  }), [route.tenant, me, operator, summary]);
+  }), [route.project, me, operator, summary]);
   // The status the sidebar and the environment's pages read: of the
   // route's environment as the route names it, else of the chosen one.
   const inEnv = route.view === 'environments' && !!route.env;
@@ -248,7 +257,7 @@ function Shell({ route, navigate, me, onSignOut, children }) {
         <main className="content">{children}</main>
       </div>
       {searching && (
-        <Palette all={all} tenant={route.tenant || ''} environments={summary.environments || []}
+        <Palette all={all} project={route.project || ''} environments={summary.environments || []}
           onClose={() => setSearching(false)} navigate={navigate} />)}
     </div>
     </EnvStatusProvider>
@@ -258,11 +267,11 @@ function Shell({ route, navigate, me, onSignOut, children }) {
 function Sidebar({ route, navigate, me, env }) {
   const operator = isOperator(me);
   const platform = platformSpace(route, operator);
-  const t = route.tenant;
-  const access = tenantAccess(me, t);
-  const nav = t ? tenantNav(access) : [];
+  const t = route.project;
+  const access = projectAccess(me, t);
+  const nav = t ? projectNav(access) : [];
   const inEnv = route.view === 'environments' && !!route.env;
-  const home = t ? tenantHome(access) : '/tenants';
+  const home = t ? projectHome(access) : '/projects';
 
   return (
     <aside className="sidebar">
@@ -274,7 +283,7 @@ function Sidebar({ route, navigate, me, env }) {
       {!platform && t && nav.some((n) => n.group === 'env') && (
         <EnvSide route={route} navigate={navigate} env={env} access={access} objects={inEnv} />)}
 
-      {!platform && t && !inEnv && <TenantPages route={route} navigate={navigate} nav={nav} tenant={t} />}
+      {!platform && t && !inEnv && <ProjectPages route={route} navigate={navigate} nav={nav} project={t} />}
 
       {platform && PLATFORM_GROUPS.map((g) => (
         <nav key={g.key} className="snav">
@@ -286,10 +295,10 @@ function Sidebar({ route, navigate, me, env }) {
       ))}
 
       {!platform && !t && (
-        <p className="sidehint muted small">Choose a tenant at the top, or make one.</p>)}
+        <p className="sidehint muted small">Choose a project at the top, or make one.</p>)}
 
       <div className="side-foot">
-        {!platform && t && inEnv && <TenantRow tenant={t} nav={nav} to={home} navigate={navigate} />}
+        {!platform && t && inEnv && <ProjectRow project={t} nav={nav} to={home} navigate={navigate} />}
         {operator && (
           <nav className="snav snav-admin">
             <NavItem item={{ view: 'administration', label: 'Administration', icon: 'server' }} active={platform}
@@ -312,10 +321,10 @@ const plainClick = (e) => e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shift
 // made by a call that are on their way, and its sandboxes (ADR 0035).
 // The topbar's switcher chooses another environment.
 function EnvSide({ route, navigate, env, access, objects }) {
-  const canCreate = can(access).writeTenant;
+  const canCreate = can(access).writeProject;
   const { environments } = useSummary();
   const { st, env: statusEnv } = useEnvStatus();
-  const t = route.tenant;
+  const t = route.project;
   const go = (to) => (e) => { if (plainClick(e)) { e.preventDefault(); navigate(to); } };
   if (!env) {
     const newTo = newEnvPath(t);
@@ -348,7 +357,7 @@ function EnvSide({ route, navigate, env, access, objects }) {
     <div className="side-env">
       <a className={'envcard' + (cardOn ? ' on' : '')} href={to} onClick={go(to)} aria-current={cardOn ? 'page' : undefined}
         title="the environment: its overview, or the view open now">
-        <EnvName name={known.name} />
+        <EnvName name={known.name} protected={!!(status ? status.protected : known.protected)} />
         {state && (
           <span className={'envcard-state ' + tone}>
             <ToneDot tone={tone} title={state} />
@@ -363,8 +372,8 @@ function EnvSide({ route, navigate, env, access, objects }) {
             {guarded && <span className="admits-lock"><Icon name="lock" size={11} /></span>}{host}</span>)}
       </a>
       {objects && (status
-        ? <ObjectList route={route} navigate={navigate} st={status} tenant={t}
-          write={atLeast(higher(envRole(access, status.id), envRole(access, status.name)), 'write')} />
+        ? <ObjectList route={route} navigate={navigate} st={status} project={t}
+          write={envCan(access, status.id).write || envCan(access, status.name).write} />
         : <div className="sidehint muted small">…</div>)}
     </div>
   );
@@ -376,7 +385,7 @@ function EnvSide({ route, navigate, env, access, objects }) {
 // their way, and the link to all of them (Activity's Jobs); then its
 // sandboxes, the hibernated folded when there are many (sideSandboxes),
 // with New sandbox where write allows.
-function ObjectList({ route, navigate, st, tenant, write }) {
+function ObjectList({ route, navigate, st, project, write }) {
   const { sandboxes, jobs } = useEnvStatus();
   const [openAll, setOpenAll] = useState(false);
   const env = st.name;
@@ -403,7 +412,7 @@ function ObjectList({ route, navigate, st, tenant, write }) {
           {objects.map((o) => {
             const id = `${o.kind}/${o.name}`;
             const tone = objectTone(o);
-            const to = pickObjectPath(route, tenant, env, o);
+            const to = pickObjectPath(route, project, env, o);
             const on = sel === id;
             const meta = sideMeta(o);
             return (
@@ -415,7 +424,7 @@ function ObjectList({ route, navigate, st, tenant, write }) {
             );
           })}
           {kind === 'job' && live.map((j) => {
-            const to = jobPath(tenant, env, j.id);
+            const to = jobPath(project, env, j.id);
             const on = selJob === j.id;
             const tone = jobTone(j.phase);
             return (
@@ -428,7 +437,7 @@ function ObjectList({ route, navigate, st, tenant, write }) {
             );
           })}
           {kind === 'job' && kept > 0 && (
-            <a className="objitem objitem-more" href={jobPath(tenant, env)} onClick={go(jobPath(tenant, env))}
+            <a className="objitem objitem-more" href={jobPath(project, env)} onClick={go(jobPath(project, env))}
               aria-current={inEnv && route.tab === 'jobs' && !selJob ? 'page' : undefined}>
               <span className="objitem-name">{kept} made by a call</span>
             </a>)}
@@ -438,11 +447,11 @@ function ObjectList({ route, navigate, st, tenant, write }) {
         <nav className="snav objnav" aria-label="sandboxes">
           <div className="snav-label">sandboxes <span className="snav-labelcount">{sandboxes.length}</span>
             {write && (
-              <a className="snav-labeladd" href={newSandboxPath(tenant, env)} onClick={go(newSandboxPath(tenant, env))}
+              <a className="snav-labeladd" href={newSandboxPath(project, env)} onClick={go(newSandboxPath(project, env))}
                 title={`new sandbox in ${env}`} aria-label="new sandbox"><Icon name="plus" size={13} /></a>)}
           </div>
           {side.shown.map((sb) => {
-            const to = sandboxPath(tenant, env, sb.sandboxId, sbView);
+            const to = sandboxPath(project, env, sb.sandboxId, sbView);
             const on = selSandbox === sb.sandboxId;
             const meta = sandboxMeta(sb);
             return (
@@ -464,35 +473,35 @@ function ObjectList({ route, navigate, st, tenant, write }) {
   );
 }
 
-// TenantRow is the tenant at the sidebar's foot while an environment is
+// ProjectRow is the project at the sidebar's foot while an environment is
 // open: one entry for its home, which lists its pages.
-function TenantRow({ tenant, nav, to, navigate }) {
-  const pages = nav.filter((n) => n.group === 'tenant').map((n) => n.label.toLowerCase());
+function ProjectRow({ project, nav, to, navigate }) {
+  const pages = nav.filter((n) => n.group === 'project').map((n) => n.label.toLowerCase());
   return (
-    <a className="tenantrow" href={to} onClick={(e) => { if (plainClick(e)) { e.preventDefault(); navigate(to); } }}
-      title="the tenant's home and its pages">
-      <Icon name="building" size={16} />
-      <span className="tenantrow-text">
-        <span className="tenantrow-name">{tenant}</span>
-        <span className="tenantrow-pages">Tenant{pages.length > 0 ? `: ${pages.join(', ')}` : ''}</span>
+    <a className="projectrow" href={to} onClick={(e) => { if (plainClick(e)) { e.preventDefault(); navigate(to); } }}
+      title="the project's home and its pages">
+      <Icon name="folder" size={16} />
+      <span className="projectrow-text">
+        <span className="projectrow-name">{project}</span>
+        <span className="projectrow-pages">Project{pages.length > 0 ? `: ${pages.join(', ')}` : ''}</span>
       </span>
       <Icon name="chevronRight" size={14} />
     </a>
   );
 }
 
-// TenantPages are the tenant's pages while none of an environment is
-// open: its home, the environments, the tenant's own pages, and one entry
+// ProjectPages are the project's pages while none of an environment is
+// open: its home, the environments, the project's own pages, and one entry
 // for its settings.
-function TenantPages({ route, navigate, nav, tenant }) {
+function ProjectPages({ route, navigate, nav, project }) {
   const { counts } = useSummary();
   const enc = encodeURIComponent;
-  const toOf = (n) => (n.view === 'environments' ? envPath(tenant) : `/tenants/${enc(tenant)}${n.path}`);
+  const toOf = (n) => (n.view === 'environments' ? envPath(project) : `/projects/${enc(project)}${n.path}`);
   const on = (n) => (n.views || [n.view]).includes(route.view);
   const manage = nav.filter((n) => n.group === 'manage');
   return (
-    <nav className="snav tenantnav">
-      <div className="snav-label">Tenant <span className="snav-labelcount">{tenant}</span></div>
+    <nav className="snav projectnav">
+      <div className="snav-label">Project <span className="snav-labelcount">{project}</span></div>
       {nav.filter((n) => n.group !== 'manage').map((n) => (
         <NavItem key={n.view} item={n} active={on(n)} count={counts[n.view]} to={toOf(n)} navigate={navigate} />
       ))}
@@ -520,13 +529,13 @@ function useMenu() {
   return [open, setOpen, box];
 }
 
-// TENANT_FILTER is the number of tenants from which the switcher offers
-// a filter; NEW_TENANT is where a tenant is made.
-const TENANT_FILTER = 8;
-const NEW_TENANT = '/tenants?new';
+// PROJECT_FILTER is the number of projects from which the switcher offers
+// a filter; NEW_PROJECT is where a project is made.
+const PROJECT_FILTER = 8;
+const NEW_PROJECT = '/projects?new';
 
 // Switcher is where one works, at the head of the topbar's trail: a
-// tenant and one of its environments, in two columns (choosing a tenant
+// project and one of its environments, in two columns (choosing a project
 // on the left lists its environments on the right). The platform's
 // administration is the sidebar's last entry, for operators.
 function Switcher({ route, navigate, me, platform }) {
@@ -536,19 +545,19 @@ function Switcher({ route, navigate, me, platform }) {
   const [filter, setFilter] = useState('');
   const { environments } = useSummary();
   const operator = isOperator(me);
-  const tenants = myTenants(me);
-  const t = route.tenant;
+  const projects = myProjects(me);
+  const t = route.project;
   const envName = route.view === 'environments' ? route.env : '';
 
   const toggle = () => {
     if (!open) {
-      setPicked(platform ? '' : t || (tenants[0] || {}).tenant || '');
+      setPicked(platform ? '' : t || (projects[0] || {}).project || '');
       setOthers({});
       setFilter('');
     }
     setOpen(!open);
   };
-  // Another tenant's environments are read when it is chosen.
+  // Another project's environments are read when it is chosen.
   useEffect(() => {
     if (!open || !picked || picked === t || others[picked] !== undefined) return;
     setOthers((o) => ({ ...o, [picked]: null }));
@@ -560,38 +569,38 @@ function Switcher({ route, navigate, me, platform }) {
   const go = (to) => { setOpen(false); navigate(to); };
   const envs = picked === t ? environments : others[picked];
   const f = filter.trim().toLowerCase();
-  const shownTenants = f ? tenants.filter((tn) => tn.tenant.toLowerCase().includes(f)) : tenants;
-  const pickedAccess = tenantAccess(me, picked);
+  const shownProjects = f ? projects.filter((tn) => tn.project.toLowerCase().includes(f)) : projects;
+  const pickedAccess = projectAccess(me, picked);
   const enc = encodeURIComponent;
 
   return (
     <div className="switcher" ref={box}>
       <button className={'switch' + (open ? ' on' : '')} onClick={toggle} aria-expanded={open}>
-        <Icon name={platform ? 'server' : 'building'} size={14} />
-        <span className="switch-name">{platform ? 'Administration' : t || 'Choose a tenant'}</span>
+        <Icon name={platform ? 'server' : 'folder'} size={14} />
+        <span className="switch-name">{platform ? 'Administration' : t || 'Choose a project'}</span>
         {!platform && t && envName && <><span className="switch-slash">/</span><span className="switch-name">{envName}</span></>}
         <Icon name="chevronDown" size={13} />
       </button>
       {open && (
         <div className="switch-menu" role="menu">
           <div className="switch-col">
-            <div className="switch-label">{operator ? 'tenants you are a member of' : 'tenants'}</div>
-            {tenants.length > TENANT_FILTER && (
+            <div className="switch-label">{operator ? 'projects you are a member of' : 'projects'}</div>
+            {projects.length > PROJECT_FILTER && (
               <input className="switch-filter" placeholder="filter" value={filter} autoFocus
-                aria-label="filter the tenants" onChange={(e) => setFilter(e.target.value)} />)}
+                aria-label="filter the projects" onChange={(e) => setFilter(e.target.value)} />)}
             <div className="switch-list">
-            {shownTenants.map((tn) => (
-              <button key={tn.tenant} role="menuitem" className={'switch-item' + (tn.tenant === picked ? ' on' : '')}
-                onClick={() => setPicked(tn.tenant)} aria-haspopup="true">
-                <span className="mono">{tn.tenant}</span>
+            {shownProjects.map((tn) => (
+              <button key={tn.project} role="menuitem" className={'switch-item' + (tn.project === picked ? ' on' : '')}
+                onClick={() => setPicked(tn.project)} aria-haspopup="true">
+                <span className="mono">{tn.project}</span>
                 <Icon name="chevronRight" size={12} />
               </button>
             ))}
-            {tenants.length === 0 && <div className="switch-empty muted small">none yet</div>}
+            {projects.length === 0 && <div className="switch-empty muted small">none yet</div>}
             </div>
             <div className="switch-foot">
-              <button role="menuitem" className="switch-item" onClick={() => go(NEW_TENANT)}>
-                <Icon name="plus" size={13} /> New tenant
+              <button role="menuitem" className="switch-item" onClick={() => go(NEW_PROJECT)}>
+                <Icon name="plus" size={13} /> New project
               </button>
             </div>
           </div>
@@ -607,20 +616,20 @@ function Switcher({ route, navigate, me, platform }) {
                   className={'switch-item' + (picked === t && (envName === e.name || envName === e.id) ? ' on' : '')}
                   onClick={() => go(switchEnvPath(route, picked, e.name))}>
                   <ToneDot tone={deploymentTone(e.state)} title={e.state} />
-                  <span className="mono">{e.name}</span>
+                  <EnvName name={e.name} className="mono" protected={!!e.protected} />
                   {Number(e.openIncidents) > 0 && <span className="snav-count bad" title="open incidents">{e.openIncidents}</span>}
                 </button>
               ))}
               </div>
               <div className="switch-foot">
-              <button role="menuitem" className="switch-item" onClick={() => go(tenantHome(pickedAccess))}>
-                <Icon name="home" size={13} /> Tenant home
+              <button role="menuitem" className="switch-item" onClick={() => go(projectHome(pickedAccess))}>
+                <Icon name="home" size={13} /> Project home
               </button>
               <button role="menuitem" className="switch-item" onClick={() => go(envPath(picked))}>
                 <Icon name="layers" size={13} /> All environments
               </button>
-              {can(pickedAccess).writeTenant && (
-                <button role="menuitem" className="switch-item" onClick={() => go(`/tenants/${enc(picked)}/new-environment`)}>
+              {can(pickedAccess).writeProject && (
+                <button role="menuitem" className="switch-item" onClick={() => go(`/projects/${enc(picked)}/new-environment`)}>
                   <Icon name="plus" size={13} /> New environment
                 </button>)}
               </div>
@@ -640,17 +649,17 @@ function NavItem({ item, active, count, to, navigate }) {
   );
 }
 
-// SettingsTabs are the tenant's settings, one page each: the tabs over
-// them (the sidebar's "Tenant settings").
+// SettingsTabs are the project's settings, one page each: the tabs over
+// them (the sidebar's "Project settings").
 const SETTINGS_VIEWS = new Set(['members', 'tokens', 'usage', 'settings']);
 function SettingsTabs({ route, me, navigate }) {
-  const t = encodeURIComponent(route.tenant);
-  const pages = tenantNav(tenantAccess(me, route.tenant)).filter((n) => n.group === 'manage');
+  const t = encodeURIComponent(route.project);
+  const pages = projectNav(projectAccess(me, route.project)).filter((n) => n.group === 'manage');
   return (
     <div className="tabbar settings-tabs">
       {pages.map((n) => (
-        <a key={n.view} href={`/tenants/${t}${n.path}`} className={'tab' + (route.view === n.view ? ' on' : '')}
-          onClick={(e) => { e.preventDefault(); navigate(`/tenants/${t}${n.path}`); }}>
+        <a key={n.view} href={`/projects/${t}${n.path}`} className={'tab' + (route.view === n.view ? ' on' : '')}
+          onClick={(e) => { e.preventDefault(); navigate(`/projects/${t}${n.path}`); }}>
           <Icon name={n.icon} size={13} /> {n.label}
         </a>
       ))}
@@ -664,7 +673,7 @@ const THEME_ICONS = { light: 'sun', dark: 'moon', gta: 'star' };
 
 // UserMenu is the signed-in person at the topbar's right end: who, the
 // architecture page, the theme and signing out.
-function UserMenu({ me, onSignOut }) {
+function UserMenu({ me, onSignOut, navigate }) {
   const [open, setOpen, box] = useMenu();
   const [, toggleTheme, nextTheme] = useTheme();
   const name = displayName(me);
@@ -683,6 +692,10 @@ function UserMenu({ me, onSignOut }) {
             {me.email && me.email !== name && <span className="muted small">{me.email}</span>}
           </div>
           <div className="switch-sep" />
+          {actsInProjects(me) && (
+            <button role="menuitem" className="switch-item" onClick={() => { setOpen(false); navigate('/accounts'); }}>
+              <Icon name="building" size={13} /> Your accounts
+            </button>)}
           <a role="menuitem" className="switch-item" href="/docs/"><Icon name="book" size={13} /> Architecture of FeRun</a>
           <button role="menuitem" className="switch-item" onClick={toggleTheme}>
             <Icon name={THEME_ICONS[nextTheme]} size={13} /> {THEME_LABELS[nextTheme]}
@@ -694,7 +707,7 @@ function UserMenu({ me, onSignOut }) {
   );
 }
 
-// CRUMB_NAMES name the tenant's pages in the trail.
+// CRUMB_NAMES name the project's pages in the trail.
 const CRUMB_NAMES = {
   tools: 'tools', domains: 'domains', members: 'people', tokens: 'tokens', usage: 'usage', settings: 'general',
   providers: 'access providers',
@@ -711,7 +724,7 @@ function crumbItem(item) {
 }
 
 function Topbar({ route, navigate, me, onSearch, onSignOut }) {
-  const t = route.tenant;
+  const t = route.project;
   const platform = platformSpace(route, isOperator(me));
   const enc = encodeURIComponent;
   const crumb = (label, to, strong) => (
@@ -726,11 +739,11 @@ function Topbar({ route, navigate, me, onSearch, onSignOut }) {
     <header className="topbar">
       <Switcher route={route} navigate={navigate} me={me} platform={platform} />
       <nav className="crumbs">
-        {t && SETTINGS_VIEWS.has(route.view) && <>{sep}<span className="crumb">tenant settings</span></>}
-        {t && page && <>{sep}{crumb(page, `/tenants/${enc(t)}/${route.view === 'members' ? 'members' : route.view}`)}</>}
+        {t && SETTINGS_VIEWS.has(route.view) && <>{sep}<span className="crumb">project settings</span></>}
+        {t && page && <>{sep}{crumb(page, `/projects/${enc(t)}/${route.view === 'members' ? 'members' : route.view}`)}</>}
         {route.view === 'domains' && route.sel && <>{sep}<span className="crumb mono">{domainName(route.sel)}</span></>}
         {route.view === 'providers' && route.sel && <>{sep}<span className="crumb mono">{route.sel}</span></>}
-        {route.view === 'newProvider' && <>{sep}{crumb('access providers', `/tenants/${enc(t)}/providers`)}{sep}<span className="crumb">new</span></>}
+        {route.view === 'newProvider' && <>{sep}{crumb('access providers', `/projects/${enc(t)}/providers`)}{sep}<span className="crumb">new</span></>}
         {route.view === 'invite' && <>{sep}<span className="crumb">invitation</span></>}
         {((route.view === 'environments' && !route.env) || route.view === 'newEnvironment') && <>{sep}{crumb('environments', envPath(t))}</>}
         {route.view === 'newEnvironment' && <>{sep}<span className="crumb">new</span></>}
@@ -745,18 +758,21 @@ function Topbar({ route, navigate, me, onSearch, onSignOut }) {
           && route.otab !== 'overview' && <>{sep}<span className="crumb">{route.otab}</span></>}
         {route.view === 'environments' && route.tab === 'secrets' && route.otab === 'edit' && (
           <>{sep}<span className="crumb">new version</span></>)}
-        {route.view === 'tenants' && <>{sep}<span className="crumb strong">tenants</span></>}
+        {route.view === 'projects' && <>{sep}<span className="crumb strong">projects</span></>}
         {(route.view === 'nodes' || route.view === 'node') && <>{sep}{crumb('nodes', '/nodes', route.view === 'nodes')}</>}
         {route.view === 'node' && <>{sep}<span className="crumb mono strong">{route.node}</span></>}
         {route.view === 'joinTokens' && <>{sep}<span className="crumb strong">join tokens</span></>}
         {route.view === 'instances' && <>{sep}<span className="crumb strong">control plane</span></>}
         {route.view === 'ingresses' && <>{sep}<span className="crumb strong">ingresses</span></>}
         {route.view === 'people' && <>{sep}<span className="crumb strong">people</span></>}
+        {route.view === 'integrations' && <>{sep}<span className="crumb strong">integrations</span></>}
+        {(route.view === 'accounts' || route.view === 'account') && <>{sep}{crumb('accounts', '/accounts', route.view === 'accounts')}</>}
+        {route.view === 'account' && <>{sep}<span className="crumb mono strong">{route.account}</span></>}
       </nav>
       <button className="topsearch" onClick={onSearch} title="search (⌘K)">
         <Icon name="search" size={14} /> <span>Search or jump to…</span> <kbd>⌘K</kbd>
       </button>
-      <UserMenu me={me} onSignOut={onSignOut} />
+      <UserMenu me={me} onSignOut={onSignOut} navigate={navigate} />
     </header>
   );
 }

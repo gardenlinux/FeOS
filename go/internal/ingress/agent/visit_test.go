@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -87,7 +88,7 @@ func TestVisitKeysAloneReachTheProxyAndTheCache(t *testing.T) {
 	}
 }
 
-// The cache is table-v3.json; the first save deletes the table.json of
+// The cache is table-v4.json; the first save deletes the table.json of
 // the releases before visits, which is never read.
 func TestTableCacheV2(t *testing.T) {
 	d, err := openStateDir(filepath.Join(t.TempDir(), "state"))
@@ -105,8 +106,8 @@ func TestTableCacheV2(t *testing.T) {
 	if err := d.saveTable(s, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(d.file("table-v3.json")); err != nil {
-		t.Fatalf("table-v3.json: %v", err)
+	if _, err := os.Stat(d.file("table-v4.json")); err != nil {
+		t.Fatalf("table-v4.json: %v", err)
 	}
 	if _, err := os.Stat(d.file("table.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("table.json is still there: %v", err)
@@ -121,36 +122,47 @@ func TestTableCacheV2(t *testing.T) {
 	}
 }
 
-// The cache of the releases before a route's host, table-v2.json, is read
-// while there is no table-v3.json, and the first save deletes it, so that
-// an older binary on the volume finds no cache it would serve every
-// route on every host from. table-v3.json keeps a route's host.
-func TestTableCacheV3(t *testing.T) {
+// The cache of the release before ADR 0061, table-v3.json, is read while
+// there is no table-v4.json, with its earlier names: an environment's
+// project and the ingress's project zone. The first save deletes it, and
+// table-v2.json beside it, so that an older binary on the volume finds no
+// cache it would serve from.
+func TestTableCacheV4(t *testing.T) {
 	d, err := openStateDir(filepath.Join(t.TempDir(), "state"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	prior := `{"savedAt":"2026-11-16T00:00:00Z","state":{"seq":7,"envs":{"e1":{"id":"e1","hosts":["a.example"],` +
-		`"routes":[{"name":"root","path":"/","service":"web","port":"http"}]}}}}`
+	prior := `{"savedAt":"2026-11-16T00:00:00Z","state":{"seq":7,"self":{"name":"i1","tenantZone":"apps.example"},` + // KEEP-TENANT: the cache of before ADR 0061
+		`"envs":{"e1":{"id":"e1","tenant":"acme","hosts":["a.example"],` + // KEEP-TENANT: the cache of before ADR 0061
+		`"routes":[{"name":"root","path":"/","service":"web","port":"http","host":"git.example"}]}}}}`
 	if err := d.write(priorTableFile, []byte(prior)); err != nil {
 		t.Fatal(err)
 	}
-	s, _, err := d.loadTable()
-	if err != nil || s == nil || s.Seq != 7 || s.Envs["e1"].Routes[0].Name != "root" {
-		t.Fatalf("table-v2.json was not read: %+v %v", s, err)
+	if err := d.write(olderTableFile, []byte(`{"savedAt":"2026-11-01T00:00:00Z","state":{"seq":3,"envs":{}}}`)); err != nil {
+		t.Fatal(err)
 	}
-	e := s.Envs["e1"]
-	e.Routes = append(e.Routes, wire.Route{Name: "git", Path: "/", Service: "web", Port: "http", Host: "git.example"})
-	s.Envs["e1"] = e
+	s, _, err := d.loadTable()
+	if err != nil || s == nil || s.Seq != 7 || s.Envs["e1"].Routes[0].Host != "git.example" {
+		t.Fatalf("table-v3.json was not read: %+v %v", s, err)
+	}
+	if s.Envs["e1"].Project != "acme" || s.Self.ProjectZone != "apps.example" {
+		t.Fatalf("the earlier names were not read: project %q, zone %q", s.Envs["e1"].Project, s.Self.ProjectZone)
+	}
 	if err := d.saveTable(s, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(d.file(priorTableFile)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("table-v2.json is still there: %v", err)
+	for _, old := range []string{priorTableFile, olderTableFile} {
+		if _, err := os.Stat(d.file(old)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s is still there: %v", old, err)
+		}
 	}
 	got, _, err := d.loadTable()
-	if err != nil || got.Envs["e1"].Routes[1].Host != "git.example" {
+	if err != nil || got.Envs["e1"].Project != "acme" || got.Self.ProjectZone != "apps.example" {
 		t.Fatalf("loaded %+v %v", got, err)
+	}
+	b, err := d.read(tableFile)
+	if err != nil || !strings.Contains(string(b), `"project":"acme"`) || !strings.Contains(string(b), `"projectZone":"apps.example"`) {
+		t.Fatalf("table-v4.json %s %v, want the new names", b, err)
 	}
 }
 

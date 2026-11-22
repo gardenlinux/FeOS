@@ -61,7 +61,7 @@ is woken by whoever holds the request until the pod runs.
 - The ingress is FeRun's second program, built from the Go module beside
   `ferund` and shipped in the same image. It serves the HTTP traffic of
   public environments' hosts and nothing else: no REST API, no MCP, no
-  UI, no access to the database and no tenant's token. It runs as
+  UI, no access to the database and no project's token. It runs as
   identical instances, as many as the deployment wants; an instance holds
   no state of its own, only a cache of what `ferund` sent it.
 - It is not a front door of `ferund`: `ferund`'s instances carry no
@@ -146,7 +146,7 @@ is woken by whoever holds the request until the pod runs.
   public, are the route door's (ADR 0043), which takes the environment's
   route tokens. FeCode's previews stay behind the doors and behind
   FeCode's forwarder, where their authorization belongs.
-- An environment is public by its tenant's decision, made by one call.
+- An environment is public by its project's decision, made by one call.
   The ingress authorizes nothing: what a route of a public environment
   names is public, except that a route's `from` blocks refuse every other
   client with 403 (ADR 0012). Without an apps zone (ADR 0045) nothing
@@ -170,7 +170,7 @@ is woken by whoever holds the request until the pod runs.
   through an outage of `ferund` and a restart of its own, as the nodes
   keep their peers and groups: what was routable stays routable while the
   control plane is away, and nothing new becomes so. Nothing expires it.
-- The table is bounded per environment, not in total, so that no tenant
+- The table is bounded per environment, not in total, so that no project
   can make it too large for every instance: an environment whose entry
   would exceed the bound is left out; a large table goes in parts, which
   an instance applies together.
@@ -218,9 +218,9 @@ is woken by whoever holds the request until the pod runs.
   has lost `ferund`, idle pauses of public environments' services are
   fenced off for a while. Pod-to-pod traffic counts as before: not at
   all.
-- **One tenant cannot take an instance from the others.** Forwarded
+- **One project cannot take an instance from the others.** Forwarded
   requests, from the pick of an endpoint to the end of the answer or of
-  the upgraded connection, have a share per tenant, a share per
+  the upgraded connection, have a share per project, a share per
   environment within it, and a cap per instance that fits its memory
   limit; held requests have the same shares beside their cap; beyond, the
   answer is 503. Each wait for a connection to an instance is bounded,
@@ -228,7 +228,7 @@ is woken by whoever holds the request until the pod runs.
   of streams, and what a waiting request keeps (headers, the body's
   window) is bounded too, so that the caps bound memory.
 - **Cookies are host-only under the zones.** An app under the apps zone
-  or the tenant zone could set cookies for the zone's parent, which reach
+  or the project zone could set cookies for the zone's parent, which reach
   the platform's hosts (cookie tossing, login CSRF), or for the other
   apps. On a host under a zone the ingress removes from every
   `Set-Cookie` of an answer each `Domain` attribute that names anything
@@ -301,7 +301,7 @@ is woken by whoever holds the request until the pod runs.
   runs without Kubernetes (ADR 0001) tied to it on the one path every
   customer uses.
 - **A provider's edge** (a tunnel to a CDN) in front of the doors: a
-  dependency on one provider for every tenant's traffic; a tenant may
+  dependency on one provider for every project's traffic; a project may
   put one in front of its domain by itself.
 - **WireGuard in userspace** in the ingress process, without
   `NET_ADMIN`: every packet through userspace and a dependency of its
@@ -359,7 +359,7 @@ is woken by whoever holds the request until the pod runs.
   memory and, here, every domain's key.
 - The ingress serves HTTP alone, speaks HTTP/1.1 to services, and has no
   authorization and no rate limits of its own beyond the shares per
-  tenant and environment.
+  project and environment.
 
 ## History
 

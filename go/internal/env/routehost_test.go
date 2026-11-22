@@ -37,7 +37,7 @@ const hostSpec = `{
   }
 }`
 
-// hostEnv is a public environment web of tenantA at web-acme.apps.test
+// hostEnv is a public environment web of projectA at web-acme.apps.test
 // with the domains fecode.example and *.boxed.fecode.example served,
 // git.fecode.example bound and being issued, and free.example claimed and
 // unbound.
@@ -46,7 +46,7 @@ func hostEnv(t *testing.T) *harness {
 	h := newHarness(t, harnessOptions{appsZone: "apps.test"})
 	h.create("web", nil)
 	h.create("other", nil)
-	if _, err := h.svc.SetPublic(h.ctx(), tenantA, "web", PublicRequest{Public: true}); err != nil {
+	if _, err := h.svc.SetPublic(h.ctx(), projectA, "web", PublicRequest{Public: true}); err != nil {
 		t.Fatal(err)
 	}
 	web, other := h.env("web"), h.env("other")
@@ -60,7 +60,7 @@ func hostEnv(t *testing.T) *harness {
 		id := fmt.Sprintf("00000000-0000-4000-8000-0000000000%02d", i+1)
 		h.exec(`INSERT INTO domains (id, owner, name, token, env_id, bound_at, verification, verified_at, routed, was_routed, state)
 			VALUES ($1, $2, $3, 'abcdefghijklmnopqrstuvwxyz234567', $4, now(), 'verified', now(), true, true, $5)`,
-			id, tenantA, d.name, d.env, d.state)
+			id, projectA, d.name, d.env, d.state)
 		if d.cert {
 			h.exec(`INSERT INTO domain_certs (domain_id, chain, key_sealed, not_before, not_after, renew_after, serial)
 				VALUES ($1, ARRAY['\x01'::bytea], '\x01', now() - interval '1 day', now() + interval '5 days', now(), '1')`, id)
@@ -80,7 +80,7 @@ func TestRouteHostPlan(t *testing.T) {
 	plan := func(host string) PlanAnswer {
 		t.Helper()
 		raw := strings.Replace(hostSpec, `"host": "git.fecode.example"`, `"host": "`+host+`"`, 1)
-		a, err := h.svc.Plan(ctx, tenantA, "web", PlanRequest{Spec: json.RawMessage(raw)})
+		a, err := h.svc.Plan(ctx, projectA, "web", PlanRequest{Spec: json.RawMessage(raw)}, spec.FormatJSON)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -110,13 +110,15 @@ func TestRouteHostPlan(t *testing.T) {
 	}
 	// An apply is refused the same way.
 	raw := strings.Replace(hostSpec, "git.fecode.example", "free.example", 1)
-	_, err := h.svc.Apply(ctx, tenantA, "web", ApplyRequest{Spec: json.RawMessage(raw), Author: "tester"})
+	_, err := h.svc.Apply(ctx, projectA, "web", ApplyRequest{Spec: json.RawMessage(raw), Author: "tester"},
+		spec.FormatJSON)
 	var ise *InvalidSpecError
 	if !errors.As(err, &ise) || !hasFinding(ise.Findings, spec.SeverityError, "routes.git.host", "is no host") {
 		t.Fatalf("apply: %v", describe(err))
 	}
 	// Without an environment, a host is checked for its form alone.
-	if a, err := h.svc.PlanSpec(ctx, tenantA, PlanSpecRequest{Spec: json.RawMessage(raw)}); err != nil || !a.Valid {
+	if a, err := h.svc.PlanSpec(ctx, projectA, PlanSpecRequest{Spec: json.RawMessage(raw)},
+		spec.FormatJSON); err != nil || !a.Valid {
 		t.Fatalf("plan without an environment: %+v %v", a, err)
 	}
 }
@@ -132,7 +134,7 @@ func TestRouteHostStatusAndDoor(t *testing.T) {
 	ctx := h.ctx()
 	h.apply("web", hostSpec, 0)
 	e := h.env("web")
-	st, err := h.svc.GetEnv(ctx, tenantA, "web")
+	st, err := h.svc.GetEnv(ctx, projectA, "web")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +157,7 @@ func TestRouteHostStatusAndDoor(t *testing.T) {
 
 	backend := h.instance(e.ID, spec.KindService, "backend", 0, 1, model.PhaseReady, model.StateRunning, "n1", "fd6b::11")
 	ui := h.instance(e.ID, spec.KindService, "ui", 0, 1, model.PhaseReady, model.StateRunning, "n1", "fd6b::12")
-	tok, err := h.svc.CreateRouteToken(ctx, tenantA, "web")
+	tok, err := h.svc.CreateRouteToken(ctx, projectA, "web")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -68,12 +68,12 @@ func TestStateVisitKeys(t *testing.T) {
 // it as it did; with them, an older reader ignores them.
 func TestEnvAccessCompatible(t *testing.T) {
 	c := Codec{}
-	e := Env{ID: "e1", Tenant: "acme", Name: "stage", Hosts: []string{"stage--acme.apps.test"}, Deployment: 2, Hash: "h"}
+	e := Env{ID: "e1", Project: "acme", Name: "stage", Hosts: []string{"stage--acme.apps.test"}, Deployment: 2, Hash: "h"}
 	b, err := c.Marshal(&e)
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"id":"e1","tenant":"acme","name":"stage","hosts":["stage--acme.apps.test"],"deployment":2,"hash":"h",` +
+	const want = `{"id":"e1","project":"acme","name":"stage","hosts":["stage--acme.apps.test"],"deployment":2,"hash":"h",` +
 		`"routes":null,"services":null}`
 	if string(b) != want {
 		t.Errorf("without access:\n got %s\nwant %s", b, want)

@@ -206,7 +206,7 @@ to meanwhile. ADR 0022 decides what is baked and when; diskd only seals.
   nothing.
 - **feosd linking the chunk store** instead of a daemon of its own: a
   restart or an upgrade of `feosd` would take every pod's disk with it.
-- **Baking in `feosd`'s own pods only**, so that no tenant's state lands
+- **Baking in `feosd`'s own pods only**, so that no project's state lands
   in a shared layer: the bake point lies before any container of the
   pod's has run, which keeps the layer clean (ADR 0022); a bake pod of
   the node's own is ADR 0050.

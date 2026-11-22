@@ -22,6 +22,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/gardenlinux/feos/go/ferun/api"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
 	"github.com/gardenlinux/feos/go/internal/model"
 )
@@ -77,40 +78,16 @@ type Addon struct {
 	Options                   map[string]any
 }
 
-// Option is an option a blueprint declares: a key of an addon's
-// options, its kind, its default and what its values must be.
-type Option struct {
-	// Name is the key in the addon's options: "databases".
-	Name string `json:"name"`
-	// Kind is OptionString, OptionList (a list of strings), OptionBoolean
-	// or OptionOneOf (a string among Values).
-	Kind string `json:"kind"`
-	// Required: the addon must set it. Else Default applies.
-	Required bool `json:"required"`
-	// Default is the value of an addon that leaves it out (or sets it to
-	// null): a string, a list of strings or a boolean, as Kind says.
-	Default any `json:"default"`
-	// Description says what the option does, for a form and the docs.
-	Description string `json:"description"`
-	// Values are a OneOf's values.
-	Values []string `json:"values"`
-	// Pattern is a regular expression (RE2, anchored) that a string, or
-	// each element of a list, must match; "": any.
-	Pattern string `json:"pattern"`
-	// Reserved are the values a string or an element cannot be, and
-	// ReservedPrefixes the prefixes it cannot start with.
-	Reserved         []string `json:"reserved"`
-	ReservedPrefixes []string `json:"reservedPrefixes"`
-	// Unique: a list's elements are distinct.
-	Unique bool `json:"unique"`
-}
+// Option is an option a blueprint declares, as the catalog answers it:
+// the published module's (ADR 0057).
+type Option = api.Option
 
 // The kinds of an option (Option.Kind).
 const (
-	OptionString  = "string"
-	OptionList    = "list"
-	OptionBoolean = "boolean"
-	OptionOneOf   = "oneOf"
+	OptionString  = api.OptionString
+	OptionList    = api.OptionList
+	OptionBoolean = api.OptionBoolean
+	OptionOneOf   = api.OptionOneOf
 )
 
 // Plan is a size of an addon.
