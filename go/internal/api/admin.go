@@ -81,6 +81,17 @@ type projectTokenInfo struct {
 	MadeBy      string `json:"madeBy,omitempty"`
 	CreatedAt   string `json:"createdAt"`
 	LastUsedAt  string `json:"lastUsedAt,omitempty"`
+	// Grants are the token's grants beside its own (PUT
+	// /api/v1/project/tokens/{hash}/grants, the protect dialog's), in the
+	// project's own list only.
+	Grants []tokenGrantInfo `json:"grants,omitempty"`
+}
+
+// tokenGrantInfo is a grant of a token beside its own: its role, and its
+// environment's ID, "" for the project.
+type tokenGrantInfo struct {
+	Role        string `json:"role"`
+	Environment string `json:"environment"`
 }
 
 func projectTokenOf(t store.ProjectToken) projectTokenInfo {

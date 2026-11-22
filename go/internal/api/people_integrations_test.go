@@ -551,6 +551,24 @@ func TestProtectEnvironment(t *testing.T) {
 		"environment": "stage"}))
 	expect(t, resp, http.StatusOK, `{"token":"`+hash+`","role":"write","environment":"`+w.stage.String()+`"}`+"\n")
 	expect(t, e.do("PUT", "/api/v1/environments/stage/tags/v1", bearerOf(tok), nil), http.StatusOK, "")
+	// The tokens' list shows it beside the token's own, to be removed there.
+	resp = e.serve(asSession("GET", "/api/v1/project/tokens", ada, nil))
+	expect(t, resp, http.StatusOK, "")
+	listed := false
+	for _, lt := range decode[struct {
+		Tokens []struct {
+			Hash, Role string
+			Grants     []struct{ Role, Environment string }
+		}
+	}](t, resp).Tokens {
+		if lt.Hash == hash {
+			listed = lt.Role == "write" && len(lt.Grants) == 1 && lt.Grants[0].Role == "write" &&
+				lt.Grants[0].Environment == w.stage.String()
+		}
+	}
+	if !listed {
+		t.Fatalf("the token's grant is not listed: %s", resp.Body)
+	}
 	expect(t, e.serve(asSession("PUT", "/api/v1/project/tokens/"+strings.Repeat("0", 64)+"/grants", ada,
 		map[string]string{"role": "read"})), http.StatusNotFound, errBody("no such token"))
 	expect(t, e.serve(asSession("DELETE", "/api/v1/project/tokens/"+hash+"/grants?environment=stage", ada, nil)),

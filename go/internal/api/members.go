@@ -797,9 +797,14 @@ func (s *server) acceptAccountInvitation(w http.ResponseWriter, r *http.Request,
 
 // ----------------------------------------------------------------- tokens --
 
-// listOwnTokens is GET /api/v1/project/tokens: the project's tokens, by its admins.
+// listOwnTokens is GET /api/v1/project/tokens: the project's tokens, by its
+// admins, each with its grants beside its own.
 func (s *server) listOwnTokens(w http.ResponseWriter, r *http.Request) error {
 	toks, err := s.st.ListProjectTokens(r.Context(), projectOf(r))
+	if err != nil {
+		return fmt.Errorf("list tokens: %w", err)
+	}
+	gs, err := s.st.ListGrants(r.Context(), projectOf(r))
 	if err != nil {
 		return fmt.Errorf("list tokens: %w", err)
 	}
@@ -807,7 +812,13 @@ func (s *server) listOwnTokens(w http.ResponseWriter, r *http.Request) error {
 		Tokens []projectTokenInfo `json:"tokens"`
 	}{Tokens: make([]projectTokenInfo, 0, len(toks))}
 	for _, t := range toks {
-		out.Tokens = append(out.Tokens, projectTokenOf(t))
+		info := projectTokenOf(t)
+		for _, g := range gs {
+			if g.TokenHash == t.Hash {
+				info.Grants = append(info.Grants, tokenGrantInfo{Role: g.Role, Environment: idOrEmpty(g.EnvironmentID)})
+			}
+		}
+		out.Tokens = append(out.Tokens, info)
 	}
 	return writeJSON(w, http.StatusOK, out)
 }
