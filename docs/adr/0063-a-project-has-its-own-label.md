@@ -69,7 +69,8 @@ registered to their project for good, as ADR 0045 decided.
   The environment that held it gets its natural label (or its fallback)
   in the same transaction: there is one project's address, and taking it
   moves it. Giving it up is a `hostLabel` of the environment's natural
-  label, or of a chosen one.
+  label, of its fallback (its own, where its name gives no natural
+  label) or of a chosen one.
 - An environment's view says whether it holds the project's address
   (`projectAddress`), beside its `hostLabel` and hosts.
 - While a domain of that environment is served, the project's address
@@ -123,8 +124,9 @@ registered to their project for good, as ADR 0045 decided.
   environment holds it from FeRun. FeCode keeps no copy of it; its
   `project_host` column goes a release later.
 - A project whose name has a dot or a `--` has no project's address and
-  no natural labels; its environments get fallbacks and it gives them
-  addresses by chosen labels or domains.
+  no natural or chosen labels; its environments get fallbacks, and a
+  domain gives one an address.
+- The labels name a project by its name, as hosts do (ADR 0062).
 
 ## History
 
