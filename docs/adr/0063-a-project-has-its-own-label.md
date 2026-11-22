@@ -1,6 +1,6 @@
 # ADR 0063: A project has its own label, its environments `<environment>--<project>`
 
-**Status:** Proposed · **Date:** 2026-11-22
+**Status:** Accepted · **Date:** 2026-11-22
 
 A project's name is a host label of its own in the zone it is in:
 `<project>.<zone>` is the **project's address**, and one environment of
@@ -140,3 +140,9 @@ registered to their project for good, as ADR 0045 decided.
 Proposed on 2026-11-22, after a project's address at
 `<project>.apps.fecore.dev` answered `no such host` since FeCode's move
 onto FeRun (FeCode ADR 0037).
+
+Accepted on 2026-11-22 and live in eu-central-1 with ferund of FeOS
+98e9e59f and FeCode be5bb7d: migration 0044 moved every environment's
+host, gave the labels FeCode chose in its gone project `fecode` to the
+projects they name, and `hb-baxxter.apps.fecore.dev` is the project's
+address of `hb-baxxter`.
