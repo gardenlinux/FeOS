@@ -54,11 +54,11 @@ func (s *Store) MintRouteToken(ctx context.Context, hash string, envID uuid.UUID
 }
 
 // ResolveRouteToken reads the route token of a hash; ErrNoRow if there is
-// none, or when an integration minted it and its access no longer backs it
-// (integrationMayWrite).
+// none, or when its minter's access no longer backs it (minterMayWrite).
 func (s *Store) ResolveRouteToken(ctx context.Context, hash string) (EnvRouteToken, error) {
 	t, err := scanRouteToken(s.q.QueryRow(ctx, "SELECT "+routeTokenCols+` FROM env_route_tokens
-		WHERE hash = $1 AND `+integrationMayWrite("env_route_tokens.integration_id", "env_route_tokens.env_id"), hash))
+		WHERE hash = $1 AND `+minterMayWrite("env_route_tokens.integration_id", "env_route_tokens.made_by",
+		"env_route_tokens.env_id"), hash))
 	if err != nil {
 		return EnvRouteToken{}, noRow(err, ErrNoRow)
 	}

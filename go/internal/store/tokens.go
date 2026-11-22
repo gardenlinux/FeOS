@@ -206,18 +206,46 @@ func integrationMayWrite(tokenIntegration, tokenEnv string) string {
 				OR (g.environment_id IS NULL AND (g.role = 'admin' OR (g.role = 'write' AND NOT e.protected)))))))`
 }
 
+// minterMayWrite is integrationMayWrite and, for a token no integration
+// minted, the condition on its made_by (tokenMadeBy) under which it still
+// reaches tokenEnv: on a protected environment a project's write gives no
+// sandbox and no route token (ADR 0060), so a token a person or a project
+// token minted there by that write, before the environment was protected,
+// is good again only once it is unprotected or the minter holds write on
+// the environment itself or admin on the project. An operator by Basic
+// keeps it; a person's operator session is not recorded in made_by, nor is
+// a minter of a version before ADR 0031, and such a token stops on a
+// protected environment like a project writer's.
+func minterMayWrite(tokenIntegration, tokenMadeBy, tokenEnv string) string {
+	return `(CASE WHEN ` + tokenIntegration + ` IS NOT NULL THEN ` + integrationMayWrite(tokenIntegration, tokenEnv) + `
+		ELSE NOT EXISTS (SELECT 1 FROM environments e WHERE e.id = ` + tokenEnv + ` AND e.protected)
+			OR ` + tokenMadeBy + ` LIKE 'basic:%'
+			OR EXISTS (SELECT 1 FROM environments e JOIN grants g ON g.project_id = e.owner
+				LEFT JOIN people p ON p.id = g.person_id
+				WHERE e.id = ` + tokenEnv + `
+				AND (('person:' || g.person_id::text = ` + tokenMadeBy + ` AND p.disabled_at IS NULL)
+					OR 'token:' || g.token_hash = ` + tokenMadeBy + `)
+				AND ((g.environment_id = e.id AND g.role IN ('write', 'admin'))
+					OR (g.environment_id IS NULL AND g.role = 'admin')))
+			OR EXISTS (SELECT 1 FROM environments e JOIN project_tokens pt ON pt.project_id = e.owner
+				WHERE e.id = ` + tokenEnv + ` AND 'token:' || pt.hash = ` + tokenMadeBy + `
+				AND ((pt.environment_id = e.id AND pt.role IN ('write', 'admin'))
+					OR (pt.environment_id IS NULL AND pt.role = 'admin')))
+		END)`
+}
+
 // ResolveSandboxToken returns the sandbox and owner of a token hash,
 // ignoring a project being deleted and an environment's instance row (the
 // sandbox doors treat it as absent; it has no token of its own), and a
-// token an integration minted that its access no longer backs
-// (integrationMayWrite); model.ErrUnknownToken when there is none.
+// token whose minter's access no longer backs it (minterMayWrite);
+// model.ErrUnknownToken when there is none.
 func (s *Store) ResolveSandboxToken(ctx context.Context, hash string) (podid.ID, string, error) {
 	var id podid.ID
 	var owner string
 	err := s.q.QueryRow(ctx, `SELECT t.sandbox_id, s.owner FROM sandbox_tokens t
 		JOIN sandboxes s ON s.id = t.sandbox_id JOIN projects n ON n.id = s.owner
 		WHERE t.hash = $1 AND n.deleting_at IS NULL AND NOT s.instance AND NOT s.project_job
-			AND `+integrationMayWrite("t.integration_id", "s.environment_id"), hash).Scan(&id, &owner)
+			AND `+minterMayWrite("t.integration_id", "t.made_by", "s.environment_id"), hash).Scan(&id, &owner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", model.ErrUnknownToken
 	}

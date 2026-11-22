@@ -179,7 +179,8 @@ func TestEnvironmentProtected(t *testing.T) {
 // integration is enabled and holds write on its environment by its own
 // grants, protection counted: the grant lowered, removed, the integration
 // disabled or removed, or the environment protected under a project write
-// all refuse it; a token minted by no integration is never touched.
+// all refuse it; a token an operator by Basic minted is never touched
+// (TestTokensOfProjectWriteStopOnProtection in api has the other minters).
 func TestIntegrationTokens(t *testing.T) {
 	s, _ := newStore(t)
 	mkProject(t, s, "acme")
@@ -189,11 +190,11 @@ func TestIntegrationTokens(t *testing.T) {
 	must(t, err)
 	_, err = s.MintRouteToken(bg, "r-int", env, "integration:"+in.ID.String(), in.ID)
 	must(t, err)
-	_, err = s.InsertRouteToken(bg, "r-plain", env, "person:x")
+	_, err = s.InsertRouteToken(bg, "r-plain", env, "basic:ops")
 	must(t, err)
 	_, err = s.MintSandboxToken(bg, "s-int", sb.ID, "a", "integration:"+in.ID.String(), in.ID)
 	must(t, err)
-	_, err = s.CreateSandboxToken(bg, "s-plain", sb.ID, "b", "")
+	_, err = s.CreateSandboxToken(bg, "s-plain", sb.ID, "b", "basic:ops")
 	must(t, err)
 	good := func(want bool, what string) {
 		t.Helper()
