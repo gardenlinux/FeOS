@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -35,10 +36,10 @@ func newAPI(store *Store, traces *Traces, projects *Projects, ingest <-chan stru
 	mux.HandleFunc("GET /api/v1/logs", a.project(a.logs))
 	mux.HandleFunc("GET /api/v1/log-streams", a.project(a.streams))
 	mux.HandleFunc("DELETE /api/v1/log-streams", a.project(a.deleteStreams))
-	mux.HandleFunc("GET /api/v1/jaeger/api/services", a.project(a.jaegerNames))
-	mux.HandleFunc("GET /api/v1/jaeger/api/services/{service}/operations", a.project(a.jaegerNames))
-	mux.HandleFunc("GET /api/v1/jaeger/api/traces/{traceID}", a.project(a.jaegerTrace))
-	mux.HandleFunc("GET /api/v1/jaeger/api/traces", a.project(a.jaegerFind))
+	mux.HandleFunc("GET /api/v1/jaeger/api/services", a.reader(a.jaegerNames, spansNamed))
+	mux.HandleFunc("GET /api/v1/jaeger/api/services/{service}/operations", a.reader(a.jaegerNames, spansNamed))
+	mux.HandleFunc("GET /api/v1/jaeger/api/traces/{traceID}", a.reader(a.jaegerTrace, spansNamed))
+	mux.HandleFunc("GET /api/v1/jaeger/api/traces", a.reader(a.jaegerFind, spansNamed))
 	mux.HandleFunc("GET /api/v1/traffic", a.project(a.traffic))
 	mux.HandleFunc("GET /api/v1/egress", a.project(a.egress))
 	return mux
@@ -117,15 +118,28 @@ func credential(r *http.Request) (Credential, error) {
 
 // project resolves the request's reader to what it may read through
 // ferund; a refusal of ferund is passed on as it came, and a reader that
-// may read nothing of the project is answered as an unknown project.
+// may read nothing of the project is answered as an unknown project. Its
+// routes name what they read by an ID of the project's (Projects).
 func (a *api) project(h func(w http.ResponseWriter, r *http.Request, acc Access)) http.HandlerFunc {
+	return a.reader(h, nil)
+}
+
+// reader is project for a route that may read without naming an ID:
+// named reports whether a request names one (nil: every request does),
+// and one that names none is resolved by a fresh ask, never a kept
+// answer (Projects).
+func (a *api) reader(h func(w http.ResponseWriter, r *http.Request, acc Access), named func(url.Values) bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, err := credential(r)
 		if err != nil {
 			apierr.Write(w, err)
 			return
 		}
-		acc, err := a.projects.Resolve(r.Context(), c)
+		resolve := a.projects.Resolve
+		if named != nil && !named(r.URL.Query()) {
+			resolve = a.projects.Fresh
+		}
+		acc, err := resolve(r.Context(), c)
 		var ref *refusal
 		if errors.As(err, &ref) {
 			if ref.contentType != "" {
@@ -154,7 +168,7 @@ func (a *api) logs(w http.ResponseWriter, r *http.Request, acc Access) {
 		apierr.Write(w, apierr.New(http.StatusBadRequest, "%s", err.Error()))
 		return
 	}
-	q.Sel.Within = acc.within()
+	q.Sel.Within, q.Sel.From = acc.within(), acc.from()
 	project := acc.Project
 	if q.Follow {
 		a.follow(w, r, project, q)
@@ -175,7 +189,7 @@ func (a *api) streams(w http.ResponseWriter, r *http.Request, acc Access) {
 		apierr.Write(w, apierr.New(http.StatusBadRequest, "%s", err.Error()))
 		return
 	}
-	sel.Within = acc.within()
+	sel.Within, sel.From = acc.within(), acc.from()
 	project := acc.Project
 	since := time.Now().Add(-7 * 24 * time.Hour).UnixNano()
 	if t := v.Get("since"); t != "" {
@@ -199,7 +213,9 @@ func (a *api) streams(w http.ResponseWriter, r *http.Request, acc Access) {
 }
 
 // deleteStreams needs write on the project (FeCode's token, which deletes
-// an environment's streams with the environment).
+// an environment's streams with the environment). It deletes the
+// project's alone, from its making on (Access.Since): a project of the
+// name before stays until its retention, as a read never reaches it.
 func (a *api) deleteStreams(w http.ResponseWriter, r *http.Request, acc Access) {
 	if !acc.Write {
 		apierr.Write(w, apierr.RoleRequired("write", "project"))
@@ -212,7 +228,7 @@ func (a *api) deleteStreams(w http.ResponseWriter, r *http.Request, acc Access) 
 		apierr.Write(w, apierr.New(http.StatusBadRequest, "give environment or job, and nothing else"))
 		return
 	}
-	n, err := a.store.DeleteStreams(r.Context(), project, env, job)
+	n, err := a.store.DeleteStreams(r.Context(), project, acc.from(), env, job)
 	if err != nil {
 		a.fail(w, r, err)
 		return

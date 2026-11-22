@@ -109,13 +109,14 @@ func TestParseTraceExport(t *testing.T) {
 	child := testSpan(traceA, "2222222222222222", "00f067aa0ba902b7", "query", start+100, -time.Microsecond)
 	child.ParentSpanId = mustHex("0000000000000000") // all zero: no parent
 	noStart := testSpan(traceA, "3333333333333333", "", "late", 0, 0)
+	ahead := testSpan(traceA, "5555555555555555", "", "ahead", now.Add(time.Hour).UnixNano(), time.Millisecond)
 	badTrace := testSpan("00000000000000000000000000000000", "4444444444444444", "", "x", start, 0)
 	badSpan := &tracev1.Span{TraceId: mustHex(traceA), SpanId: []byte{1, 2, 3}}
 	attrs := podAttrs("acme", "env1", "api")
 	attrs["ferun.foo"] = "bar"
-	req := traceRequest(attrs, root, child, noStart, badTrace, badSpan)
+	req := traceRequest(attrs, root, child, noStart, badTrace, badSpan, ahead)
 	spans, rejected, err := parseTraceExport(req, ingestPeer{node: "node-1"}, now)
-	if err != nil || rejected != 2 || len(spans) != 3 {
+	if err != nil || rejected != 2 || len(spans) != 4 {
 		t.Fatalf("%d spans, %d rejected, %v", len(spans), rejected, err)
 	}
 	d := spans[0].doc
@@ -148,6 +149,11 @@ func TestParseTraceExport(t *testing.T) {
 	}
 	if c := spans[2].doc; c.TS != now.UnixNano() || c.StartNs != 0 {
 		t.Errorf("a span without a start: %+v", c)
+	}
+	// A span that says it starts ahead of the sink's clock keeps its
+	// start; its ts, which the reads bound, is when the sink took it.
+	if c := spans[3].doc; c.TS != now.UnixNano() || c.StartNs != now.Add(time.Hour).UnixNano() {
+		t.Errorf("a span ahead: %+v", c)
 	}
 
 	// A resource without a service.name gets unknown_service.

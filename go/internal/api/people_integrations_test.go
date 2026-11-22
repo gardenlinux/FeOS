@@ -129,8 +129,7 @@ func TestIntegrationRegistrationAndSignIn(t *testing.T) {
 	resp = e.serve(asSession("PUT", "/api/v1/project/integrations/fecode/grants", admin,
 		map[string]string{"role": "admin", "environment": "stage"}))
 	expect(t, resp, http.StatusOK, `{"integration":"fecode","role":"admin","environment":"`+w.stage.String()+`"}`+"\n")
-	expect(t, get(jwt, testProject, ""), http.StatusOK, `{"project":"acme","role":"write","environments":["`+
-		w.stage.String()+`"]}`+"\n")
+	expect(t, get(jwt, testProject, ""), http.StatusOK, projectAnswer(t, e, "acme", "write", `["`+w.stage.String()+`"]`))
 	expect(t, get(jwt, "other", ""), http.StatusNotFound, errBody("no such project"))
 	// A project's writer may not grant it.
 	writer := w.person(t, "wr", false, store.Grant{Role: "write"})
@@ -216,9 +215,9 @@ func TestIntegrationNamesAPerson(t *testing.T) {
 	get := func(person string) *httptest.ResponseRecorder {
 		return e.serve(asIntegration("GET", "/api/v1/project?filter=environments", jwt, testProject, person, nil))
 	}
-	expect(t, get(""), http.StatusOK, `{"project":"acme","role":"admin","environments":[]}`+"\n")
-	expect(t, get("reader"), http.StatusOK, `{"project":"acme","role":"read","environments":[]}`+"\n")
-	expect(t, get("stager"), http.StatusOK, `{"project":"acme","role":"","environments":["`+w.stage.String()+`"]}`+"\n")
+	expect(t, get(""), http.StatusOK, projectAnswer(t, e, "acme", "admin", "[]"))
+	expect(t, get("reader"), http.StatusOK, projectAnswer(t, e, "acme", "read", "[]"))
+	expect(t, get("stager"), http.StatusOK, projectAnswer(t, e, "acme", "", `["`+w.stage.String()+`"]`))
 	for _, p := range []string{"nobody", "off", "elsewhere"} {
 		expect(t, get(p), http.StatusNotFound, errBody("no such project"))
 	}

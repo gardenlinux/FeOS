@@ -98,6 +98,13 @@ func selectStreams(ctx context.Context, q db.Querier, project string, f streamFi
 	if f.sel.Attempt != nil {
 		add("attempt = ?", *f.sel.Attempt)
 	}
+	if f.sel.From != 0 {
+		// A line's time is the platform's, never the application's: the
+		// guest's when it read the line or wrote its egress record (the
+		// guest's clock follows its node's, ADR 0027), the ingress's when
+		// it answered the request, else the node's or the sink's.
+		add("first_ns >= ?", f.sel.From)
+	}
 	if f.since != nil {
 		add("last_ns >= ?", *f.since)
 	}
@@ -143,6 +150,7 @@ func (s *Store) Read(ctx context.Context, project string, q Query) (scanResult, 
 	}
 	defer func() { <-s.scans }()
 
+	q.Since = max(q.Since, q.Sel.From) // nothing of before the reader's bound
 	res := scanResult{streams: map[int64]*streamRow{}}
 	f := streamFilter{sel: q.Sel, until: &q.Until, limit: maxStreamsRead}
 	if q.SinceSet || !q.Forward {

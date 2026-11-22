@@ -36,10 +36,12 @@ const (
 var egressKinds = []string{"service", "job", "sandbox"}
 
 // EgressQuery is a read of the requests of a project's environment's pods
-// through their HTTP bindings in [SinceNs, UntilNs), Unix ns.
+// through their HTTP bindings in [SinceNs, UntilNs), Unix ns; FromNs is
+// the reader's bound (Access.from): no span or record before it counts.
 type EgressQuery struct {
 	Project, Environment string
 	SinceNs, UntilNs     int64
+	FromNs               int64
 }
 
 // Egress is the answer of a read: per binding that had a request in the
@@ -106,7 +108,7 @@ func egressBinding(spanName string) (string, bool) {
 // sends it once the request's answer ended.
 func (t *Traces) Egress(ctx context.Context, q EgressQuery) (Egress, error) {
 	base := quickwit.SpanQuery{Project: q.Project, Environment: q.Environment, Source: SourceEgress, SinceNs: q.SinceNs,
-		UntilNs: q.UntilNs - 1}
+		UntilNs: q.UntilNs - 1, FromNs: q.FromNs}
 	type read struct {
 		q      quickwit.SpanQuery
 		fields []string
@@ -240,13 +242,13 @@ const egressMessageWindow = 10 * time.Minute
 // egressMessage is feos-authn's message of a refusal: the text's
 // error.message of the pod's egress record of the request (sink.md, A
 // pod's egress records), found in the log index by the request's trace
-// and span; "" when it is not there.
-func (s *Store) egressMessage(ctx context.Context, project, env string, p *EgressProblem) (string, error) {
+// and span, not before q's FromNs; "" when it is not there.
+func (s *Store) egressMessage(ctx context.Context, q EgressQuery, p *EgressProblem) (string, error) {
 	if p.TraceID == "" || p.SpanID == "" {
 		return "", nil
 	}
-	docs, err := s.index.Search(ctx, s.indexPattern(), quickwit.Query{Project: project, Environment: env,
-		Source: SourceEgress, Trace: p.TraceID, SinceNs: p.TsNs - int64(egressMessageWindow),
+	docs, err := s.index.Search(ctx, s.indexPattern(), quickwit.Query{Project: q.Project, Environment: q.Environment,
+		Source: SourceEgress, Trace: p.TraceID, SinceNs: max(p.TsNs-int64(egressMessageWindow), q.FromNs),
 		UntilNs: p.TsNs + int64(egressMessageWindow), Order: quickwit.NewestFirst, Max: 100})
 	if err != nil {
 		return "", err
@@ -311,6 +313,7 @@ func (a *api) egress(w http.ResponseWriter, r *http.Request, acc Access) {
 		apierr.Write(w, apierr.New(http.StatusNotFound, "no such environment"))
 		return
 	}
+	q.FromNs = acc.from()
 	out, err := a.traces.Egress(r.Context(), q)
 	if err != nil {
 		a.fail(w, r, err)
@@ -321,7 +324,7 @@ func (a *api) egress(w http.ResponseWriter, r *http.Request, acc Access) {
 		if p == nil || p.Code == "" {
 			continue
 		}
-		if p.Message, err = a.store.egressMessage(r.Context(), q.Project, q.Environment, p); err != nil {
+		if p.Message, err = a.store.egressMessage(r.Context(), q, p); err != nil {
 			if r.Context().Err() != nil {
 				return
 			}

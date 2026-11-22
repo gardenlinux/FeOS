@@ -19,15 +19,27 @@ import (
 	"github.com/gardenlinux/feos/go/internal/pki"
 )
 
-// GET /api/v1/project answers a project's token with its project and role,
-// anything else 401.
+// GET /api/v1/project answers a project's token with its project, when
+// it was made, and its role, anything else 401.
 func TestGetProject(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, envOptions{})
 	expect(t, e.do("GET", "/api/v1/project", bearerOf(e.projectToken), nil), http.StatusOK,
-		`{"project":"acme","role":"admin","environments":[]}`+"\n")
+		projectAnswer(t, e, "acme", "admin", "[]"))
 	expect(t, e.do("GET", "/api/v1/project", bearerOf("nope"), nil), http.StatusUnauthorized, errBody("unknown project token"))
 	expect(t, e.do("GET", "/api/v1/project", "", nil), http.StatusUnauthorized, errBody("project bearer required"))
+}
+
+// projectAnswer is GET /api/v1/project's answer of project: when the
+// store says it was made, role, and envs (a JSON list).
+func projectAnswer(t *testing.T, e *env, project, role, envs string) string {
+	t.Helper()
+	p, err := e.st.GetProject(context.Background(), project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return `{"project":"` + project + `","createdAt":"` + p.CreatedAt.UTC().Format(time.RFC3339Nano) + `","role":"` + role +
+		`","environments":` + envs + "}\n"
 }
 
 // testIssuer is a fresh platform CA's issuer.

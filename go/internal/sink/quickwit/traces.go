@@ -80,7 +80,10 @@ type SpanLink struct {
 // environments it names (a reader's grants on environments, ADR 0031):
 // a span of no environment is none of them, and an empty list selects
 // nothing. ObjectKind is the label ferun.kind (service, job, sandbox, …);
-// Egress, a pod's egress spans of that class only (EgressClass).
+// Egress, a pod's egress spans of that class only (EgressClass). FromNs
+// bounds ts below whatever the range (0: no bound): the reader's
+// project's making, before which a span is another project's of the name
+// (ADR 0056), and which no window of a search widens.
 type SpanQuery struct {
 	Project                                    string
 	Environment, Object, Job, Instance, Source string
@@ -89,6 +92,7 @@ type SpanQuery struct {
 	TraceID, Service, Operation                string
 	Tags                                       map[string]string
 	SinceNs, UntilNs                           int64
+	FromNs                                     int64
 	MinDurationNs, MaxDurationNs               int64
 	Failed                                     bool
 	Kind                                       uint64
@@ -96,6 +100,9 @@ type SpanQuery struct {
 	NotPaths                                   []string
 	Max                                        int
 }
+
+// sinceNs is the lower end of the time range: SinceNs, not before FromNs.
+func (q SpanQuery) sinceNs() int64 { return max(q.SinceNs, q.FromNs) }
 
 // String is the query in Quickwit's query language.
 func (q SpanQuery) String() string {
@@ -125,10 +132,10 @@ func (q SpanQuery) String() string {
 	term("trace_id", q.TraceID)
 	term("service_name", q.Service)
 	term("span_name", q.Operation)
-	if q.SinceNs > 0 || q.UntilNs > 0 {
+	if since := q.sinceNs(); since > 0 || q.UntilNs > 0 {
 		lo, hi := "*", "*"
-		if q.SinceNs > 0 {
-			lo = rfc3339(q.SinceNs)
+		if since > 0 {
+			lo = rfc3339(since)
 		}
 		if q.UntilNs > 0 {
 			hi = rfc3339(q.UntilNs)
@@ -215,7 +222,7 @@ func (q *SpanQuery) Match(d *SpanDoc) bool {
 	if q.Environments != nil && (d.Environment == "" || !slices.Contains(q.Environments, d.Environment)) {
 		return false
 	}
-	if (q.SinceNs > 0 && d.TS < q.SinceNs) || (q.UntilNs > 0 && d.TS > q.UntilNs) {
+	if since := q.sinceNs(); (since > 0 && d.TS < since) || (q.UntilNs > 0 && d.TS > q.UntilNs) {
 		return false
 	}
 	if (q.MinDurationNs > 0 && d.DurationNs < q.MinDurationNs) || (q.MaxDurationNs > 0 && d.DurationNs > q.MaxDurationNs) {
@@ -337,8 +344,8 @@ func TraceIndexConfig(id string, s IndexSettings) []byte {
 // spanSearch is the body of a search of q's spans.
 func spanSearch(q SpanQuery, maxHits int) map[string]any {
 	req := map[string]any{"query": q.String(), "max_hits": maxHits, "count_all": false, "format": "json"}
-	if q.SinceNs > 0 {
-		req["start_timestamp"] = q.SinceNs / 1e9
+	if since := q.sinceNs(); since > 0 {
+		req["start_timestamp"] = since / 1e9
 	}
 	if q.UntilNs > 0 {
 		req["end_timestamp"] = q.UntilNs/1e9 + 1

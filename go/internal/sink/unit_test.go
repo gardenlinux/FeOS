@@ -171,6 +171,10 @@ func TestProjects(t *testing.T) {
 			_, _ = w.Write([]byte(`{"project":"acme","role":"read","environments":[]}`))
 		case "Bearer stage":
 			_, _ = w.Write([]byte(`{"project":"acme","role":"","environments":["e1",""]}`))
+		case "Bearer made":
+			_, _ = w.Write([]byte(`{"project":"acme","createdAt":"2026-11-22T09:30:00.123456Z","role":"read","environments":[]}`))
+		case "Bearer made-e1":
+			_, _ = w.Write([]byte(`{"project":"acme","createdAt":"2026-11-22T09:30:00.123456Z","role":"","environments":["e1"]}`))
 		case "s1 acme":
 			_, _ = w.Write([]byte(`{"project":"acme","role":"write","environments":["e1"]}`))
 		case "s1 other":
@@ -195,6 +199,7 @@ func TestProjects(t *testing.T) {
 	}))
 	defer srv.Close()
 	ts := NewProjects(srv.URL, nil, time.Minute)
+	made := time.Date(2026, 11, 22, 9, 30, 0, 123456000, time.UTC)
 	now := time.Now()
 	ts.now = func() time.Time { return now }
 	ctx := context.Background()
@@ -218,10 +223,28 @@ func TestProjects(t *testing.T) {
 		{Credential{Authorization: "Bearer reader"}, Access{Project: "acme", All: true}},
 		{Credential{Authorization: "Bearer stage"}, Access{Project: "acme", Envs: []string{"e1"}}},
 		{Credential{Session: "s1", Project: "acme"}, Access{Project: "acme", All: true, Write: true}},
+		// The project's making bounds what is read (ADR 0056); a ferund
+		// of before answers none, which bounds nothing.
+		{Credential{Authorization: "Bearer made"}, Access{Project: "acme", All: true, Since: made}},
+		{Credential{Authorization: "Bearer made-e1"}, Access{Project: "acme", Envs: []string{"e1"}, Since: made}},
 	} {
 		if got, err := ts.Resolve(ctx, c.c); err != nil || !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%+v: %+v, %v", c.c, got, err)
 		}
+	}
+	if got := (Access{Since: made}).from(); got != made.UnixNano() {
+		t.Errorf("from %d", got)
+	}
+	if got := (Access{}).from(); got != 0 {
+		t.Errorf("no bound: from %d", got)
+	}
+	// Fresh asks ferund even with an answer kept, and keeps its own.
+	n0 := calls.Load()
+	if _, err := ts.Fresh(ctx, Credential{Authorization: "Bearer made"}); err != nil || calls.Load() != n0+1 {
+		t.Errorf("fresh: %v, %d calls", err, calls.Load()-n0)
+	}
+	if _, err := ts.Resolve(ctx, Credential{Authorization: "Bearer made"}); err != nil || calls.Load() != n0+1 {
+		t.Errorf("after fresh: %v, %d calls", err, calls.Load()-n0)
 	}
 	// A session's answer is kept for sessionTTL, per project.
 	n := calls.Load()

@@ -18,6 +18,10 @@ func TestSpanQueryString(t *testing.T) {
 			`tenant:"acme" AND environment:"e" AND source:"ingress" AND trace_id:"ab" AND service_name:"api" AND span_name:"GET \"/\""`}, // KEEP-TENANT: Quickwit's stored name
 		{SpanQuery{SinceNs: 1, MinDurationNs: 5}, `ts:[1970-01-01T00:00:00.000000001Z TO *] AND duration_ns:[5 TO *]`},
 		{SpanQuery{MaxDurationNs: 7}, `duration_ns:[* TO 7]`},
+		// The reader's bound raises the range's start, never lowers it.
+		{SpanQuery{SinceNs: 1, FromNs: 2}, `ts:[1970-01-01T00:00:00.000000002Z TO *]`},
+		{SpanQuery{SinceNs: 3, FromNs: 2, UntilNs: 4}, `ts:[1970-01-01T00:00:00.000000003Z TO 1970-01-01T00:00:00.000000004Z]`},
+		{SpanQuery{FromNs: 2}, `ts:[1970-01-01T00:00:00.000000002Z TO *]`},
 		{SpanQuery{Project: "acme", Environments: []string{"e1", "e2"}},
 			`tenant:"acme" AND (environment:"e1" OR environment:"e2")`}, // KEEP-TENANT: Quickwit's stored name
 		{SpanQuery{Environments: []string{}}, `(NOT *)`},
@@ -47,6 +51,9 @@ func TestSpanQueryMatch(t *testing.T) {
 		{SpanQuery{Source: "ingress"}, false},
 		{SpanQuery{SinceNs: 100, UntilNs: 100}, true},
 		{SpanQuery{SinceNs: 101}, false},
+		{SpanQuery{FromNs: 100}, true},
+		{SpanQuery{FromNs: 101}, false},
+		{SpanQuery{SinceNs: 50, FromNs: 101, UntilNs: 200}, false},
 		{SpanQuery{UntilNs: 99}, false},
 		{SpanQuery{MinDurationNs: 50, MaxDurationNs: 50}, true},
 		{SpanQuery{MinDurationNs: 51}, false},

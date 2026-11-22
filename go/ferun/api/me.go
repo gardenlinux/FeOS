@@ -148,9 +148,13 @@ type AccountRef struct {
 
 // Project is GET /api/v1/project, the sink's ask (ADR 0026): the
 // caller's effective role on the project and the environments it reads
-// beside it.
+// beside it. CreatedAt is when the project was made, as MeProject's: the
+// sink reads a project's logs and traces from then on, since a project
+// made under a name again is another (ADR 0056); a ferund of before
+// leaves it out (the zero time).
 type Project struct {
-	Project      string   `json:"project"`
-	Role         string   `json:"role"`
-	Environments []string `json:"environments"`
+	Project      string    `json:"project"`
+	CreatedAt    time.Time `json:"createdAt"`
+	Role         string    `json:"role"`
+	Environments []string  `json:"environments"`
 }

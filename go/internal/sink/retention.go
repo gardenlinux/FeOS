@@ -58,14 +58,17 @@ func (s *Store) Sweep(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// DeleteStreams deletes a project's streams of an environment or a job:
-// it leaves a delete task of them in every log index (Quickwit removes
-// their lines when it rewrites their splits; until then no read finds
-// them, their streams being gone), then deletes the streams with their
-// hot lines, each under its lock, which keeps the cold stage from moving
-// its mark meanwhile. It returns how many streams went.
-func (s *Store) DeleteStreams(ctx context.Context, project, environment, job string) (int, error) {
-	sel := Selector{Environment: environment, Job: job}
+// DeleteStreams deletes a project's streams of an environment or a job,
+// those from from on (Unix ns, the project's making; 0: all) as a read
+// selects them (Selector.From): it leaves a delete task of the lines from
+// from on in every log index (Quickwit removes them when it rewrites
+// their splits; until then no read finds them, their streams being gone;
+// an older project's line of that time, of an environment or job of the
+// same ID, goes too, which no bounded read reaches), then deletes the
+// streams with their hot lines, each under its lock, which keeps the cold
+// stage from moving its mark meanwhile. It returns how many streams went.
+func (s *Store) DeleteStreams(ctx context.Context, project string, from int64, environment, job string) (int, error) {
+	sel := Selector{Environment: environment, Job: job, From: from}
 	streams, err := selectStreams(ctx, s.db.Pool, project, streamFilter{sel: sel, limit: maxStreamsRead})
 	if err != nil {
 		return 0, err
@@ -76,7 +79,8 @@ func (s *Store) DeleteStreams(ctx context.Context, project, environment, job str
 			return 0, fmt.Errorf("index: %w", err)
 		}
 		for _, id := range ids {
-			if err := s.index.Delete(ctx, id, quickwit.Query{Project: project, Environment: environment, Job: job}); err != nil {
+			if err := s.index.Delete(ctx, id, quickwit.Query{Project: project, Environment: environment, Job: job,
+				SinceNs: from}); err != nil {
 				return 0, fmt.Errorf("index %s: delete: %w", id, err)
 			}
 		}

@@ -43,7 +43,8 @@ func TestPeopleJSON(t *testing.T) {
 		{Principal{Kind: "token", ID: "h", ProjectRole: "write", LosesWrite: true},
 			`{"kind":"token","id":"h","label":"","projectRole":"write","environmentRole":"","losesWrite":true}`},
 		{ProtectedAnswer{ID: "e", Name: "prod", Protected: true}, `{"id":"e","name":"prod","protected":true,"changed":false}`},
-		{Project{Project: "kino", Environments: []string{}}, `{"project":"kino","role":"","environments":[]}`},
+		{Project{Project: "kino", CreatedAt: time.Date(2026, 11, 21, 9, 30, 0, 0, time.UTC), Environments: []string{}},
+			`{"project":"kino","createdAt":"2026-11-21T09:30:00Z","role":"","environments":[]}`},
 	} {
 		b, err := json.Marshal(c.v)
 		if err != nil || string(b) != c.want {

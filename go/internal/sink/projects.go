@@ -70,12 +70,25 @@ func (c Credential) key() [32]byte {
 // span, else only those whose environment is one of Envs (its grants on
 // environments); a stream or span of no environment (a sandbox's, a
 // project's job's) needs All. Write (write on the project) may delete
-// streams.
+// streams. Since is when the project was made: streams and spans are
+// keyed by the project's name, and a project made under a name again is
+// another (ADR 0056), so every read and delete is bounded to what came at
+// or after it (from). The zero time, a ferund's of before that leaves
+// createdAt out, bounds nothing: ferund and the sink ship together.
 type Access struct {
 	Project string
+	Since   time.Time
 	All     bool
 	Envs    []string
 	Write   bool
+}
+
+// from is Since in Unix ns, 0 for no bound.
+func (a Access) from() int64 {
+	if a.Since.IsZero() {
+		return 0
+	}
+	return a.Since.UnixNano()
 }
 
 // none reports a reader that may read nothing.
@@ -99,6 +112,20 @@ func (a Access) within() []string {
 // or the session's cookie, and FeRun-Project) and keeps the answer for TTL (a session's for
 // at most sessionTTL), by the SHA-256 of the credential. Refusals are not
 // kept.
+//
+// A kept answer outlives its project's deletion by up to its TTL, as it
+// outlives the loss of a grant, and a project may be made under the name
+// meanwhile: the kept Access names the name still, and its Since bounds
+// it from below only. It reads none of the new project's streams and
+// spans unless one of that project's readers tells it their IDs. A reader
+// of environments only reads its Envs, each environment's ID made anew.
+// Every other read but one names what it reads by such an ID (a
+// selector's environment, job, instance or stream, a traffic's or an
+// egress read's environment, a span search's environment, job or
+// instance: UUIDs, pod IDs and random stream IDs), and ferund shows the
+// new project's to its readers alone. The one, a search of spans that
+// names none, asks ferund afresh (Fresh), which refuses the old reader
+// once its project is gone.
 type Projects struct {
 	ferunURL string
 	hc       *http.Client
@@ -135,26 +162,28 @@ func (r *refusal) Error() string {
 
 // projectAnswer is ferund's answer: role and environments are left out by
 // a ferund of before people (ADR 0031), whose every token was its
-// project's.
+// project's; createdAt by a ferund of before ADR 0056's deletion (no
+// bound).
 type projectAnswer struct {
-	Project      string   `json:"project"`
-	Role         *string  `json:"role"`
-	Environments []string `json:"environments"`
+	Project      string    `json:"project"`
+	CreatedAt    time.Time `json:"createdAt"`
+	Role         *string   `json:"role"`
+	Environments []string  `json:"environments"`
 }
 
 // access is the answer as an Access.
 func (a projectAnswer) access() Access {
 	if a.Role == nil {
-		return Access{Project: a.Project, All: true, Write: true}
+		return Access{Project: a.Project, Since: a.CreatedAt, All: true, Write: true}
 	}
 	switch *a.Role {
 	case "read":
-		return Access{Project: a.Project, All: true}
+		return Access{Project: a.Project, Since: a.CreatedAt, All: true}
 	case "write", "admin":
-		return Access{Project: a.Project, All: true, Write: true}
+		return Access{Project: a.Project, Since: a.CreatedAt, All: true, Write: true}
 	}
 	envs := slices.DeleteFunc(slices.Clone(a.Environments), func(e string) bool { return e == "" })
-	return Access{Project: a.Project, Envs: envs}
+	return Access{Project: a.Project, Since: a.CreatedAt, Envs: envs}
 }
 
 // integrationBearer reports whether an Authorization's bearer is a JWT
@@ -168,12 +197,22 @@ func integrationBearer(authz string) bool {
 // unknown, 404 no such project, 400) comes back as a *refusal; any other
 // failure as an error.
 func (t *Projects) Resolve(ctx context.Context, c Credential) (Access, error) {
+	return t.resolve(ctx, c, false)
+}
+
+// Fresh is Resolve from ferund's answer now, never a kept one; the answer
+// is kept as Resolve's.
+func (t *Projects) Fresh(ctx context.Context, c Credential) (Access, error) {
+	return t.resolve(ctx, c, true)
+}
+
+func (t *Projects) resolve(ctx context.Context, c Credential, fresh bool) (Access, error) {
 	h := c.key()
 	now := t.now()
 	t.mu.Lock()
 	e, ok := t.m[h]
 	t.mu.Unlock()
-	if ok && now.Before(e.expires) {
+	if ok && !fresh && now.Before(e.expires) {
 		return e.access, nil
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.ferunURL+askProject, nil)

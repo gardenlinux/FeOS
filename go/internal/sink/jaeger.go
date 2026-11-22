@@ -67,10 +67,11 @@ func (t *Traces) names(ctx context.Context, q quickwit.SpanQuery, sinceNs int64,
 
 // Trace answers a trace's spans of sel (its Project and TraceID set), from
 // the index and its topic's tail (ADR 0026 §11), one per span ID, the earliest first, at most
-// maxTraceSpans; none: nil.
+// maxTraceSpans, none before sel's FromNs; none: nil.
 func (t *Traces) Trace(ctx context.Context, sel quickwit.SpanQuery) ([]quickwit.SpanDoc, error) {
 	q := quickwit.SpanQuery{Project: sel.Project, TraceID: sel.TraceID, Environment: sel.Environment, Object: sel.Object,
-		Job: sel.Job, Instance: sel.Instance, Source: sel.Source, Environments: sel.Environments, Max: maxTraceSpans}
+		Job: sel.Job, Instance: sel.Instance, Source: sel.Source, Environments: sel.Environments, FromNs: sel.FromNs,
+		Max: maxTraceSpans}
 	spans, err := t.index.SearchSpans(ctx, t.pattern(), q)
 	if err != nil {
 		return nil, fmt.Errorf("index: %w", err)
@@ -154,15 +155,21 @@ func (t *Traces) Find(ctx context.Context, q quickwit.SpanQuery, limit int) ([][
 
 // parseSpanSelector reads FeRun's selectors of the trace reads:
 // environment, object, job, instance and source (ingress, egress or
-// container); the reader's project, and its environments when it reads
-// those only.
+// container); the reader's project, its environments when it reads those
+// only, and its project's making, before which no span is read.
 func parseSpanSelector(v url.Values, acc Access) (quickwit.SpanQuery, error) {
 	q := quickwit.SpanQuery{Project: acc.Project, Environment: v.Get("environment"), Object: v.Get("object"), Job: v.Get("job"),
-		Instance: v.Get("instance"), Source: v.Get("source"), Environments: acc.within()}
+		Instance: v.Get("instance"), Source: v.Get("source"), Environments: acc.within(), FromNs: acc.from()}
 	if !validSource(q.Source) {
 		return quickwit.SpanQuery{}, fmt.Errorf("source must be ingress, egress or container")
 	}
 	return q, nil
+}
+
+// spansNamed reports whether a trace read names its spans by an ID of the
+// project's: an environment, a job or an instance (Projects).
+func spansNamed(v url.Values) bool {
+	return v.Get("environment") != "" || v.Get("job") != "" || v.Get("instance") != ""
 }
 
 // parseTraceID reads a trace ID as Jaeger takes it: up to 32 hex digits,

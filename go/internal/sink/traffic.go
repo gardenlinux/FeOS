@@ -40,11 +40,13 @@ const (
 // whole seconds, of which both ends are multiples, and the source:
 // TrafficIngress (also when empty), what the ingress answered for each
 // service, or TrafficApp, the requests each service's own server spans
-// count, without those to its Skip paths (its readiness check).
+// count, without those to its Skip paths (its readiness check). FromNs is
+// the reader's bound (Access.from): no span before it counts.
 type TrafficQuery struct {
 	Project, Environment string
 	Services             []string
 	SinceNs, UntilNs     int64
+	FromNs               int64
 	Step                 time.Duration
 	Source               string
 	Skip                 map[string][]string
@@ -100,11 +102,11 @@ func (t *Traces) Traffic(ctx context.Context, q TrafficQuery) ([]ServiceTraffic,
 
 func (t *Traces) serviceTraffic(ctx context.Context, q TrafficQuery, service string) (ServiceTraffic, error) {
 	sel := quickwit.SpanQuery{Project: q.Project, Environment: q.Environment, Object: service, Source: SourceIngress,
-		SinceNs: q.SinceNs, UntilNs: q.UntilNs - 1, Failed: true}
+		SinceNs: q.SinceNs, UntilNs: q.UntilNs - 1, FromNs: q.FromNs, Failed: true}
 	if q.Source == TrafficApp {
 		sel = quickwit.SpanQuery{Project: q.Project, Environment: q.Environment, Object: service, Source: SourceContainer,
 			Kind: quickwit.SpanKindServer, NotPaths: q.Skip[service], SinceNs: q.SinceNs, UntilNs: q.UntilNs - 1,
-			ServerFailed: true}
+			FromNs: q.FromNs, ServerFailed: true}
 	}
 	failed, err := t.index.SpanHistogram(ctx, t.pattern(), sel, q.Step, false)
 	if err != nil {
@@ -212,6 +214,7 @@ func (a *api) traffic(w http.ResponseWriter, r *http.Request, acc Access) {
 		apierr.Write(w, apierr.New(http.StatusNotFound, "no such environment"))
 		return
 	}
+	q.FromNs = acc.from()
 	services, err := a.traces.Traffic(r.Context(), q)
 	if err != nil {
 		a.fail(w, r, err)

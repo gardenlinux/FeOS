@@ -76,7 +76,8 @@ type traceSpan struct {
 // ingress's: ferun.source ingress, ferun.pod ingress/<its name>), refuses
 // the request with errNotYours; more than maxExportSpans spans refuse it
 // too. A span without a valid trace or span ID is left out and counted in
-// rejected. now is the time of a span without a start.
+// rejected. now is the time of a span without a start, and the latest a
+// span's ts may be.
 func parseTraceExport(req *otlptracev1.ExportTraceServiceRequest, p ingestPeer, now time.Time) ([]traceSpan, int64, error) {
 	count := 0
 	for _, rs := range req.GetResourceSpans() {
@@ -141,8 +142,12 @@ func parseTraceExport(req *otlptracev1.ExportTraceServiceRequest, p ingestPeer, 
 				d.SpanKind = uint64(max(sp.GetKind(), 0))
 				d.StartNs, d.EndNs = clampNs(sp.GetStartTimeUnixNano()), clampNs(sp.GetEndTimeUnixNano())
 				d.DurationNs = max(d.EndNs-d.StartNs, 0)
+				// ts is the span's start, by the clock of whoever made it (an
+				// application's own), but never after the sink took it:
+				// the reads bound a project's spans by ts from its making
+				// on (ADR 0056), which a start set ahead must not pass.
 				d.TS = d.StartNs
-				if d.TS == 0 {
+				if d.TS == 0 || d.TS > now.UnixNano() {
 					d.TS = now.UnixNano()
 				}
 				d.StatusCode = uint64(max(sp.GetStatus().GetCode(), 0))

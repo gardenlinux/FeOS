@@ -59,7 +59,9 @@ func (s *server) service(h apiHandler) http.Handler {
 
 // getProject is GET /api/v1/project, which the sink asks for its readers
 // (ADR 0026, 0031): the project of the request's principal, a token, a
-// session or an integration with FeRun-Project; the principal's effective
+// session or an integration with FeRun-Project; when the project was made
+// (a name made again is another project, ADR 0056, and the sink reads a
+// project's streams and spans from then on); the principal's effective
 // role on the project ("": none, its roles are on environments only; for
 // an integration naming a person the lower of both, ADR 0056); and the
 // IDs of the environments beside it it reads, sorted. The sink lets a role on the project read
@@ -68,11 +70,20 @@ func (s *server) service(h apiHandler) http.Handler {
 // every token was the project's. A sink of before people reads such an
 // answer as the whole project's, so a principal of environments only is
 // answered only an asker that says it filters (filter=environments), and
-// any other 403 role_required read on the project.
+// any other 403 role_required read on the project. A project gone since
+// the request's principal was resolved is 404.
 func (s *server) getProject(w http.ResponseWriter, r *http.Request) error {
 	t, _ := auth.ProjectFrom(r.Context())
 	if t.ProjectRole() == auth.RoleNone && r.URL.Query().Get("filter") != "environments" {
 		return apierr.RoleRequired(auth.RoleRead.String(), "project")
+	}
+	created, err := s.st.ProjectsCreated(r.Context(), []string{t.Name})
+	if err != nil {
+		return internalf("project: %v", err)
+	}
+	at, ok := created[t.Name]
+	if !ok {
+		return apierr.New(http.StatusNotFound, "no such project")
 	}
 	envs := []string{}
 	for _, id := range t.EnvGrants() {
@@ -81,7 +92,8 @@ func (s *server) getProject(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	slices.Sort(envs)
-	return writeJSON(w, http.StatusOK, fapi.Project{Project: t.Name, Role: t.ProjectRole().String(), Environments: envs})
+	return writeJSON(w, http.StatusOK, fapi.Project{Project: t.Name, CreatedAt: at, Role: t.ProjectRole().String(),
+		Environments: envs})
 }
 
 // issueServiceCert is POST /api/v1/service-certificates {csr}: the

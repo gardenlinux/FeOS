@@ -27,11 +27,15 @@ const (
 // Instance and Stream is set. Source is SourceIngress, SourceEgress,
 // SourceContainer or "" for all. Within is not the request's but its
 // reader's (Access.within): when not nil, only the streams of the
-// environments it names are selected, none of no environment.
+// environments it names are selected, none of no environment. From is
+// the reader's too (Access.from, Unix ns): when not 0, only streams whose
+// first line is at or after it, so all their lines and their counts, and
+// lines at or after it; a stream without a line yet is none of them.
 type Selector struct {
 	Environment, Kind, Object, Instance, Container, Job, Stream, Source string
 	Replica, Attempt                                                    *int
 	Within                                                              []string
+	From                                                                int64
 }
 
 // Query is a read of /api/v1/logs: the selector, the time range in Unix

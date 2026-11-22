@@ -191,7 +191,7 @@ func (s *Store) Follow(ctx context.Context, project string, q Query, out followS
 			var st *streamRow
 			if !unknown[w.d.Stream] {
 				var err error
-				if st, err = s.followed(ctx, project, w.d.Stream, known, now.Sub(w.since) >= streamWait); err != nil {
+				if st, err = s.followed(ctx, project, q.Sel.From, w.d.Stream, known, now.Sub(w.since) >= streamWait); err != nil {
 					return err
 				}
 			}
@@ -252,13 +252,15 @@ const (
 )
 
 // followed is the stream of sid that a follow gives a line of: known, or
-// read from the database (a stream that started during the follow); nil
-// for one not found, which is gone once final (known[sid] nil).
-func (s *Store) followed(ctx context.Context, project, sid string, known map[string]*streamRow, final bool) (*streamRow, error) {
+// read from the database (a stream that started during the follow), of
+// the reader's bound from (Selector.From); nil for one not found, which is
+// gone once final (known[sid] nil).
+func (s *Store) followed(ctx context.Context, project string, from int64, sid string, known map[string]*streamRow,
+	final bool) (*streamRow, error) {
 	if st, ok := known[sid]; ok {
 		return st, nil
 	}
-	sts, err := selectStreams(ctx, s.db.Pool, project, streamFilter{sel: Selector{Stream: sid}, limit: 1})
+	sts, err := selectStreams(ctx, s.db.Pool, project, streamFilter{sel: Selector{Stream: sid, From: from}, limit: 1})
 	if err != nil {
 		return nil, fmt.Errorf("stream %s: %w", sid, err)
 	}
@@ -275,7 +277,8 @@ func (s *Store) followed(ctx context.Context, project, sid string, known map[str
 // selects reports whether a document is of project's streams of sel.
 func selects(project string, sel Selector, d *quickwit.Doc) bool {
 	eq := func(want, got string) bool { return want == "" || want == got }
-	return d.Project == project && eq(sel.Environment, d.Environment) && eq(sel.Kind, d.Kind) && eq(sel.Object, d.Object) &&
+	return d.Project == project && d.TS >= sel.From && eq(sel.Environment, d.Environment) && eq(sel.Kind, d.Kind) &&
+		eq(sel.Object, d.Object) &&
 		eq(sel.Instance, d.Instance) && eq(sel.Container, d.Container) && eq(sel.Job, d.Job) && eq(sel.Stream, d.Stream) &&
 		eq(sel.Source, d.Source) && (sel.Replica == nil || *sel.Replica == d.Replica) &&
 		(sel.Attempt == nil || *sel.Attempt == d.Attempt) &&

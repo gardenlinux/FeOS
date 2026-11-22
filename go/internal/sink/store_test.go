@@ -792,10 +792,10 @@ func TestRetentionAndDelete(t *testing.T) {
 	}
 	// An index of before (version 1) gets its delete task too.
 	idx.add("ferun-logs-1d", quickwit.Doc{Project: "acme", Environment: "e", Stream: "s_v1", Text: "v1"})
-	if n, err := s.DeleteStreams(ctx, "other", "e", ""); err != nil || n != 0 {
+	if n, err := s.DeleteStreams(ctx, "other", 0, "e", ""); err != nil || n != 0 {
 		t.Fatalf("another project deleted %d: %v", n, err)
 	}
-	n, err := s.DeleteStreams(ctx, "acme", "e", "")
+	n, err := s.DeleteStreams(ctx, "acme", 0, "e", "")
 	if err != nil || n != 2 {
 		t.Fatalf("deleted %d: %v", n, err)
 	}

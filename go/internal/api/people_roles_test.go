@@ -619,7 +619,7 @@ func TestProjectPrincipal(t *testing.T) {
 		return request{method: "GET", path: "/api/v1/project", header: http.Header{"Authorization": {bearerOf(e.projectToken)},
 			projectHeader: {project}}}
 	}
-	expect(t, e.serve(tok(testProject)), http.StatusOK, `{"project":"acme","role":"admin","environments":[]}`+"\n")
+	expect(t, e.serve(tok(testProject)), http.StatusOK, projectAnswer(t, e, "acme", "admin", "[]"))
 	expect(t, e.serve(tok("other")), http.StatusNotFound, errBody("no such project"))
 	// Another project's token never reaches this one's environments.
 	other := e.mintProjectToken("other")
@@ -639,7 +639,7 @@ func TestProjectPrincipal(t *testing.T) {
 		return e.serve(request{method: method, path: path, header: h,
 			cookies: []*http.Cookie{{Name: cookieSession, Value: member}}})
 	}
-	expect(t, sess("GET", "/api/v1/project", testProject, nil), http.StatusOK, `{"project":"acme","role":"write","environments":[]}`+"\n")
+	expect(t, sess("GET", "/api/v1/project", testProject, nil), http.StatusOK, projectAnswer(t, e, "acme", "write", "[]"))
 	expect(t, sess("GET", "/api/v1/project", "", nil), http.StatusBadRequest,
 		errBody("a session names its project in the FeRun-Project header"))
 	expect(t, sess("GET", "/api/v1/project", "other", nil), http.StatusNotFound, errBody("no such project"))
@@ -655,7 +655,7 @@ func TestProjectPrincipal(t *testing.T) {
 	op := w.person(t, "op", true)
 	w2 := e.serve(request{method: "GET", path: "/api/v1/project", header: http.Header{projectHeader: {"other"}},
 		cookies: []*http.Cookie{{Name: cookieSession, Value: op}}})
-	expect(t, w2, http.StatusOK, `{"project":"other","role":"admin","environments":[]}`+"\n")
+	expect(t, w2, http.StatusOK, projectAnswer(t, e, "other", "admin", "[]"))
 	// A session of the version before people (no person) is no
 	// principal; nor is an unknown cookie.
 	if _, err := e.st.InsertUISession(context.Background(), store.UISession{IDHash: store.HashToken("old"), Admin: true},
@@ -698,15 +698,15 @@ func TestProjectAnswersWhatIsRead(t *testing.T) {
 		want string
 	}{
 		{"project read and stage admin", asSession(w.person(t, "r", false, store.Grant{Role: "read"},
-			store.Grant{Role: "admin", EnvironmentID: w.stage})), `{"project":"acme","role":"read","environments":["` + stage + `"]}`},
+			store.Grant{Role: "admin", EnvironmentID: w.stage})), projectAnswer(t, e, "acme", "read", `["`+stage+`"]`)},
 		{"stage read", asSession(w.person(t, "sr", false, store.Grant{Role: "read", EnvironmentID: w.stage})),
-			`{"project":"acme","role":"","environments":["` + stage + `"]}`},
+			projectAnswer(t, e, "acme", "", `["`+stage+`"]`)},
 		{"stage and prod", asSession(w.person(t, "sp", false, store.Grant{Role: "read", EnvironmentID: w.stage},
-			store.Grant{Role: "write", EnvironmentID: w.prod})), `{"project":"acme","role":"","environments":` + both + `}`},
-		{"a token of prod", asToken(w.token(t, "write", w.prod)), `{"project":"acme","role":"","environments":["` + prod + `"]}`},
-		{"a token of the project", asToken(w.token(t, "read", uuid.Nil)), `{"project":"acme","role":"read","environments":[]}`},
+			store.Grant{Role: "write", EnvironmentID: w.prod})), projectAnswer(t, e, "acme", "", both)},
+		{"a token of prod", asToken(w.token(t, "write", w.prod)), projectAnswer(t, e, "acme", "", `["`+prod+`"]`)},
+		{"a token of the project", asToken(w.token(t, "read", uuid.Nil)), projectAnswer(t, e, "acme", "read", "[]")},
 	} {
-		if got := e.serve(c.req); got.Code != http.StatusOK || got.Body.String() != c.want+"\n" {
+		if got := e.serve(c.req); got.Code != http.StatusOK || got.Body.String() != c.want {
 			t.Errorf("%s: %d %s, want %s", c.name, got.Code, got.Body.String(), c.want)
 		}
 		// A sink of before people does not filter: it would read the
