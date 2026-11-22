@@ -10,8 +10,8 @@ import { envPath, jobPath, sandboxPath } from '../routes.js';
 import { useSummary } from '../summary.jsx';
 import { inUse } from './reach.js';
 import {
-  UNGUARDED, actionProblem, admitsOf, cloneBody, defaultHost, envDomains, errorShare, fmtLatency, newestFirst, olderCursor,
-  publishNote, routeCurl, sparkPoints, statusTone,
+  UNGUARDED, actionProblem, admitsOf, cloneBody, defaultHost, envDomains, errorShare, fmtLatency, naturalLabel, newestFirst,
+  olderCursor, projectAddress, projectLabel, publishNote, routeCurl, sparkPoints, statusTone,
 } from './envs.js';
 import { choices, guardsNone, hostLabelChoice, kindLabel, NO_VISITS, providerWords, publishChoice, sameChoice } from './providers.js';
 import { useMe } from '../people.js';
@@ -359,7 +359,7 @@ export function AccessTab({ project, env, st, ec, domains, changed, navigate }) 
   if (!st) return <p className="empty">Loading…</p>;
   return (
     <>
-      <PublicBox env={env} st={st} ec={ec} domains={domains} changed={changed} />
+      <PublicBox project={project} env={env} st={st} ec={ec} domains={domains} changed={changed} />
       <DomainsBox project={project} st={st} domains={domains} navigate={navigate} />
       <RouteTokenBox env={st.name} ec={ec} />
     </>
@@ -368,16 +368,23 @@ export function AccessTab({ project, env, st, ec, domains, changed, navigate }) 
 
 // PublicBox publishes the environment and says who the ingress admits
 // at its hosts (ADR 0054): visitors of one of the project's providers, or
-// anyone. The providers and the kinds this installation serves are the
-// summary's, unless given; a publish always says the access.
-export function PublicBox({ env, st, ec, domains, changed, providers: given, kinds: givenKinds }) {
+// anyone. It shows the project's address (ADR 0063), which one
+// environment of the project holds, and takes it for this one or gives it
+// up. The providers, the kinds this installation serves and the
+// environments are the summary's, unless given; a publish always says the
+// access.
+export function PublicBox({ project, env, st, ec, domains, changed, providers: given, kinds: givenKinds, environments: givenEnvs }) {
   const [label, setLabel] = useState('');
   const [picked, setPicked] = useState(null);
   const [op, run, clear] = useOp();
   const sum = useSummary();
   const providers = given === undefined ? sum.providers : given;
   const kinds = givenKinds === undefined ? sum.providerKinds : givenKinds;
+  const envs = givenEnvs === undefined ? sum.environments : givenEnvs;
   const dh = defaultHost(st, domains || []);
+  // The others' rows and this one's status, which is the newer.
+  const address = projectAddress(project, [...(envs || []).filter((e) => e.id !== st.id), st]);
+  const natural = naturalLabel(st.name, project);
   const now = admitsOf(st);
   // current is the access a publish keeps; choice what the box asks for.
   const current = publishChoice(st, kinds);
@@ -441,6 +448,30 @@ export function PublicBox({ env, st, ec, domains, changed, providers: given, kin
               : 'answers 404 while one of its domains is served; it is its host again once none is'}
           </span>
         </div>)}
+      {address && (
+        <div className="envbox-row">
+          <span className="k">project address</span>
+          {address.host
+            ? (st.projectAddress && dh && dh.serving ? <HostLink host={address.host} /> : <span className="mono host">{address.host}</span>)
+            : <span className="mono host dim">{project}.…</span>}
+          <span className="muted small">
+            {st.projectAddress
+              ? 'this environment holds it; it moves when another environment takes it'
+              : address.holder ? `${address.holder} holds it` : 'no environment holds it'}
+          </span>
+          {st.projectAddress
+            ? natural && (
+              <ConfirmButton className="mini" label="Give it up" confirmLabel={`Give it up for ${natural}: sure?`} disabled={off}
+                title={why || `its default host becomes ${natural}; the project's address answers nothing until an environment takes it`}
+                onConfirm={() => publish(true, hostLabelChoice(st, current), natural)} />)
+            : (
+              <ConfirmButton className="mini" label={address.holder ? `Move it here from ${address.holder}` : 'Take it'}
+                confirmLabel={address.holder ? `Move it from ${address.holder}: sure?` : 'Take it: sure?'}
+                disabled={off || (!st.public && !ready)}
+                title={why || (!st.public && !ready ? 'choose who it admits first'
+                  : address.holder ? `${address.holder} gets its own default host again` : '')}
+                onConfirm={() => publish(true, st.public ? hostLabelChoice(st, current) : choice, project)} />)}
+        </div>)}
       <div className="envbox-row admits-form">
         <span className="k">{st.public ? 'admit' : 'it admits'}</span>
         <span className="cred-seg" role="group" aria-label="who it admits">
@@ -472,7 +503,9 @@ export function PublicBox({ env, st, ec, domains, changed, providers: given, kin
       }}>
         <input className="mono" placeholder={st.hostLabel ? `host label (now ${st.hostLabel})` : 'host label (optional)'}
           value={label} disabled={off} onChange={(e) => setLabel(e.target.value)}
-          title="a label with -- in it, e.g. stage--kino; empty: the one it has, or its natural one" />
+          title={projectLabel(project)
+            ? `<choice>--${project}, e.g. blue--${project}; empty: the one it has, or its natural one`
+            : 'a domain gives it an address: this project has no labels of its own'} />
         <button className="primary mini" type="submit" disabled={off || (st.public ? !label.trim() : !ready)}
           title={why || (st.public || ready ? '' : 'choose who it admits first')}>
           {st.public ? 'Change host label' : 'Publish'}

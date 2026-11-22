@@ -59,7 +59,7 @@ describe('EnvTable', () => {
     expect(out).toContain('>4 deployed</td>');
     expect(out).toContain('>3 deployed</td>');
     // A public one shows its hosts, teal; the others serve at the route door only.
-    expect(out).toContain('<span class="mono host">expensa-stage-fecode.apps.fecode.dev</span>');
+    expect(out).toContain('<span class="mono host">expensa-stage--fecode.apps.fecode.dev</span>');
     expect(count(out, 'route door only')).toBe(2);
     // and whom it admits (ADR 0054); the others admit nobody at a host.
     expect(count(out, '<div class="muted small">visitors · fecode</div>')).toBe(1);
@@ -195,7 +195,7 @@ describe('EnvOverview', () => {
 
   it('shows where it is reached: the public hosts, else the route door, and the routes to its services', () => {
     const pub = overview(STAGE);
-    expect(words(STAGE)).toContain('Reachable at Domains & access expensa-stage-fecode.apps.fecode.dev');
+    expect(words(STAGE)).toContain('Reachable at Domains & access expensa-stage--fecode.apps.fecode.dev');
     expect(pub).toContain('<span class="mono">/api/expense</span>');
     expect(pub).toContain('href="/projects/fecode/environments/expensa-stage/objects/service/expense-service" class="strong">expense-service</a>');
     const door = words(PREVIEW);
@@ -602,11 +602,11 @@ describe('EnvHead', () => {
     expect(out).toContain('<span class="statepill failed">');
     expect(words(STAGE)).toContain('1 open incident');
     expect(words(STAGE)).toContain('Deployment 7 deploying, started');
-    expect(words(STAGE)).toContain('deployment 6 serves meanwhile · public at expensa-stage-fecode.apps.fecode.dev · visitors of fecode');
+    expect(words(STAGE)).toContain('deployment 6 serves meanwhile · public at expensa-stage--fecode.apps.fecode.dev · visitors of fecode');
     expect(out).toContain('Revert to 6');
     expect(out).toContain('href="/projects/fecode/environments/expensa-stage/builder"');
     // public at its host, teal and a link
-    expect(out).toContain('<a class="mono host" href="https://expensa-stage-fecode.apps.fecode.dev"');
+    expect(out).toContain('<a class="mono host" href="https://expensa-stage--fecode.apps.fecode.dev"');
     // Its labels are on Settings.
     expect(out).not.toContain('fecode.class=');
   });
@@ -653,7 +653,7 @@ describe('EnvHead', () => {
     const { access, provider, ...old } = STAGE;
     expect(access).toBe('visitors');
     expect(provider).toBe('fecode');
-    expect(words(old)).toContain('public at expensa-stage-fecode.apps.fecode.dev · open to anyone');
+    expect(words(old)).toContain('public at expensa-stage--fecode.apps.fecode.dev · open to anyone');
   });
 });
 
@@ -758,9 +758,26 @@ describe('the domains & access tab', () => {
     // arming click submits nothing.
     expect(on).toMatch(/<form class="inlineform">.*<button type="button" class="mini danger confirm"[^>]*>Unpublish<\/button><\/form>/);
     expect(on).toContain('<button class="primary mini" type="submit"');
-    expect(on).toContain('<a class="mono host" href="https://expensa-stage-fecode.apps.fecode.dev"');
+    expect(on).toContain('<a class="mono host" href="https://expensa-stage--fecode.apps.fecode.dev"');
     expect(html(<PublicBox env="e" st={off} ec={{ ...ALL, admin: false }} domains={[]} changed={nav} />))
       .toContain('title="needs admin on this environment"');
+  });
+
+  it('shows the project\'s address, takes it from the environment that holds it and gives it up', () => {
+    const prod = { id: 'p', name: 'prod', hostLabel: 'fecode', hosts: ['fecode.apps.fecode.dev'], projectAddress: true,
+      projectHost: 'fecode.apps.fecode.dev' };
+    const taking = text(<PublicBox project="fecode" env="e" st={STAGE} ec={ALL} domains={[]} changed={nav} environments={[prod]} />);
+    expect(taking).toContain('project address');
+    expect(taking).toContain('fecode.apps.fecode.dev');
+    expect(taking).toContain('prod holds it');
+    expect(taking).toContain('Move it here from prod');
+    const held = { ...STAGE, hostLabel: 'fecode', hosts: ['fecode.apps.fecode.dev'], projectAddress: true };
+    const holding = text(<PublicBox project="fecode" env="e" st={held} ec={ALL} domains={[]} changed={nav} environments={[]} />);
+    expect(holding).toContain('this environment holds it');
+    expect(holding).toContain('Give it up');
+    // A project without a label of its own shows none.
+    expect(text(<PublicBox project="shop.io" env="e" st={STAGE} ec={ALL} domains={[]} changed={nav} environments={[]} />))
+      .not.toContain('project address');
   });
 
   // The providers as GET /api/v1/providers answers them, and the kinds an

@@ -87,7 +87,7 @@ describe("a service's page", () => {
     expect(out).toContain('href="/projects/fecode/environments/expensa-stage/objects/service/approval-service"');
     expect(all).toContain('EXPENSA_HTTP_ADDR [::]:8080');
     expect(all).toContain('routes to it · 1');
-    expect(all).toContain('api-expense /api/expense http 8080 expensa-stage-fecode.apps.fecode.dev/api/expense');
+    expect(all).toContain('api-expense /api/expense http 8080 expensa-stage--fecode.apps.fecode.dev/api/expense');
   });
 
   it('counts its keys on its overview, after what is wrong and before its instances, with the way to its Config', () => {

@@ -8,9 +8,9 @@ import {
   UNGUARDED, actionProblem, activityItems, admitsOf, admitsShort, admitsWords, CHANGES_READ, changesTo, changeTone, cloneBody, conditionText, defaultHost,
   definitionRows, deploymentTone, envCounts, envDomains, envRows, envValueRef, errorShare, exitText, findObject,
   fmtCount, fmtLatency, fmtValue, groupObjects, hasEvidence, heavyEffect, incidentObject, instanceDeployments, instanceNote, instancePhase,
-  jobTrigger, KIND_NAMES, logReplicas, logSourceText, logsProblem, mayRevertTo, newestFirst, objectImage,
+  jobTrigger, KIND_NAMES, logReplicas, logSourceText, logsProblem, mayRevertTo, naturalLabel, newestFirst, objectImage,
   objectIncidents, objectStateText, objectsText, objectSummary, objectTone, olderCursor, originText, parseLabelFilter,
-  phaseTone, preflightRows, publishNote, readinessText, readyText, resourcesText, restartsOf, revertOffer, rolloutNote,
+  phaseTone, preflightRows, projectAddress, projectLabel, publishNote, readinessText, readyText, resourcesText, restartsOf, revertOffer, rolloutNote,
   routeCurl, routesTo, shortImage, sideMeta, sparkPoints, specObject, splitItem,
   statusState, statusTone, tagPlan, trafficOf, trafficTotals, usedBy,
 } from './envs.js';
@@ -367,10 +367,28 @@ describe('domains and access', () => {
   });
 
   it('name the default host, which answers 404 while a domain is served', () => {
-    expect(defaultHost(STAGE, [])).toEqual({ host: 'expensa-stage-fecode.apps.fecode.dev', label: 'expensa-stage-fecode', serving: true });
+    expect(defaultHost(STAGE, [])).toEqual({ host: 'expensa-stage--fecode.apps.fecode.dev', label: 'expensa-stage--fecode', serving: true });
     const onDomain = { ...STAGE, hosts: ['kino.example.com'], hostLabel: 'stage--kino' };
     expect(defaultHost(onDomain, domains)).toEqual({ host: '', label: 'stage--kino', serving: false });
     expect(defaultHost({ ...STAGE, public: false, hosts: [] }, [])).toBe(null);
+  });
+
+  it('know a project\'s own label, its environments\' natural labels and who holds its address (ADR 0063)', () => {
+    for (const p of ['kino', 'hb-baxxter', 'x0123456789abcdef']) expect(projectLabel(p)).toBe(true);
+    for (const p of ['shop.io', 'a--b', 'x-0123456789abcdef', 'Kino', '', undefined]) expect(projectLabel(p)).toBe(false);
+    expect(naturalLabel('dev', 'hb-baxxter')).toBe('dev--hb-baxxter');
+    expect(naturalLabel('blue-green', 'kino')).toBe('blue-green--kino');
+    for (const [n, p] of [['qa', 'kino'], ['a--b', 'kino'], ['dev', 'shop.io'], ['x'.repeat(58), 'kino']]) {
+      expect(naturalLabel(n, p)).toBe('');
+    }
+    const envs = [
+      { id: '1', name: 'stage', hostLabel: 'stage--kino', projectAddress: false, projectHost: 'kino.apps.fecore.dev' },
+      { id: '2', name: 'prod', hostLabel: 'kino', hosts: ['kino.example.com'], projectAddress: true },
+    ];
+    expect(projectAddress('kino', envs)).toEqual({ host: 'kino.apps.fecore.dev', holder: 'prod' });
+    expect(projectAddress('kino', [envs[1]])).toEqual({ host: '', holder: 'prod' });
+    expect(projectAddress('kino', [])).toEqual({ host: '', holder: '' });
+    expect(projectAddress('shop.io', envs)).toBe(null);
   });
 
   it('show a curl through the route door, and what a publish did', () => {
@@ -378,12 +396,12 @@ describe('domains and access', () => {
       .toBe("curl -H 'X-FeRun-Route-Token: tok' https://run.example.com/api/v1/environments/expensa-stage/http/api/x");
     expect(routeCurl('', 'a b', 't')).toBe("curl -H 'X-FeRun-Route-Token: t' /api/v1/environments/a%20b/http/");
     // A publish that says nothing admits visitors of ferun (ADR 0054).
-    expect(publishNote(response('PUT_environments_env_public.200'))).toBe('Public at expensa-stage-fecode.apps.fecode.dev, admitting '
+    expect(publishNote(response('PUT_environments_env_public.200'))).toBe('Public at expensa-stage--fecode.apps.fecode.dev, admitting '
       + 'visitors of ferun. This first publish rolls the image services once, so that their pods join the ingress\'s group.');
     // The sentence of who it admits, whether or not the fixture's publish
     // rolls (§1.8.1 pins only its access and provider).
     expect(publishNote(response('PUT_environments_env_public.200.anyone')))
-      .toContain('Public at expensa-stage-fecode.apps.fecode.dev, open to anyone.');
+      .toContain('Public at expensa-stage--fecode.apps.fecode.dev, open to anyone.');
     expect(publishNote({ public: true, hosts: [], rolling: false, access: 'visitors', provider: 'fecode' }))
       .toBe('Public, admitting visitors of fecode.');
     // An older ferund answers no access, and serves it to anyone.

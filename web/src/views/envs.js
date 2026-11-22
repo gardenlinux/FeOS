@@ -455,6 +455,38 @@ export function defaultHost(st, domains) {
   return null;
 }
 
+// projectLabel reports whether a project's name is a label of its own,
+// the project's address in its zone (ADR 0063): a DNS label without "--"
+// that does not end as a fallback label does (a hyphen and 16 hex
+// characters). A project with a dot in its name has none.
+export function projectLabel(project) {
+  return typeof project === 'string' && /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(project)
+    && !project.includes('--') && !/-[0-9a-f]{16}$/.test(project);
+}
+
+// naturalLabel is an environment's natural label, <name>--<project>, ''
+// where it has none (ADR 0063): a project without a label of its own, a
+// name with "--" or of two characters (R-LDH), a label over 63
+// characters.
+export function naturalLabel(name, project) {
+  if (!projectLabel(project) || !name || name.includes('--') || name.endsWith('-')) return '';
+  const l = `${name}--${project}`;
+  return l.length <= 63 && l.slice(2, 4) !== '--' ? l : '';
+}
+
+// projectAddress is the project's address as an environment's box shows
+// it: {host, holder}, host <project>.<zone> as ferund names it in the
+// environments' projectHost ('' when none does), holder the name of the
+// environment that holds it ('' when none does). null: the project has no
+// label of its own.
+export function projectAddress(project, envs) {
+  if (!projectLabel(project)) return null;
+  const list = envs || [];
+  const named = list.find((e) => e.projectHost);
+  const holder = list.find((e) => e.projectAddress);
+  return { host: named ? named.projectHost : '', holder: holder ? holder.name : '' };
+}
+
 // routeCurl is a request through the route door with a route token.
 export function routeCurl(origin, env, token, path = '/') {
   const p = String(path || '/').replace(/^\/+/, '');
