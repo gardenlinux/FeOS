@@ -34,7 +34,7 @@ type Domains interface {
 //
 // A claim is the project's (ADR 0021): claiming, checking and deleting
 // need admin on the project; a binding admin on the environments it leaves
-// and joins, which the handler checks; the list and a domain answer what
+// and joins, which the handler checks, deleting a bound domain too; the list and a domain answer what
 // the principal may read: every domain with read on the project, else
 // those bound to an environment it reads.
 func (s *server) domainRoutes(project func(n need, pattern string, h apiHandler)) {
@@ -147,7 +147,14 @@ func (s *server) getDomain(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, http.StatusOK, d)
 }
 
+// deleteDomain unbinds the domain on the way, so it needs what unbinding
+// needs besides admin on the project: admin on the environment it is
+// bound to, which an integration that names nobody lacks on a protected
+// one (ADR 0060).
 func (s *server) deleteDomain(w http.ResponseWriter, r *http.Request) error {
+	if err := s.allowBinding(r, ""); err != nil {
+		return err
+	}
 	if err := s.deps.Domains.DeleteDomain(r.Context(), projectOf(r), r.PathValue("id")); err != nil {
 		return err
 	}
