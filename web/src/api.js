@@ -408,7 +408,8 @@ export const api = {
   // 0059; '' or left out: default), its maker its admin: {name,
   // createdAt, role, limits, account}.
   createOwnProject: (name, account = '') => sessionCall('POST', '/projects', account ? { name, account } : { name }),
-  // The project as the session sees it: {project, role, environments}.
+  // The project as the session sees it: {project, createdAt, role,
+  // environments}.
   getProject: () => projectCall('GET', '/project'),
   // The members and the integrations the project grants (ADR 0056):
   // {members: [{person, name, email, issuer, subject, disabled?, role,

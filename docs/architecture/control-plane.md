@@ -1900,10 +1900,12 @@ integrations alike. A `project_deleted` row records who
 (`person:<id>`, `integration:<id>/person:<id>`). Its logs and traces
 stay in the sink until their retention (`--log-retention`,
 `--trace-retention`, 720 h by default; a stream's own up to
-`--log-retention-max`): the sink keys streams and spans by the project's
-name alone, and no deletion calls `DELETE /api/v1/log-streams`, so a
-project made under the name again reads them until then (backlog, ADR
-0026 and 0031).
+`--log-retention-max`), read only by the project they belong to: the
+sink keys streams and spans by the project's name and reads a project
+from its `createdAt` on (sink.md, Readers), so a project made under the
+name again reads none of them. No deletion calls `DELETE
+/api/v1/log-streams`; purging them before their retention is in the
+backlog (ADR 0026).
 
 **Members.** `GET /api/v1/project/members` answers `{members: [{person,
 name, email, issuer, subject, disabled?, role, madeBy, madeByName,
@@ -5545,9 +5547,12 @@ nor waits for. `ferund`'s part:
   route (404), it answers the bindings with zeros and `unavailable`, not
   a 503, and logs the sink's error.
 - **`GET /api/v1/project`** (project class, member), which the sink asks
-  for its readers: `{"project": "<name>", "role": "read"|"write"|"admin"|"",
-  "environments": ["<ID>", …]}` for any principal, a token or a session
-  with `FeRun-Project`: its role on the project (`""`: none, an operator's
+  for its readers: `{"project": "<name>", "createdAt": "<RFC 3339>",
+  "role": "read"|"write"|"admin"|"", "environments": ["<ID>", …]}`
+  (`api.Project`) for any principal, a token or a session with
+  `FeRun-Project`: when the project was made (a project made under a
+  name again is another, ADR 0056, and the sink reads a project's streams
+  and spans from then on), its role on the project (`""`: none, an operator's
   `admin`) and the IDs of the environments it holds a grant on, sorted.
   A principal of environments only (`role` `""`) is answered only with
   `?filter=environments`, which a sink that filters by environment

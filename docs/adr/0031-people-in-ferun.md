@@ -161,10 +161,10 @@ Two things outside FeRun shape the decision:
   and the project go after them. Nothing is kept to restore. Its name is
   free then, and a project made under it again is another (ADR 0056).
 - Its logs and traces stay in the sink until their retention (ADR 0026,
-  30 days by default): the sink keeps them by the project's name alone,
-  so a project made under the name again reads them until they have
-  gone. Purging them with the project, or binding the sink's reads to
-  the project's `createdAt`, is in the backlog.
+  30 days by default), read only by the project they belong to: the sink
+  keeps them by the project's name and reads a project from its
+  `createdAt` on, so a project made under the name again reads none of
+  them. Purging them before their retention is in the backlog.
 - An operator deletes any project, through the admin API or in the
   project's settings as its admin. A project token deletes none: ending
   a project is a person's decision, and a token is a program's. An

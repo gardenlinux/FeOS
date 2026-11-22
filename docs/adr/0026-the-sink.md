@@ -164,7 +164,14 @@ exactly once.
 ### Reading
 
 - A project reads its own streams with its FeRun token or a person's
-  session, filtered to the environments it may read (ADR 0031). `GET
+  session, filtered to the environments it may read (ADR 0031), and to
+  what came from its making on: streams and spans are keyed by the
+  project's name, and a project made under a name again is another (ADR
+  0056), so a reader reads a stream whose first line, and a span whose
+  start, is at or after the project's `createdAt`, which `ferund`
+  answers with the reader's role. A line's time is the platform's, a
+  span's its start but never after the sink took it, so no
+  application's clock passes the bound. `GET
   /api/v1/logs` answers lines with their labels, source, level and time:
   a stream selector, a time range, filters (words that must all appear,
   a word to exclude, a regular expression, a level, a trace ID), a
@@ -337,4 +344,8 @@ object (489547e). The ingress's access log moved from `ferund`'s database
 into the sink on 2026-10-31 (b820813, 371279d). A pod's egress records
 became a third source on 2026-11-05 (a3e9933, ADR 0028); readers by
 session, filtered by their environments, on 2026-11-06 (e382591,
-ADR 0031). Audit records in the sink were planned and not built.
+ADR 0031). Audit records in the sink were planned and not built. On
+2026-11-22, when a project's admin could delete it and its name was
+free for anyone (ADR 0031, 0056), every read became bound to the
+project's `createdAt`: a deleted project's streams and spans stay until
+their retention, read by no project made under the name again.

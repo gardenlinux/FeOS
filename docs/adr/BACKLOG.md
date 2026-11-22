@@ -133,7 +133,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0026: sampling of traces, and whether the ingress's spans of every request are kept once the volume asks.
 - ADR 0026: audit records in the sink: never dropped, kept a year, not deletable by a project; which of `ferund`'s calls write one, and whether they are signed or chained.
 - ADR 0026: whether an attached service's process log becomes a stream; a workspace's logs are not shipped.
-- ADR 0026, 0031: a deleted project's logs and traces stay in the sink until their retention, keyed by the project's name alone, so a project made under the name again reads them (no deletion calls `DELETE /api/v1/log-streams`, though ADR 0026 says an environment's deletion deletes its streams): purge a project's streams and spans with its deletion, or bind the sink's reads to the project's `createdAt` (a stream's first line, a span's start, after it).
+- ADR 0026, 0031: purge a deleted project's or environment's streams and spans before their retention (storage only: no project reads them, the reads being bound to its `createdAt`); no deletion calls `DELETE /api/v1/log-streams`, though ADR 0026 says an environment's deletion deletes its streams.
 
 ## ADR 0027
 

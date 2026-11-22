@@ -321,7 +321,7 @@ request of the same origin (`Sec-Fetch-Site`, or `Origin` against
 `Host`; 403 otherwise), as `ferund`'s own. The sink asks `ferund` `GET
 /api/v1/project?filter=environments` with the same `Authorization`, or
 the cookie, with `FeRun-Project` and the `FeRun-Person` that came
-(`200 {"project", "role", "environments"}`, the effective roles of
+(`200 {"project", "createdAt", "role", "environments"}`, the effective roles of
 ferund's one rule, so that a person read through an integration gets
 what both may read; a 4xx but 429 passed on as it came: a session's or
 a token's `FeRun-Person` is ferund's 400), and keeps the answer by the
@@ -335,6 +335,22 @@ a project's job's among them (ADR 0035), and none of no environment (a
 stream shipped before); one that may
 read nothing is 404 "no such project". An answer without `role` is a
 `ferund` of before people: the whole project's, as its every token was.
+Streams and spans are keyed by the project's name, and a project made
+under a name again is another (ADR 0056): every read and delete is of
+what came from the project's `createdAt` on, a stream whose first line
+is at or after it (its lines, its first and last time and its counts
+with it; one with an earlier line is none of the project's), a line, and
+a span whose `ts` is (traces.md, The index); a trace of earlier spans
+only is 404. A line's time is the platform's (the guest's when it read
+the line, the ingress's when it answered), a span's `ts` its start but
+never after it came, so an application's clock does not pass the bound.
+An answer without `createdAt` is a `ferund` of before: no bound, and the
+two ship together. A kept answer outlives its project by up to its TTL.
+Its reads name what they read by an ID, which every environment, pod and
+stream gets anew, so it reads nothing of a project made under the name
+meanwhile unless that project's readers tell it its IDs; a search of
+spans that names no environment, job or instance asks `ferund` afresh,
+which refuses it once the project is gone.
 
 **Stages.** `log_streams` (one row per stream key: labels, first and
 last time, next offset, the last offset stored, ended; its ID `s_` and 16
@@ -448,8 +464,8 @@ that is gone.
 ## Reading
 
 All routes need a reader (**Readers** above) and answer only the
-streams it may read: a selector that names others finds nothing, a
-follow gives none of their lines.
+streams it may read, of its project from its making on: a selector that
+names others finds nothing, a follow gives none of their lines.
 
 A read takes its streams from the database, then reads, of each log
 topic, the partitions of their keys from the index source's checkpoint
@@ -529,7 +545,7 @@ most 500.
 
 ### `DELETE /api/v1/log-streams?environment=<id>` or `?job=<id>`
 
-Needs write on the project (else 403 `role_required`). Deletes the streams' rows, and leaves a delete task of the environment's or job's lines in every log index (Quickwit removes them when its janitor rewrites their splits; no read finds them meanwhile). 204.
+Needs write on the project (else 403 `role_required`). Deletes the streams' rows, and leaves a delete task of the environment's or job's lines in every log index (Quickwit removes them when its janitor rewrites their splits; no read finds them meanwhile), of the project's from its `createdAt` on, as a read selects them (Readers): an older project's of the name stay until their retention. 204.
 
 ## `ferund`
 
@@ -549,8 +565,9 @@ Needs write on the project (else 403 `role_required`). Deletes the streams' rows
 - `--sink-endpoint` (host:port of the ingest) to the nodes, a name
   resolved every 10 s into one ready instance's address per node;
   `--sink-url` (the API, inside the cluster) for its own reads.
-- `GET /api/v1/project`: the principal's project, its role there and the
-  environments it holds a grant on (control-plane.md, The sink).
+- `GET /api/v1/project`: the principal's project, when it was made, its
+  role there and the environments it holds a grant on (control-plane.md,
+  The sink).
 - `ferund service-token --kind sink --name <name>` prints
   `feos-sink-<secret>` once; `GET /api/v1/admin/service-tokens` lists the
   tokens, `DELETE /api/v1/admin/service-tokens/{id}` revokes one (the

@@ -202,7 +202,9 @@ transaction with the project's usage, each keyed by its trace ID (a
 trace's spans in one partition); the answer comes after Kafka has
 them on two of its three replicas and the commit, well within the 8 s the
 node gives a pod's export.
-A span without a start gets the time it came as its `ts`; a resource
+A span without a start, or with one after the time it came (an
+application's clock ahead), gets the time it came as its `ts`, which a
+read bounds by its project's making (sink.md, Readers); a resource
 without `service.name` the service `unknown_service`.
 
 **Quota.** Bytes of documents per project per day, `--trace-quota`
@@ -236,7 +238,7 @@ span:
 
 | field | type | from |
 |---|---|---|
-| `ts` | datetime (ns), the timestamp field, fast | `start_time_unix_nano` |
+| `ts` | datetime (ns), the timestamp field, fast | `start_time_unix_nano`, never after the span came |
 | `tenant` | raw text, the tag field: the project, under the earlier word of ADR 0061, as `release` | `ferun.project` (`ferun.tenant` from a pod placed before) | <!-- KEEP-TENANT: Quickwit's stored name -->
 | `environment`, `kind`, `object`, `instance`, `job`, `source`, `pod`, `node` | raw text | the `ferun.*` attributes; `source` `ingress` or `egress` as `ferun.source` says, else `container` |
 | `replica`, `release`, `attempt` | u64 | the `ferun.*` attributes; `release` is the deployment, under the label's earlier word, as the log index has it (sink.md) |
@@ -262,7 +264,8 @@ object, bytes as base64 text.
 
 Under `/api/v1/jaeger`, with a reader as `GET /api/v1/logs` takes it
 (sink.md, Readers); every query is the project's own, whatever it asks,
-and a reader of environments only (ADR 0031) reads the spans of those:
+of spans from the project's making on (a trace of earlier spans only is
+404), and a reader of environments only (ADR 0031) reads the spans of those:
 a trace's other spans are left out. The paths and answers are those of Jaeger's HTTP query API
 (`jaeger-query`'s `/api/…`), so a client of that API, Grafana's Jaeger
 data source among them, reads them with the base URL
