@@ -80,6 +80,8 @@ ALTER TABLE invitations ADD CONSTRAINT invitations_scope CHECK (
       AND role IN ('member', 'admin')));
 CREATE INDEX invitations_account ON invitations (account_id, created_at) WHERE account_id IS NOT NULL;
 
-INSERT INTO accounts (id, title) VALUES ('default', 'Default');
+-- default is as old as the oldest project on it.
+INSERT INTO accounts (id, title, created_at)
+  SELECT 'default', 'Default', coalesce(min(created_at), now()) FROM projects;
 INSERT INTO project_accounts (project_id, account_id, moved_at, moved_by)
   SELECT id, 'default', created_at, '' FROM projects;

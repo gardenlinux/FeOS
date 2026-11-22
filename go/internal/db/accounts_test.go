@@ -54,9 +54,10 @@ func TestAccountsMigration(t *testing.T) {
 	migrateRange(t, d, 43, 44)
 
 	var title string
-	if err := d.Pool.QueryRow(ctx, "SELECT title FROM accounts WHERE id = 'default'").Scan(&title); err != nil ||
-		title != "Default" {
-		t.Fatalf("default: %q %v", title, err)
+	var oldest bool
+	if err := d.Pool.QueryRow(ctx, `SELECT title, created_at = '2026-01-02T03:04:05Z' FROM accounts
+		WHERE id = 'default'`).Scan(&title, &oldest); err != nil || title != "Default" || !oldest {
+		t.Fatalf("default: %q, as old as the oldest project %v, %v", title, oldest, err)
 	}
 	rows, err := d.Pool.Query(ctx, `SELECT a.project_id, a.account_id, a.moved_by, a.moved_at = p.created_at,
 			a.left_at IS NULL
