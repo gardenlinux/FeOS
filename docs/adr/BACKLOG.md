@@ -236,7 +236,6 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0045: certificates a project brings, for a domain whose CA is not Let's Encrypt.
 - ADR 0045: whether the cap on unverified claims and certificates only for routed domains shield the ACME account enough, or a project wants a cap on its certificates.
 - ADR 0045: a Public Suffix List entry for the apps zone, an operator's action, so that a page's script cannot set a cookie for the zone.
-- ADR 0045: a project takes its own name as the label of one of its environments, in the zone it is in (FeCode's ADR 0037 waits for it with a project's address).
 
 ## ADR 0048
 
