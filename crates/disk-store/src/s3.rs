@@ -6,7 +6,9 @@
 //!
 //!   AWS_ENDPOINT_URL        e.g. https://s3.example.com
 //!   AWS_REGION              default "us-east-1"
-//!   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+//!   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, or a role the platform
+//!   hands the pod: AWS_CONTAINER_CREDENTIALS_FULL_URI (EKS Pod Identity)
+//!   or AWS_WEB_IDENTITY_TOKEN_FILE (IRSA)
 //!   S3_BUCKET
 //!
 //! Ordering rule (ADR 0011): chunks are uploaded *before* any manifest that
@@ -93,16 +95,23 @@ impl S3 {
         };
         let endpoint = std::env::var("AWS_ENDPOINT_URL").ok();
         let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".into());
+        let set = |name: &str| std::env::var(name).is_ok_and(|v| !v.is_empty());
         let ak = std::env::var("AWS_ACCESS_KEY_ID").ok();
         let sk = std::env::var("AWS_SECRET_ACCESS_KEY").ok();
-        let (Some(ak), Some(sk)) = (ak, sk) else {
+        let b = if let (Some(ak), Some(sk)) = (ak, sk) {
+            object_store::aws::AmazonS3Builder::new()
+                .with_access_key_id(&ak)
+                .with_secret_access_key(&sk)
+        } else if set("AWS_CONTAINER_CREDENTIALS_FULL_URI") || set("AWS_WEB_IDENTITY_TOKEN_FILE") {
+            // A role the platform hands the pod (EKS Pod Identity, IRSA):
+            // object_store fetches its credentials and renews them.
+            object_store::aws::AmazonS3Builder::from_env()
+        } else {
             return Ok(None);
         };
-        let mut b = object_store::aws::AmazonS3Builder::new()
+        let mut b = b
             .with_bucket_name(&bucket)
             .with_region(&region)
-            .with_access_key_id(&ak)
-            .with_secret_access_key(&sk)
             // Ceph/radosgw: path-style.
             .with_virtual_hosted_style_request(false);
         // object_store's endpoint for the region when none is configured.

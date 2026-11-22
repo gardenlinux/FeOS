@@ -88,7 +88,8 @@ func (p *pipes) ensure(ctx context.Context, id string, config func() []byte) (in
 	if err != nil {
 		return 0, err
 	}
-	src := quickwit.Source{Topic: id, Brokers: p.cfg.KafkaBrokers}
+	src := quickwit.Source{Topic: id, Brokers: p.cfg.SourceBrokers(),
+		Username: p.cfg.QuickwitKafkaUsername, Password: p.cfg.QuickwitKafkaPassword}
 	if err := p.index.Ensure(ctx, id, config(), src); err != nil {
 		return 0, fmt.Errorf("index %s: %w", id, err)
 	}

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gardenlinux/feos/go/internal/awsauth"
 	"github.com/gardenlinux/feos/go/internal/db"
 	"github.com/gardenlinux/feos/go/internal/sink/kafka"
 	"github.com/gardenlinux/feos/go/internal/sink/quickwit"
@@ -84,7 +85,7 @@ func New(ctx context.Context, cfg Config, deps Deps, log *slog.Logger) (*Program
 	}
 	rlog := deps.Log
 	if rlog == nil {
-		kc, err := kafka.New(cfg.KafkaBrokers)
+		kc, err := kafka.New(cfg.KafkaBrokers, kafkaAuth(cfg.KafkaSASL))
 		if err != nil {
 			d.Close()
 			return nil, err
@@ -107,6 +108,16 @@ func New(ctx context.Context, cfg Config, deps Deps, log *slog.Logger) (*Program
 		apiLis:   lis,
 		ingestUp: make(chan struct{}),
 	}, nil
+}
+
+// kafkaAuth is how the sink signs in to Kafka (--kafka-sasl): with
+// aws-msk-iam with the credentials the platform hands the process, which
+// awsauth fetches again before they expire.
+func kafkaAuth(mode string) kafka.Auth {
+	if mode == KafkaSASLAWSMSKIAM {
+		return kafka.Auth{AWS: awsauth.NewSource().Get}
+	}
+	return kafka.Auth{}
 }
 
 // withAppName names the sink's connections unless the URL does.

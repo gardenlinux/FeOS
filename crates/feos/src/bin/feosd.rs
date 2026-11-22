@@ -24,7 +24,7 @@ const USAGE: &str = "usage: feosd [--tcp ADDRESS] [--self-upgrade] [--pod-prefix
              [--stop-grace SECONDS]
              [--control-plane HOST:PORT [--control-plane-name NAME]
               [--trust-domain NAME] [--join-token-file PATH] [--node-dir PATH]
-              [--mesh-port PORT] [--mesh-address ADDRESS]]
+              [--node-name NAME] [--mesh-port PORT] [--mesh-address ADDRESS]]
        feosd --hand-over-vms --vms-cgroup PATH
        feosd --version
 
@@ -88,6 +88,8 @@ const USAGE: &str = "usage: feosd [--tcp ADDRESS] [--self-upgrade] [--pod-prefix
   --node-dir PATH          the node's key, certificate and trust bundle, and the
                            mesh's key and peers in mesh/; /var/lib/feos/node by
                            default
+  --node-name NAME         the name the node joins as, a DNS label; the hostname
+                           by default
   --mesh-port PORT         the UDP port of the mesh's WireGuard device; 51820 by
                            default
   --mesh-address ADDRESS   where the other nodes reach this node's mesh; the
@@ -129,6 +131,7 @@ impl Args {
         let mut trust_domain = None;
         let mut join_token_file = None;
         let mut node_dir = None;
+        let mut node_name = None;
         let mut mesh_port = None;
         let mut mesh_address = None;
         while let Some(arg) = args.next() {
@@ -208,6 +211,7 @@ impl Args {
                 "--trust-domain" => trust_domain = Some(value("a name")?),
                 "--join-token-file" => join_token_file = Some(value("a path")?.into()),
                 "--node-dir" => node_dir = Some(value("a path")?.into()),
+                "--node-name" => node_name = Some(value("a name")?),
                 "--mesh-port" => {
                     let port = value("a port")?;
                     mesh_port = Some(
@@ -251,6 +255,7 @@ impl Args {
             if let Some(dir) = node_dir {
                 config.node_dir = dir;
             }
+            config.node_name = node_name;
             // Without a prefix of its network's, the node is on its
             // cluster's mesh (ADR 0017).
             if parsed.network.pod_prefix.is_none() {
@@ -265,6 +270,8 @@ impl Args {
                 );
             }
             parsed.fleet = Some(config);
+        } else if node_name.is_some() {
+            bail!("--node-name needs --control-plane\n{USAGE}");
         } else if let Some(trust_domain) = trust_domain {
             fleet_client::check_trust_domain(&trust_domain)
                 .map_err(|e| anyhow!("--trust-domain: {e}\n{USAGE}"))?;
@@ -463,9 +470,12 @@ mod tests {
             std::path::Path::new("/etc/feos/join-token")
         );
         assert_eq!(fleet.node_dir, std::path::Path::new("/var/lib/feos/node"));
+        assert_eq!(fleet.node_name, None);
         let fleet = parse(&[
             "--control-plane",
             "10.43.0.17:7443",
+            "--node-name",
+            "ip-10-0-1-2",
             "--control-plane-name",
             "ferun-nodes.ferun.svc.cluster.local",
             "--trust-domain",
@@ -486,6 +496,8 @@ mod tests {
             std::path::Path::new("/run/credentials/feosd/join-token")
         );
         assert_eq!(fleet.node_dir, std::path::Path::new("/srv/feos/node"));
+        assert_eq!(fleet.node_name.as_deref(), Some("ip-10-0-1-2"));
+        assert!(parse(&["--node-name", "ip-10-0-1-2"]).is_err());
         for bad in [
             &["--mesh-port", "51821"][..],
             &[

@@ -88,6 +88,8 @@ type config struct {
 	OIDCClientSecret string
 	PublicURL        string
 	SessionSecret    string
+	// Budget caps what the model costs a month (budget.go); nil: no cap.
+	Budget *budget
 }
 
 func loadConfig() config {
@@ -184,7 +186,10 @@ type streamResult struct {
 	Content     string // all content deltas of the round, for the history
 	ToolCalls   []ToolCall
 	FinishTools bool
-	Err         error
+	// Usage is the call's tokens from the stream's last chunk; nil when
+	// the API sent none.
+	Usage *usage
+	Err   error
 }
 
 // llmClient calls the LLM gateway: a client span per request, and the
@@ -272,8 +277,12 @@ func callLLM(ctx context.Context, cfg config, messages []Message, tools []Tool) 
 			var chunk struct {
 				Model string `json:"model"`
 				Usage *struct {
-					Prompt     int `json:"prompt_tokens"`
-					Completion int `json:"completion_tokens"`
+					Prompt        int `json:"prompt_tokens"`
+					Completion    int `json:"completion_tokens"`
+					PromptDetails struct {
+						Cached     int `json:"cached_tokens"`
+						CacheWrite int `json:"cache_write_tokens"`
+					} `json:"prompt_tokens_details"`
 				} `json:"usage"`
 				Choices []struct {
 					Delta struct {
@@ -290,6 +299,8 @@ func callLLM(ctx context.Context, cfg config, messages []Message, tools []Tool) 
 				span.SetAttributes(attribute.String("gen_ai.response.model", chunk.Model))
 			}
 			if chunk.Usage != nil {
+				res.Usage = &usage{Prompt: chunk.Usage.Prompt, Completion: chunk.Usage.Completion,
+					CacheRead: chunk.Usage.PromptDetails.Cached, CacheWrite: chunk.Usage.PromptDetails.CacheWrite}
 				span.SetAttributes(
 					attribute.Int("gen_ai.usage.input_tokens", chunk.Usage.Prompt),
 					attribute.Int("gen_ai.usage.output_tokens", chunk.Usage.Completion))
@@ -438,9 +449,32 @@ func handleChat(cfg config) http.HandlerFunc {
 		// ... again in every round.
 		seq := 0
 		for round := 0; round < 8; round++ {
+			// Every round is a call of the model, and every call first asks
+			// the month's budget (budget.go).
+			if cfg.Budget != nil {
+				if err := cfg.Budget.check(r.Context()); err != nil {
+					log.Printf("chat refused: %v", err)
+					msg := "This month's budget for the model is spent; FeChat answers again next month."
+					if !errors.Is(err, errBudgetSpent) {
+						msg = "FeChat cannot check its budget for the model right now; please try again later."
+					}
+					sseEvent(w, map[string]string{"type": "error", "content": msg})
+					return
+				}
+			}
 			res := callLLM(r.Context(), cfg, messages, defs)
 			for d := range res.Deltas {
 				sseEvent(w, map[string]string{"type": "delta", "content": d})
+			}
+			if cfg.Budget != nil && res.Usage != nil {
+				// Counted on the request's context made independent: a
+				// client that went away has still been charged for.
+				if total, err := cfg.Budget.add(context.WithoutCancel(r.Context()), *res.Usage); err != nil {
+					log.Printf("budget: counting %+v: %v", *res.Usage, err)
+				} else {
+					log.Printf("budget: %+v costs %d micro-USD; this month %d of %d", *res.Usage,
+						costMicro(*res.Usage, cfg.Budget.prices), total, cfg.Budget.capMicro)
+				}
 			}
 			if res.Err != nil {
 				log.Printf("llm error: %v", res.Err)
@@ -526,6 +560,14 @@ func main() {
 	}
 	if cfg.Model == "" {
 		log.Fatal("MODEL is not set")
+	}
+	b, err := loadBudget()
+	if err != nil {
+		log.Fatalf("budget: %v", err)
+	}
+	cfg.Budget = b
+	if b == nil {
+		log.Printf("BUDGET_URL is not set: the model's cost has no cap")
 	}
 	if cfg.FeRunURL != "" {
 		if cfg.FeRunEnvironment == "" {

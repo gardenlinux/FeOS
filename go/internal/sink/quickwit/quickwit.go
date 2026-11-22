@@ -320,10 +320,27 @@ func IndexConfig(id string, s IndexSettings) []byte {
 	return b
 }
 
-// Source is the Kafka topic an index's source reads, at the brokers.
+// Source is the Kafka topic an index's source reads, at the brokers:
+// in plaintext, or, with a Username, over TLS with SASL SCRAM-SHA-512
+// (librdkafka's SASL_SSL, the system's roots) as that user.
 type Source struct {
-	Topic   string
-	Brokers []string
+	Topic              string
+	Brokers            []string
+	Username, Password string
+}
+
+// clientParams are librdkafka's settings of src's source.
+func (src Source) clientParams() map[string]string {
+	// earliest: a partition without a checkpoint is read from its start,
+	// not its end; a short session, so that a restarted indexer takes its
+	// partitions again within seconds.
+	p := map[string]string{"bootstrap.servers": strings.Join(src.Brokers, ","),
+		"auto.offset.reset": "earliest", "session.timeout.ms": "10000", "heartbeat.interval.ms": "3000"}
+	if src.Username != "" {
+		p["security.protocol"], p["sasl.mechanism"] = "SASL_SSL", "SCRAM-SHA-512"
+		p["sasl.username"], p["sasl.password"] = src.Username, src.Password
+	}
+	return p
 }
 
 // sourceID is the one source of a sink's index.
@@ -332,7 +349,10 @@ const sourceID = "kafka"
 // Ensure makes the index id of config unless it exists, and its Kafka
 // source on src's topic unless it has one (ADR 0026 §11): Quickwit keeps
 // the topic's offsets in its metastore with each split it publishes, so a
-// record is indexed once.
+// record is indexed once. A source that exists keeps what it was made
+// with, its brokers and sign-in too, and is not compared: its checkpoint
+// holds offsets of those brokers' topic, so other brokers take a new index
+// (MappingVersion) or the index deleted first.
 func (c *Client) Ensure(ctx context.Context, id string, config []byte, src Source) error {
 	err := c.do(ctx, http.MethodGet, c.search+"/api/v1/indexes/"+url.PathEscape(id), "", nil, nil)
 	if IsNotFound(err) {
@@ -348,11 +368,7 @@ func (c *Client) Ensure(ctx context.Context, id string, config []byte, src Sourc
 		"version": "0.9", "source_id": sourceID, "source_type": "kafka", "num_pipelines": 1, "input_format": "json",
 		"params": map[string]any{
 			"topic": src.Topic, "client_log_level": "warn", "enable_backfill_mode": false,
-			// earliest: a partition without a checkpoint is read from its
-			// start, not its end; a short session, so that a restarted
-			// indexer takes its partitions again within seconds.
-			"client_params": map[string]string{"bootstrap.servers": strings.Join(src.Brokers, ","),
-				"auto.offset.reset": "earliest", "session.timeout.ms": "10000", "heartbeat.interval.ms": "3000"},
+			"client_params": src.clientParams(),
 		},
 	})
 	err = c.do(ctx, http.MethodPost, c.search+"/api/v1/indexes/"+url.PathEscape(id)+"/sources", "application/json", body, nil)

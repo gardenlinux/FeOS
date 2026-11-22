@@ -9,8 +9,9 @@
 //
 // Every flag has an environment variable FERUN_SINK_<NAME> (the flag's
 // name in upper snake case); a flag given wins over its variable. The
-// secrets come from variables only: SINK_SERVICE_TOKEN, the sink's
-// service token at ferund.
+// secrets come from a variable, SINK_SERVICE_TOKEN, the sink's service
+// token at ferund, and from a file, the password of Quickwit's Kafka
+// sources (--quickwit-kafka-password-file); neither is in a flag.
 package sink
 
 import (
@@ -20,6 +21,7 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +36,18 @@ const EnvPrefix = "FERUN_SINK_"
 // The variables of the secrets.
 const (
 	EnvServiceToken = "SINK_SERVICE_TOKEN"
+)
+
+// How the sink signs in to Kafka (--kafka-sasl).
+const (
+	// KafkaSASLNone is plaintext without SASL: a listener inside the
+	// cluster that a NetworkPolicy guards (Strimzi's plain).
+	KafkaSASLNone = "none"
+	// KafkaSASLAWSMSKIAM is TLS and SASL AWS_MSK_IAM, Amazon MSK's IAM
+	// access control (port 9098), with the AWS credentials the platform
+	// hands the process: an EKS Pod Identity's, or static keys
+	// (awsauth.Source).
+	KafkaSASLAWSMSKIAM = "aws-msk-iam"
 )
 
 // The log formats (--log-format).
@@ -68,6 +82,22 @@ type Config struct {
 	KafkaBrokers                      []string
 	KafkaPartitions, KafkaReplication int
 	KafkaRetention                    time.Duration
+	// KafkaSASL is how the sink signs in to the brokers, KafkaSASLNone or
+	// KafkaSASLAWSMSKIAM. It is the sink's own: Quickwit's Kafka sources
+	// get the brokers alone, and Quickwit 0.9's source (librdkafka) has no
+	// way to sign in with IAM, so with aws-msk-iam they cannot read.
+	KafkaSASL string
+	// Quickwit's Kafka sources reach the brokers on their own, as the sink
+	// makes them: at QuickwitKafkaBrokers (none: KafkaBrokers), and, with
+	// a QuickwitKafkaUsername, over TLS with SASL SCRAM-SHA-512 as that
+	// user, since Quickwit 0.9 cannot sign in with IAM (an Amazon MSK
+	// listener of its own, 9096). The password is read from
+	// QuickwitKafkaPasswordFile at the start; it goes to Quickwit with
+	// each source the sink makes, so Quickwit's metastore holds it.
+	QuickwitKafkaBrokers      []string
+	QuickwitKafkaUsername     string
+	QuickwitKafkaPasswordFile string
+	QuickwitKafkaPassword     string
 	// IndexPartitions is how many partitions a new index hashes its lines
 	// into by project, environment and job (its partition_key); an index
 	// keeps the number it was made with.
@@ -118,6 +148,7 @@ func Default() Config {
 		KafkaPartitions:  64,
 		KafkaReplication: 3,
 		KafkaRetention:   24 * time.Hour,
+		KafkaSASL:        KafkaSASLNone,
 		TraceQuota:       1 << 30,
 		TraceRetention:   720 * time.Hour,
 		TraceIndexPrefix: "ferun-traces",
@@ -145,6 +176,13 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	if getenv != nil {
 		c.ServiceToken = getenv(EnvServiceToken)
 	}
+	if c.QuickwitKafkaPasswordFile != "" {
+		b, err := os.ReadFile(c.QuickwitKafkaPasswordFile)
+		if err != nil {
+			return Config{}, fmt.Errorf("--quickwit-kafka-password-file: %w", err)
+		}
+		c.QuickwitKafkaPassword = strings.TrimRight(string(b), "\r\n")
+	}
 	if err := c.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -163,6 +201,10 @@ func register(fs *flag.FlagSet, c *Config) *string {
 	fs.IntVar(&c.KafkaPartitions, "kafka-partitions", c.KafkaPartitions, "the partitions of a new topic")
 	fs.IntVar(&c.KafkaReplication, "kafka-replication", c.KafkaReplication, "the replicas of a new topic's partitions")
 	fs.DurationVar(&c.KafkaRetention, "kafka-retention", c.KafkaRetention, "how long a new topic keeps its records: the replay buffer, not the store")
+	fs.StringVar(&c.KafkaSASL, "kafka-sasl", c.KafkaSASL, "how the sink signs in to Kafka: none (plaintext) or aws-msk-iam (TLS and SASL AWS_MSK_IAM with the process's AWS credentials, Amazon MSK's port 9098)")
+	fs.Var((*stringList)(&c.QuickwitKafkaBrokers), "quickwit-kafka-brokers", "the brokers Quickwit's Kafka sources read, comma-separated host:port (default: --kafka-brokers)")
+	fs.StringVar(&c.QuickwitKafkaUsername, "quickwit-kafka-username", c.QuickwitKafkaUsername, "the SASL SCRAM-SHA-512 user of Quickwit's Kafka sources, over TLS (none: plaintext, no SASL)")
+	fs.StringVar(&c.QuickwitKafkaPasswordFile, "quickwit-kafka-password-file", c.QuickwitKafkaPasswordFile, "the file of that user's password (required with --quickwit-kafka-username)")
 	fs.StringVar(&c.IndexPrefix, "index-prefix", c.IndexPrefix, "the prefix of the log indexes' names, <prefix>-v<version>-<days>d")
 	fs.IntVar(&c.IndexPartitions, "index-partitions", c.IndexPartitions, "how many partitions a new index hashes lines into by project, environment and job, 1 to 200 (an index keeps its own)")
 	fs.DurationVar(&c.CommitTimeout, "index-commit-timeout", c.CommitTimeout, "how soon a line is searchable in the index, whole seconds (a new index's commit_timeout_secs)")
@@ -210,6 +252,14 @@ func (c *Config) Validate() error {
 	if c.KafkaPartitions < 1 || c.KafkaReplication < 1 || c.KafkaRetention < time.Minute {
 		bad("--kafka-partitions and --kafka-replication must be positive, --kafka-retention at least a minute")
 	}
+	if c.KafkaSASL != KafkaSASLNone && c.KafkaSASL != KafkaSASLAWSMSKIAM {
+		bad("--kafka-sasl must be %s or %s, not %q", KafkaSASLNone, KafkaSASLAWSMSKIAM, c.KafkaSASL)
+	}
+	if (c.QuickwitKafkaUsername == "") != (c.QuickwitKafkaPasswordFile == "") {
+		bad("--quickwit-kafka-username and --quickwit-kafka-password-file go together")
+	} else if c.QuickwitKafkaUsername != "" && c.QuickwitKafkaPassword == "" {
+		bad("--quickwit-kafka-password-file is empty")
+	}
 	for _, u := range []struct{ flag, v string }{{"--index-search-url", c.IndexSearchURL}} {
 		if p, err := url.Parse(u.v); u.v == "" || err != nil || (p.Scheme != "http" && p.Scheme != "https") || p.Host == "" {
 			bad("%s must be an http(s) URL", u.flag)
@@ -242,6 +292,14 @@ func (c *Config) Validate() error {
 		bad("--log-format must be %s or %s, not %q", LogFormatJSON, LogFormatText, c.LogFormat)
 	}
 	return errors.Join(errs...)
+}
+
+// SourceBrokers are the brokers of Quickwit's Kafka sources.
+func (c *Config) SourceBrokers() []string {
+	if len(c.QuickwitKafkaBrokers) > 0 {
+		return c.QuickwitKafkaBrokers
+	}
+	return c.KafkaBrokers
 }
 
 // NewLogger returns the logger of a log format and level, writing to w.

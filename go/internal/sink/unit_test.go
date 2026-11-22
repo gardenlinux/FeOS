@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -398,6 +400,59 @@ func TestConfig(t *testing.T) {
 		if _, err := Parse(args, func(k string) string { return env[k] }); err == nil {
 			t.Errorf("%v passed", args)
 		}
+	}
+	if c.KafkaSASL != KafkaSASLNone {
+		t.Errorf("kafka sasl %q, want none", c.KafkaSASL)
+	}
+	env["FERUN_SINK_KAFKA_SASL"] = "aws-msk-iam"
+	if c, err := Parse(nil, func(k string) string { return env[k] }); err != nil || c.KafkaSASL != KafkaSASLAWSMSKIAM {
+		t.Errorf("FERUN_SINK_KAFKA_SASL=aws-msk-iam: %q, %v", c.KafkaSASL, err)
+	}
+	delete(env, "FERUN_SINK_KAFKA_SASL")
+	if _, err := Parse([]string{"--kafka-sasl", "scram"}, func(k string) string { return env[k] }); err == nil {
+		t.Error("--kafka-sasl scram passed")
+	}
+	if c, err := Parse(nil, func(k string) string { return env[k] }); err != nil || fmt.Sprint(c.SourceBrokers()) != fmt.Sprint(c.KafkaBrokers) ||
+		c.QuickwitKafkaUsername != "" || c.QuickwitKafkaPassword != "" {
+		t.Errorf("Quickwit's sources by default: %v, %q, %v", c.SourceBrokers(), c.QuickwitKafkaUsername, err)
+	}
+	pwFile := filepath.Join(t.TempDir(), "password")
+	if err := os.WriteFile(pwFile, []byte("s3cret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env["FERUN_SINK_QUICKWIT_KAFKA_BROKERS"] = "b-1:9096,b-2:9096"
+	env["FERUN_SINK_QUICKWIT_KAFKA_USERNAME"] = "quickwit"
+	env["FERUN_SINK_QUICKWIT_KAFKA_PASSWORD_FILE"] = pwFile
+	if c, err := Parse(nil, func(k string) string { return env[k] }); err != nil || fmt.Sprint(c.SourceBrokers()) != "[b-1:9096 b-2:9096]" ||
+		c.QuickwitKafkaUsername != "quickwit" || c.QuickwitKafkaPassword != "s3cret" {
+		t.Errorf("Quickwit's sources by SCRAM: %v, %q, %v", c.SourceBrokers(), c.QuickwitKafkaUsername, err)
+	}
+	if err := os.WriteFile(pwFile, []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(nil, func(k string) string { return env[k] }); err == nil {
+		t.Error("an empty password passed")
+	}
+	if err := os.WriteFile(pwFile, []byte("s3cret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"--quickwit-kafka-password-file", filepath.Join(t.TempDir(), "none")},
+		{"--quickwit-kafka-username", ""}} {
+		if _, err := Parse(args, func(k string) string { return env[k] }); err == nil {
+			t.Errorf("%v passed", args)
+		}
+	}
+	delete(env, "FERUN_SINK_QUICKWIT_KAFKA_BROKERS")
+	delete(env, "FERUN_SINK_QUICKWIT_KAFKA_USERNAME")
+	if _, err := Parse(nil, func(k string) string { return env[k] }); err == nil {
+		t.Error("a password file without a user passed")
+	}
+	delete(env, "FERUN_SINK_QUICKWIT_KAFKA_PASSWORD_FILE")
+	if a := kafkaAuth(KafkaSASLAWSMSKIAM); a.AWS == nil {
+		t.Error("aws-msk-iam signs in with no credentials")
+	}
+	if a := kafkaAuth(KafkaSASLNone); a.AWS != nil {
+		t.Error("none signs in with AWS credentials")
 	}
 	for _, p := range []string{"0", "201"} {
 		if _, err := Parse([]string{"--index-partitions", p}, func(k string) string { return env[k] }); err == nil {
