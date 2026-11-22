@@ -317,6 +317,16 @@ describe('the release\'s answers (FeOS ADRs 0056, 0059, 0060)', () => {
     for (const lines of [read, write, admin]) {
       expect(lines[lines.length - 1]).toMatch(/^Never: members, invitations, grants, tokens, the account/);
     }
+    // admin on the project deletes it for a person it names who is its
+    // admin (MayDeleteProject); no other role or scope deletes it.
+    const DELETES = 'also deletes the project, only for a person it names who is the project\'s admin';
+    expect(admin).toContain(DELETES);
+    expect(admin[admin.length - 1]).toContain('making a project.');
+    expect(admin[admin.length - 1]).not.toContain('deleting a project');
+    for (const lines of [read, write, integrationRoleText('read', 'e1'), integrationRoleText('write', 'e1'), integrationRoleText('admin', 'e1')]) {
+      expect(lines.join(' ')).not.toContain('deletes the project');
+      expect(lines[lines.length - 1]).toContain('making or deleting a project.');
+    }
   });
 
   // §2.2: r_int(e) = max(cap(G_int, protected), g_int(e)); write on the

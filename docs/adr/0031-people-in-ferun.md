@@ -116,8 +116,9 @@ Two things outside FeRun shape the decision:
     a plan without an environment;
   - `write`: making, cloning and deleting environments, and the
     preflights, which check what a sandbox would get;
-  - `admin`: members and invitations, the project's tokens, and claiming,
-    checking and deleting domains (a claim is the project's, ADR 0045).
+  - `admin`: members and invitations, the project's tokens, claiming,
+    checking and deleting domains (a claim is the project's, ADR 0045),
+    and deleting the project (below).
 - A **project token** is a principal like a person: it is minted with a
   role and a scope, never above its minter's role on that scope. A token
   minted without a role is `admin` on its project, so FeCode and FeChat
@@ -159,6 +160,11 @@ Two things outside FeRun shape the decision:
   at once, and its sandboxes, its environments with their addons' data
   and the project go after them. Nothing is kept to restore. Its name is
   free then, and a project made under it again is another (ADR 0056).
+- Its logs and traces stay in the sink until their retention (ADR 0026,
+  30 days by default): the sink keeps them by the project's name alone,
+  so a project made under the name again reads them until they have
+  gone. Purging them with the project, or binding the sink's reads to
+  the project's `createdAt`, is in the backlog.
 - An operator deletes any project, through the admin API or in the
   project's settings as its admin. A project token deletes none: ending
   a project is a person's decision, and a token is a program's. An

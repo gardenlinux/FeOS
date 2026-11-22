@@ -423,6 +423,10 @@ export function integrationRoleText(role, scope = '') {
       ? 'also publishes it and binds its domains'
       : 'also claims and deletes domains and sets the access providers');
   }
+  // admin on the project deletes it, only for a person it names who is the
+  // project's admin (ADR 0031, 0056: auth.Project.MayDeleteProject).
+  const deletes = !env && atLeast(role, 'admin');
+  if (deletes) lines.push('also deletes the project, only for a person it names who is the project\'s admin');
   // On a protected environment (ADR 0060, §2.2): a project grant of
   // write reads it, alone or for a person, unless a grant on it says
   // more; admin on the project, or a grant on the environment, changes it
@@ -432,7 +436,7 @@ export function integrationRoleText(role, scope = '') {
   } else if (atLeast(role, 'write')) {
     lines.push('On a protected environment it reads alone; for a person it names it changes what both of you may.');
   }
-  lines.push('Never: members, invitations, grants, tokens, the account, making or deleting a project. '
+  lines.push(`Never: members, invitations, grants, tokens, the account, ${deletes ? 'making a project' : 'making or deleting a project'}. `
     + 'A call it makes for a person does what both of you may do.');
   return lines;
 }

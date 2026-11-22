@@ -177,10 +177,11 @@ for itself there, without a person.
     a protected environment it reads (ADR 0060);
   - `admin` on an environment: it also publishes that one, `public`
     with its access and host label, and binds domains to it;
-  - `admin` on the project: it also claims and deletes domains and sets
-    the project's access providers;
+  - `admin` on the project: it also claims and deletes domains, sets
+    the project's access providers, and deletes the project for a person
+    it names who is its admin (ADR 0031);
   - whatever its role, never: members, invitations, grants, project
-    tokens, the project's account, making or deleting a project.
+    tokens, the project's account, making a project.
 
 ## Alternatives considered
 

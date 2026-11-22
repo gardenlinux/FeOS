@@ -1897,7 +1897,13 @@ addons' data, and the project once they have; the answer is 202
 request ends before the sandboxes have gone, which the leader finishes.
 The project is 404 "no such project" from then on, to its people and
 integrations alike. A `project_deleted` row records who
-(`person:<id>`, `integration:<id>/person:<id>`).
+(`person:<id>`, `integration:<id>/person:<id>`). Its logs and traces
+stay in the sink until their retention (`--log-retention`,
+`--trace-retention`, 720 h by default; a stream's own up to
+`--log-retention-max`): the sink keys streams and spans by the project's
+name alone, and no deletion calls `DELETE /api/v1/log-streams`, so a
+project made under the name again reads them until then (backlog, ADR
+0026 and 0031).
 
 **Members.** `GET /api/v1/project/members` answers `{members: [{person,
 name, email, issuer, subject, disabled?, role, madeBy, madeByName,
