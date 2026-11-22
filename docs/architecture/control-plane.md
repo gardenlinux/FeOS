@@ -1586,9 +1586,13 @@ not protected (`auth.Project.MayDelete`).
 `GET /auth/me` (public class) answers by the credential, `FeRun-Project`
 ignored, with a `kind` and the projects the caller reaches, each with
 its effective roles by the one function: `{kind, …, projects:
-[{project, role, account?, integrationRole?, personRole?, environments:
-[{id, name, role, integrationRole?, personRole?, protected, plan,
-delete}]}], accounts}`, projects and environments by name. `role` is the
+[{project, createdAt, role, account?, integrationRole?, personRole?,
+environments: [{id, name, role, integrationRole?, personRole?,
+protected, plan, delete}]}], accounts}`, projects and environments by
+name. `createdAt` is when the project was made: a deleted project's name
+made again is another project, and a caller that keeps something per
+project (FeCode its repository and transcripts) tells them apart by it,
+never by the name alone. `role` is the
 effective role (`""` on a project where only environment grants count),
 `plan` whether the caller may plan against the environment (`write` were
 it not protected), `delete` whether it may delete and rename it; an

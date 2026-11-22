@@ -71,8 +71,9 @@ func (s *server) authConfig(w http.ResponseWriter, _ *http.Request) error {
 // it the caller reads with its effective role, whether it may plan
 // against it and delete it, all by auth.Project's one rule, which every
 // check uses too (the contract's §2.2). A project the caller does not see
-// is left out. The projects come sorted by name; integration says to
-// answer an integration's own roles beside.
+// is left out, and so is one no longer there. Each says when it was made
+// (a name made again is another project). The projects come sorted by
+// name; integration says to answer an integration's own roles beside.
 func (s *server) meProjects(r *http.Request, ps []auth.Project, integration bool) ([]fapi.MeProject, error) {
 	out := []fapi.MeProject{}
 	if len(ps) == 0 {
@@ -85,6 +86,10 @@ func (s *server) meProjects(r *http.Request, ps []auth.Project, integration bool
 	envs, err := s.st.ProjectEnvironments(r.Context(), names)
 	if err != nil {
 		return nil, internalf("environments: %v", err)
+	}
+	created, err := s.st.ProjectsCreated(r.Context(), names)
+	if err != nil {
+		return nil, internalf("projects: %v", err)
 	}
 	byProject := map[string][]store.EnvName{}
 	for _, e := range envs {
@@ -99,10 +104,11 @@ func (s *server) meProjects(r *http.Request, ps []auth.Project, integration bool
 				t.Protected[e.ID] = true
 			}
 		}
-		if !t.Visible() {
+		at, there := created[t.Name]
+		if !t.Visible() || !there {
 			continue
 		}
-		mp := fapi.MeProject{Project: t.Name, Role: t.ProjectRole().String(), Environments: []fapi.MeEnvironment{}}
+		mp := fapi.MeProject{Project: t.Name, CreatedAt: at, Role: t.ProjectRole().String(), Environments: []fapi.MeEnvironment{}}
 		if integration {
 			mp.IntegrationRole = t.Role.String()
 			if t.Named != nil {

@@ -22,6 +22,7 @@
     "projects": [
       {
         "project": "acme",
+        "createdAt": "2026-11-21T10:00:00Z",
         "role": "write",
         "integrationRole": "write",
         "personRole": "write",

@@ -6,6 +6,7 @@ package api
 import (
 	"encoding/json"
 	"testing"
+	"time"
 )
 
 // The people answers keep the contract's JSON: what is left out when
@@ -26,11 +27,13 @@ func TestPeopleJSON(t *testing.T) {
 		{Me{Kind: "basic", Username: "ops", Admin: true, Method: "basic", Projects: []MeProject{}, Accounts: []MeAccount{}},
 			`{"kind":"basic","username":"ops","admin":true,"method":"basic","projects":[],"accounts":[]}`},
 		{Me{Kind: "integration", Integration: &MeIntegration{Name: "fecode"}, Named: &MeNamed{Sub: "x"},
-			Projects: []MeProject{{Project: "kino", Role: "write", IntegrationRole: "admin", Environments: []MeEnvironment{
-				{ID: "e", Name: "prod", Role: "read", IntegrationRole: "admin", Protected: true, Plan: true}}}},
+			Projects: []MeProject{{Project: "kino", CreatedAt: time.Date(2026, 11, 21, 9, 30, 0, 123456000, time.UTC),
+				Role: "write", IntegrationRole: "admin", Environments: []MeEnvironment{
+					{ID: "e", Name: "prod", Role: "read", IntegrationRole: "admin", Protected: true, Plan: true}}}},
 			Accounts: []MeAccount{}},
 			`{"kind":"integration","integration":{"name":"fecode","title":"","url":"","disabled":false},` +
-				`"named":{"sub":"x","known":false},"projects":[{"project":"kino","role":"write","integrationRole":"admin",` +
+				`"named":{"sub":"x","known":false},"projects":[{"project":"kino","createdAt":"2026-11-21T09:30:00.123456Z",` +
+				`"role":"write","integrationRole":"admin",` +
 				`"environments":[{"id":"e","name":"prod","role":"read","integrationRole":"admin","protected":true,"plan":true,` +
 				`"delete":false}]}],"accounts":[]}`},
 		{Me{Kind: "token", Token: &MeToken{Role: "write"}, Projects: []MeProject{}, Accounts: []MeAccount{}},

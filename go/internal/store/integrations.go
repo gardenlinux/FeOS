@@ -275,6 +275,23 @@ func (s *Store) ProjectEnvironments(ctx context.Context, projects []string) ([]E
 	})
 }
 
+// ProjectsCreated answers when each of projects was made, by name; a
+// project that is not there is not in the map.
+func (s *Store) ProjectsCreated(ctx context.Context, projects []string) (map[string]time.Time, error) {
+	rows, err := s.q.Query(ctx, `SELECT id, created_at FROM projects WHERE id = ANY($1)`, projects)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]time.Time{}
+	var id string
+	var at time.Time
+	_, err = pgx.ForEachRow(rows, []any{&id, &at}, func() error {
+		out[id] = at.UTC()
+		return nil
+	})
+	return out, err
+}
+
 // PrincipalNames names the principals of made_by values: a person's name
 // (else e-mail address) for person:<id> and integration:<id>/person:<id>,
 // an integration's name for integration:<id>. Others, and those it does

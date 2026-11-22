@@ -3,7 +3,10 @@
 
 package api
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Me is GET /auth/me: who the caller is, by its credential, and the
 // projects it reaches with its roles there (FeOS ADR 0056, 0060). Kind is
@@ -92,9 +95,12 @@ type MeNamed struct {
 // MeProject is a project the caller reaches: Role its effective role on
 // the project ("" with roles on environments alone); for an integration
 // IntegrationRole its own grant on the project and, with a person named,
-// PersonRole the person's.
+// PersonRole the person's. CreatedAt is when the project was made: a
+// name freed by a deleted project and made again is another project, so a
+// caller that keeps something per project tells the two apart by it.
 type MeProject struct {
 	Project         string          `json:"project"`
+	CreatedAt       time.Time       `json:"createdAt"`
 	Role            string          `json:"role"`
 	IntegrationRole string          `json:"integrationRole,omitempty"`
 	PersonRole      string          `json:"personRole,omitempty"`

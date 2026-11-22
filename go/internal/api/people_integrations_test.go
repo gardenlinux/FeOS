@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -436,8 +437,13 @@ func TestAuthMeShapes(t *testing.T) {
 	// A token of prod with write: protected, its grant on prod decides.
 	tok := w.token(t, "write", w.prod)
 	resp = e.do("GET", "/auth/me", bearerOf(tok), nil)
+	acme, err := e.st.GetProject(ctx, testProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	made := acme.CreatedAt.UTC().Format(time.RFC3339Nano)
 	expect(t, resp, http.StatusOK, `{"kind":"token","token":{"label":"","role":"write","environment":"`+w.prod.String()+
-		`"},"projects":[{"project":"acme","role":"","environments":[{"id":"`+w.prod.String()+`","name":"prod",`+
+		`"},"projects":[{"project":"acme","createdAt":"`+made+`","role":"","environments":[{"id":"`+w.prod.String()+`","name":"prod",`+
 		`"role":"write","protected":true,"plan":true,"delete":false}]}],"accounts":[]}`+"\n")
 	writeFixture(t, "GET_auth_me.token.200", w.p.Issuer, "GET", "/auth/me", nil, nil, resp)
 	expect(t, e.do("GET", "/auth/me", bearerOf("0123"), nil), http.StatusUnauthorized, errBody("unknown project token"))
@@ -450,6 +456,7 @@ func TestAuthMeShapes(t *testing.T) {
 	m = decode[fapi.Me](t, resp)
 	if m.Kind != "integration" || m.Integration == nil || m.Integration.Name != "fecode" || m.Named != nil ||
 		len(m.Projects) != 1 || m.Projects[0].Role != "write" || m.Projects[0].IntegrationRole != "write" ||
+		!m.Projects[0].CreatedAt.Equal(acme.CreatedAt) ||
 		envNamed(m.Projects[0], "prod") != (fapi.MeEnvironment{ID: w.prod.String(), Name: "prod", Role: "read",
 			IntegrationRole: "admin", Protected: true, Plan: true}) ||
 		envNamed(m.Projects[0], "stage") != (fapi.MeEnvironment{ID: w.stage.String(), Name: "stage", Role: "write",

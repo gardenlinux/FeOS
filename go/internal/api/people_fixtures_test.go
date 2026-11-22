@@ -36,7 +36,7 @@ var peopleFixtures = map[string]bool{
 var (
 	fixtureUUID = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 	fixtureHash = regexp.MustCompile(`\b[0-9a-f]{64}\b`)
-	fixtureTime = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z`)
+	fixtureTime = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z`)
 )
 
 // fixtureNormal makes an answer stable across runs: the provider's issuer
