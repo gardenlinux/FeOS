@@ -278,7 +278,10 @@ func TestReaderAccess(t *testing.T) {
 // a reader of it reads nothing of before its making, whatever it names
 // (here the old project's environment e0, its service old-api and its
 // trace), in any read; a stream with a line of before (the old project's
-// pod in its last seconds) is not its. A kept answer of the old project
+// pod in its last seconds) is not its, one begun after is (the follow
+// below: the bound is a time, so a pod of the old project that runs on
+// after the making, on a node out of the leader's reach, is read as the
+// new one's; sink.md, Readers; backlog). A kept answer of the old project
 // reads on for its TTL by what it names, and a search of spans that names
 // nothing asks ferund afresh, which refuses it. An answer without
 // createdAt (a ferund of before) bounds nothing.
@@ -496,7 +499,9 @@ func TestProjectMadeAgain(t *testing.T) {
 
 	// A follow: none of the old project's lines, not the ones its pod
 	// sends late, nor one it sends after the making (its stream began
-	// before); a stream begun since is followed.
+	// before); a stream begun since is followed, of the old project's
+	// environment e0 too: that is the bound's residual (a pod of the old
+	// project still running), which this pins until it is closed.
 	fctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	fr, _ := http.NewRequestWithContext(fctx, http.MethodGet, srv.URL+"/api/v1/logs?environment=e0&kind=service&object=api&follow=1", nil)

@@ -171,7 +171,11 @@ exactly once.
   start, is at or after the project's `createdAt`, which `ferund`
   answers with the reader's role. A line's time is the platform's, a
   span's its start but never after the sink took it, so no
-  application's clock passes the bound. `GET
+  application's clock passes the bound. The bound is a time, not the
+  project: a deleted project's pod that runs on after the making (on a
+  node out of the leader's reach when its environment went) sends spans
+  the new project reads, and streams it begins then, by the IDs those
+  spans carry (sink.md, Readers; backlog). `GET
   /api/v1/logs` answers lines with their labels, source, level and time:
   a stream selector, a time range, filters (words that must all appear,
   a word to exclude, a regular expression, a level, a trace ID), a
@@ -348,4 +352,6 @@ ADR 0031). Audit records in the sink were planned and not built. On
 2026-11-22, when a project's admin could delete it and its name was
 free for anyone (ADR 0031, 0056), every read became bound to the
 project's `createdAt`: a deleted project's streams and spans stay until
-their retention, read by no project made under the name again.
+their retention, read by no project made under the name again but for
+what a pod of it out of the leader's reach sends after the making
+(backlog).

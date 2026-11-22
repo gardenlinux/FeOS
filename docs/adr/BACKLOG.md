@@ -133,7 +133,9 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0026: sampling of traces, and whether the ingress's spans of every request are kept once the volume asks.
 - ADR 0026: audit records in the sink: never dropped, kept a year, not deletable by a project; which of `ferund`'s calls write one, and whether they are signed or chained.
 - ADR 0026: whether an attached service's process log becomes a stream; a workspace's logs are not shipped.
-- ADR 0026, 0031: purge a deleted project's or environment's streams and spans before their retention (storage only: no project reads them, the reads being bound to its `createdAt`); no deletion calls `DELETE /api/v1/log-streams`, though ADR 0026 says an environment's deletion deletes its streams.
+- ADR 0026, 0031: purge a deleted project's or environment's streams and spans before their retention (the reads are bound to the project's `createdAt`); no deletion calls `DELETE /api/v1/log-streams`, though ADR 0026 says an environment's deletion deletes its streams.
+- ADR 0026, 0031, 0056: the reads' bound is a time, not the project: a deleted project's pod that runs on after a project is made under its name (on a node out of the leader's reach when its environment went; one it reaches holds the environment's row, the project's and the name until it has gone) sends spans the new project reads, a search that names nothing among them, and streams it begins then, which their IDs in those spans' tags name. Close it by the project's making, or an ID of it, in the pods' log labels, which the sink matches exactly on streams and spans, the time the fallback for pods placed before; or by a name free only once its project's tombstones have run.
+- ADR 0026, 0056: the day's quota usage (`log_usage`, `trace_usage`) is kept by the project's name and the UTC day, and no deletion resets it: a project made under the name the same day starts with the deleted one's (over `--trace-quota`, its every span export refused until midnight), and the deleted one's pods still sending count against it. Keying it by the project's making needs the label above.
 
 ## ADR 0027
 

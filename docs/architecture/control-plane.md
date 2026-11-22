@@ -1900,12 +1900,15 @@ integrations alike. A `project_deleted` row records who
 (`person:<id>`, `integration:<id>/person:<id>`). Its logs and traces
 stay in the sink until their retention (`--log-retention`,
 `--trace-retention`, 720 h by default; a stream's own up to
-`--log-retention-max`), read only by the project they belong to: the
-sink keys streams and spans by the project's name and reads a project
-from its `createdAt` on (sink.md, Readers), so a project made under the
-name again reads none of them. No deletion calls `DELETE
-/api/v1/log-streams`; purging them before their retention is in the
-backlog (ADR 0026).
+`--log-retention-max`): the sink keys streams and spans by the
+project's name and reads a project from its `createdAt` on (sink.md,
+Readers), so a project made under the name again reads none of them,
+but for what a pod of it on a node out of the leader's reach when its
+environment went sends after the making (the bound is a time). No
+deletion calls `DELETE /api/v1/log-streams`, nor resets the day's quota
+usage, which the sink keeps by the name too; binding the reads to the
+project itself, purging them before their retention and the usage are
+in the backlog (ADR 0026).
 
 **Members.** `GET /api/v1/project/members` answers `{members: [{person,
 name, email, issuer, subject, disabled?, role, madeBy, madeByName,

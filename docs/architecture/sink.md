@@ -344,6 +344,19 @@ a span whose `ts` is (traces.md, The index); a trace of earlier spans
 only is 404. A line's time is the platform's (the guest's when it read
 the line, the ingress's when it answered), a span's `ts` its start but
 never after it came, so an application's clock does not pass the bound.
+The bound is a time, not the project: what a deleted project's pod
+sends after a project is made under its name is read as the new one's.
+A pod on a node the leader reaches, one in its stop grace too, keeps its
+environment's group there until it has gone, and with it the
+environment's row, the project's and the name (control-plane.md,
+`env-delete`); one on a node out of its reach does not, and runs until
+its tombstone deletes it there. Its spans from the making on are read: a
+search that names nothing lists its services and traces, whose tags
+carry its environment's and pod's IDs, and by those a reader reads the
+streams it begins from then on (`feos-authn`'s egress stream on its
+first record, a container's on its first line), in a read and a follow,
+and its traffic and bindings. Its streams begun before stay out.
+Closing it is in the backlog (ADR 0026).
 An answer without `createdAt` is a `ferund` of before: no bound, and the
 two ship together. A kept answer outlives its project by up to its TTL.
 Its reads name what they read by an ID, which every environment, pod and

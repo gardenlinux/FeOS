@@ -267,7 +267,8 @@ export function ProjectSettings({ project, navigate }) {
             Deletes <span className="mono">{project}</span> with everything in it: its environments with their
             deployments, secrets and addons&apos; data, its sandboxes and jobs, its tokens, domains and grants. Its tokens
             stop at once; the rest goes within minutes. It cannot be undone, and its name is free for anyone then.
-            Its logs and traces stay until their retention; a project made under its name again does not see them.
+            Its logs and traces stay until their retention. A project later made under its name does not see them,
+            except what a pod still running on an unreachable node sends after that.
           </p>
           <button className="danger" onClick={() => setDeleting(true)}><Icon name="trash" size={14} /> Delete project</button>
         </section>)}

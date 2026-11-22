@@ -161,10 +161,16 @@ Two things outside FeRun shape the decision:
   and the project go after them. Nothing is kept to restore. Its name is
   free then, and a project made under it again is another (ADR 0056).
 - Its logs and traces stay in the sink until their retention (ADR 0026,
-  30 days by default), read only by the project they belong to: the sink
-  keeps them by the project's name and reads a project from its
-  `createdAt` on, so a project made under the name again reads none of
-  them. Purging them before their retention is in the backlog.
+  30 days by default): the sink keeps them by the project's name and
+  reads a project from its `createdAt` on, so a project made under the
+  name again reads none of them, but for what a pod of the deleted
+  project still sends after its making: the bound is a time, and a pod
+  on a node out of the leader's reach when its environment went runs on
+  until its tombstone deletes it there (ADR 0026). Binding the reads to
+  the project itself, and purging its logs and traces before their
+  retention, are in the backlog; so is its day's quota usage, which the
+  sink keeps by the name too, so that a project made under it the same
+  day starts with the deleted one's.
 - An operator deletes any project, through the admin API or in the
   project's settings as its admin. A project token deletes none: ending
   a project is a person's decision, and a token is a program's. An

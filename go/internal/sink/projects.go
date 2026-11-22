@@ -73,8 +73,11 @@ func (c Credential) key() [32]byte {
 // streams. Since is when the project was made: streams and spans are
 // keyed by the project's name, and a project made under a name again is
 // another (ADR 0056), so every read and delete is bounded to what came at
-// or after it (from). The zero time, a ferund's of before that leaves
-// createdAt out, bounds nothing: ferund and the sink ship together.
+// or after it (from). The bound is a time, not the project: what a pod
+// of a project of before still sends after the making (one on a node out
+// of the leader's reach when its environment went) is read as this one's
+// (sink.md, Readers; backlog). The zero time, a ferund's of before that
+// leaves createdAt out, bounds nothing: ferund and the sink ship together.
 type Access struct {
 	Project string
 	Since   time.Time
