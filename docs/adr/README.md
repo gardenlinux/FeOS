@@ -68,6 +68,7 @@ want is in [BACKLOG.md](BACKLOG.md).
 | [0059](0059-a-project-is-on-an-account.md) | A project is on an account, which says whom its use is charged to | Accepted |
 | [0060](0060-a-protected-environment-is-changed-by-a-grant-on-itself.md) | A protected environment is changed by a grant on itself, and by an integration only for a person | Accepted |
 | [0061](0061-what-ferun-called-a-tenant-is-a-project.md) | What FeRun called a tenant is a project <!-- KEEP-TENANT: ADR 0061's title and file name --> | Accepted |
+| [0062](0062-a-project-is-its-id-and-its-name-is-a-slug.md) | A project is its ID, and its name is a slug | Proposed |
 
 ## Rules
 
