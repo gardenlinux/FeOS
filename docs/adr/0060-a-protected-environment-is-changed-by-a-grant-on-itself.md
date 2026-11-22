@@ -1,6 +1,6 @@
 # ADR 0060: A protected environment is changed by a grant on itself, and by an integration only for a person
 
-**Status:** Proposed · **Date:** 2026-11-21
+**Status:** Accepted · **Date:** 2026-11-21
 
 An environment can be **protected**. A grant on the project then reads
 it and no longer changes it: whoever changes it holds a grant on the
@@ -140,8 +140,7 @@ console, a token and a platform alike.
 
 ## History
 
-Proposed on 2026-11-21, together with ADR 0056 and FeCode's ADR 0040;
-nothing of it is built. It amends ADR 0031 (a principal's role on an
+Proposed on 2026-11-21, together with ADR 0056 and FeCode's ADR 0040. It amends ADR 0031 (a principal's role on an
 environment, and who deletes one).
 
 It began as FeCode's protection (FeCode's ADR 0032) and as a backlog
@@ -149,3 +148,11 @@ line of ADR 0056, an environment that a project's grant does not reach.
 It moved here once a platform's users were the project's people with
 FeRun's roles: a rule about who may change an environment then had one
 place to be.
+
+Accepted on 2026-11-22. Built on the branch ferun-layer by parallel
+builders against one contract and merged into master as 562ee9e5; live
+on EKS in Frankfurt the same day, in one maintenance window: ferund's
+migrations 0041 to 0043 and the sink's 0009 ran once, and FeCode
+(c50a3df) moved its thirteen projects into FeRun projects of their own.
+After the move the three production environments FeCode had made subject
+to approval (agentwasm, ironcore-dashboard, kino) were protected.

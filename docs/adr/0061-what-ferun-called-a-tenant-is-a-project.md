@@ -1,6 +1,6 @@
 # ADR 0061: What FeRun called a tenant is a project
 
-**Status:** Proposed · **Date:** 2026-11-21
+**Status:** Accepted · **Date:** 2026-11-21
 
 FeRun has three levels: an **account**, which is charged; a
 **project**, which is the border; and an **environment**, which runs.
@@ -101,15 +101,25 @@ screen says both.
   proposed with this one included.
 - FeCode's project and FeRun's are one word for one thing, and no
   sentence has to translate between them.
+- Quickwit's documents keep their stored field `tenant` (log mapping
+  v5, trace mapping v4), as `log_streams` keeps `release`; no route,
+  header or screen shows it.
 - An installation of someone else's meets the new routes and header
   with the release that brings them. Tokens stay valid.
 
 ## History
 
-Proposed on 2026-11-21, together with ADR 0056, ADR 0059 and ADR 0060;
-nothing of it is built. Malte asked whether accounts, once they exist,
+Proposed on 2026-11-21, together with ADR 0056, ADR 0059 and ADR 0060. Malte asked whether accounts, once they exist,
 are not the tenants. They are in the sense of who is served and
 charged, and they are not in the sense of what is kept apart, which is
 why the word goes and does not move. That the rename is whole and at
 once is his decision, and follows how release became deployment
 (ADR 0018).
+
+Accepted on 2026-11-22. Built on the branch ferun-layer by parallel
+builders against one contract and merged into master as 562ee9e5; live
+on EKS in Frankfurt the same day, in one maintenance window: ferund's
+migrations 0041 to 0043 and the sink's 0009 ran once, and FeCode
+(c50a3df) moved its thirteen projects into FeRun projects of their own.
+At acceptance the Consequences gained the line on Quickwit's stored
+field, which no route, header or screen shows.

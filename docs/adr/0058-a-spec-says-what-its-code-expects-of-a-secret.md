@@ -1,6 +1,6 @@
 # ADR 0058: A spec says what its code expects of a secret, and the plan checks it
 
-**Status:** Proposed · **Date:** 2026-11-21
+**Status:** Accepted · **Date:** 2026-11-21
 
 A spec may state, for each secret it names, what its code is written
 for: the secret's kind and, for an HTTP secret, its mode and whether
@@ -129,8 +129,13 @@ key lives and never changes (ADR 0055).
 
 ## History
 
-Proposed on 2026-11-21, together with FeCode's ADR 0038; nothing of it
-is built. It amends ADR 0055, under which a spec's written mode was the
+Proposed on 2026-11-21, together with FeCode's ADR 0038. It amends ADR 0055, under which a spec's written mode was the
 secret's own and an error unless it repeated the pinned version's. A
 mode `env` for FeRun was weighed first and set aside against ADR 0055's
 rule for a key.
+
+Accepted on 2026-11-22. Built on the branch ferun-layer by parallel
+builders against one contract and merged into master as 562ee9e5; live
+on EKS in Frankfurt the same day, in one maintenance window: ferund's
+migrations 0041 to 0043 and the sink's 0009 ran once, and FeCode
+(c50a3df) moved its thirteen projects into FeRun projects of their own.

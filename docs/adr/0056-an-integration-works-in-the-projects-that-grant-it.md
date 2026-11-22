@@ -1,6 +1,6 @@
 # ADR 0056: An integration is a principal that works in the projects whose admins grant it a role
 
-**Status:** Proposed · **Date:** 2026-11-21
+**Status:** Accepted · **Date:** 2026-11-21
 
 Software in front of FeRun that works in many projects, as FeCode
 develops and operates one application per project, is an
@@ -295,8 +295,7 @@ for itself there, without a person.
 
 ## History
 
-Proposed on 2026-11-21, together with ADR 0059 and FeCode's ADR 0037;
-nothing of it is built. It amends ADR 0031 (the kinds of principal, and
+Proposed on 2026-11-21, together with ADR 0059 and FeCode's ADR 0037. It amends ADR 0031 (the kinds of principal, and
 the role that mints route tokens) and ADR 0043 (who mints a route
 token).
 
@@ -314,3 +313,16 @@ for users FeRun never knew, and answer for them as an access provider.
 Malte saw in a second layer of rights in the platform the duality this
 change was to end: FeRun's three roles are the roles of a platform's
 users. Naming the person, and the lower of two roles, is how they are.
+
+Accepted on 2026-11-22. Built on the branch ferun-layer by parallel
+builders against one contract and merged into master as 562ee9e5; live
+on EKS in Frankfurt the same day, in one maintenance window: ferund's
+migrations 0041 to 0043 and the sink's 0009 ran once, and FeCode
+(c50a3df) moved its thirteen projects into FeRun projects of their own.
+A review before the window found that a project's name, freed by a
+delete and made again by anyone, would hand the new project whatever a
+caller kept under the name; /auth/me answers each project's createdAt
+since (d036f2cf), and FeCode binds to it. Left for later: a sandbox or
+route token an integration mints naming a person is checked against the
+integration's grants alone while its environment is protected; FeCode
+refuses its agent's tools there on its side meanwhile.

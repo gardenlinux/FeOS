@@ -1,6 +1,6 @@
 # ADR 0057: The spec is one format for every caller: a published module, JSON or YAML
 
-**Status:** Proposed · **Date:** 2026-11-21
+**Status:** Accepted · **Date:** 2026-11-21
 
 An environment's spec has one definition, FeRun's, and every caller
 uses that one: FeRun publishes the spec's types, its strict parser and
@@ -168,8 +168,17 @@ rules of its own.
 ## History
 
 Proposed on 2026-11-21, together with FeCode's ADR 0038, which makes
-`fecode.yaml` a spec of this format; nothing of it is built. It amends
+`fecode.yaml` a spec of this format. It amends
 ADR 0018, whose one API for every caller took one JSON document and
 left the types to each caller, and ADR 0042, whose `never` was an
 attached service's word alone. ADR 0032 keeps its JSON text and its
 only judge.
+
+Accepted on 2026-11-22. Built on the branch ferun-layer by parallel
+builders against one contract and merged into master as 562ee9e5; live
+on EKS in Frankfurt the same day, in one maintenance window: ferund's
+migrations 0041 to 0043 and the sink's 0009 ran once, and FeCode
+(c50a3df) moved its thirteen projects into FeRun projects of their own.
+The module is github.com/gardenlinux/feos/go/ferun (spec, wire types,
+client); FeCode builds on it at master's merge, and its fecode.yaml is a
+spec of this format.

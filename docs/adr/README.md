@@ -62,12 +62,12 @@ want is in [BACKLOG.md](BACKLOG.md).
 | [0053](0053-kubernetes-and-ssh-bindings.md) | Kubernetes and SSH bindings: the host adds the credential | Proposed |
 | [0054](0054-visitors-of-an-environment.md) | Visitors: a guarded environment admits whom its project's access provider vouches for | Accepted |
 | [0055](0055-a-secret-is-a-value-or-an-http-api.md) | A secret is a value or an HTTP API: one object per key, its kind says where it lives | Accepted |
-| [0056](0056-an-integration-works-in-the-projects-that-grant-it.md) | An integration is a principal that works in the projects whose admins grant it a role | Proposed |
-| [0057](0057-the-spec-is-one-format-for-every-caller.md) | The spec is one format for every caller: a published module, JSON or YAML | Proposed |
-| [0058](0058-a-spec-says-what-its-code-expects-of-a-secret.md) | A spec says what its code expects of a secret, and the plan checks it | Proposed |
-| [0059](0059-a-project-is-on-an-account.md) | A project is on an account, which says whom its use is charged to | Proposed |
-| [0060](0060-a-protected-environment-is-changed-by-a-grant-on-itself.md) | A protected environment is changed by a grant on itself, and by an integration only for a person | Proposed |
-| [0061](0061-what-ferun-called-a-tenant-is-a-project.md) | What FeRun called a tenant is a project <!-- KEEP-TENANT: ADR 0061's title and file name --> | Proposed |
+| [0056](0056-an-integration-works-in-the-projects-that-grant-it.md) | An integration is a principal that works in the projects whose admins grant it a role | Accepted |
+| [0057](0057-the-spec-is-one-format-for-every-caller.md) | The spec is one format for every caller: a published module, JSON or YAML | Accepted |
+| [0058](0058-a-spec-says-what-its-code-expects-of-a-secret.md) | A spec says what its code expects of a secret, and the plan checks it | Accepted |
+| [0059](0059-a-project-is-on-an-account.md) | A project is on an account, which says whom its use is charged to | Accepted |
+| [0060](0060-a-protected-environment-is-changed-by-a-grant-on-itself.md) | A protected environment is changed by a grant on itself, and by an integration only for a person | Accepted |
+| [0061](0061-what-ferun-called-a-tenant-is-a-project.md) | What FeRun called a tenant is a project <!-- KEEP-TENANT: ADR 0061's title and file name --> | Accepted |
 
 ## Rules
 

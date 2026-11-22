@@ -1,6 +1,6 @@
 # ADR 0059: A project is on an account, which says whom its use is charged to
 
-**Status:** Proposed · **Date:** 2026-11-21
+**Status:** Accepted · **Date:** 2026-11-21
 
 Every project is on one **account**. An account is whom the operator
 charges: a name, a reference into the operator's own accounting, and
@@ -63,6 +63,8 @@ billing; if it does not, every platform invents them.
   against its limits, and nothing inside it.
 - Everyone who may make projects at all is a member of `default`. Its
   admins are the operators.
+- Membership of `default` that comes from being allowed to make
+  projects lets a person put projects on it; its page is the operators'.
 
 ### A project is on one account
 
@@ -184,7 +186,7 @@ billing; if it does not, every platform invents them.
 
 ## History
 
-Proposed on 2026-11-21, together with ADR 0056; nothing of it is built.
+Proposed on 2026-11-21, together with ADR 0056.
 It takes up ADR 0031's backlog line on billing as far as the account.
 Measuring, prices and reports were left out at Malte's word: they are
 straightforward once every project has an account, and the change this
@@ -196,3 +198,14 @@ The move was one line in the first writing. It was written out the
 same day, when Malte asked that a project can be moved to another
 account: with the rule that keeps the account out of every name, and
 the history that a meter will read.
+
+Accepted on 2026-11-22. Built on the branch ferun-layer by parallel
+builders against one contract and merged into master as 562ee9e5; live
+on EKS in Frankfurt the same day, in one maintenance window: ferund's
+migrations 0041 to 0043 and the sink's 0009 ran once, and FeCode
+(c50a3df) moved its thirteen projects into FeRun projects of their own.
+Every project, those of the window included, is on `default`, the only
+account so far. At acceptance the Decision gained the line on
+`default`'s page: read literally, implicit membership would have shown
+every person's projects, with their makers and admins, to everyone who
+may make one.
