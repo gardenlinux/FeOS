@@ -367,6 +367,14 @@ func valkeyACL(admin string, grants []Grant) string {
 // under the root anyway. The step's own TLS connection verifies no
 // server: the server is its own container's, on loopback, and its
 // certificate may be the expired one the step replaces.
+//
+// When the running server takes the addon's certificate as nobody, its
+// loaded users do not name the addon's ID: the ID changed (tenants became
+// projects) or the users were lost. Nothing can load the new ones then,
+// since only that ID may: the step keeps the new users file, stops the
+// server (SIGTERM, which writes the append-only file), and fails; FeRun
+// starts the container again on the files the step wrote, and the next
+// run of the step finds the server as it expects.
 var valkeyTLSScript = func() string {
 	var set strings.Builder
 	for _, kv := range valkeyTLS {
@@ -400,6 +408,14 @@ if [ "$(sock ping)" = PONG ]; then
   on sock CONFIG SET tls-port ` + port + `
   on sock ACL LOAD
 else
+  case $(tls ACL WHOAMI) in
+  NOAUTH*)
+    printf 'valkey does not know %s: restarted to read its new users\n' "$FERUN_VALKEY_ID"
+    rm -f "$f/users.acl.ferun-before"
+    kill -TERM $(pidof valkey-server)
+    exit 1
+    ;;
+  esac
   on tls CONFIG SET` + set.String() + `
   on tls ACL LOAD
 fi
