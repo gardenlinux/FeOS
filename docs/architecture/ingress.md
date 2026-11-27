@@ -990,8 +990,8 @@ host 404 "no such host".
 - The upstream is `http://[<pod address>]:<port>`, the path stripped of
   the route's prefix only with `strip`, the query kept. The upstream sees
   the `Host` the client sent, and `X-Forwarded-For`, `X-Forwarded-Host`,
-  `X-Forwarded-Proto` and `X-Real-IP` set by the ingress from the
-  connection; the client's own are dropped, and so are `Forwarded` and
+  `X-Forwarded-Proto`, `X-Real-IP` and `X-Real-Port` (the client's source
+  port) set by the ingress from the connection; the client's own are dropped, and so are `Forwarded` and
   `True-Client-IP`, which frameworks also read for the client's address.
   Under `externalTrafficPolicy: Local` the connection's address is the
   client's ([Kubernetes](#kubernetes)).

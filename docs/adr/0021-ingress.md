@@ -188,8 +188,9 @@ is woken by whoever holds the request until the pod runs.
   domain's from the table, else the zone's wildcard), takes HTTP/1.1 and
   HTTP/2 from clients, and speaks HTTP/1.1 to the service over pooled
   connections. Upgrades and WebSockets pass; answers stream unbuffered.
-  It sets `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host` and
-  `X-Real-IP` from the connection and drops a client's own, `Forwarded`
+  It sets `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host`,
+  `X-Real-IP` and `X-Real-Port` (the client's source port) from the
+  connection and drops a client's own, `Forwarded`
   and `True-Client-IP` too, and keeps the `Host`: an application behind
   the ingress sees who called it. Plain HTTP on port 80 answers ACME
   challenges and redirects everything else to HTTPS.

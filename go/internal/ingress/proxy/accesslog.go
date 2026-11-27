@@ -25,33 +25,36 @@ type AccessLog interface {
 // The headers a client may send to claim another address, which the
 // proxy drops: ReverseProxy drops Forwarded and X-Forwarded-For, -Host
 // and -Proto before Rewrite, and SetXForwarded sets the last three anew.
-// X-Real-IP is set anew too, to the client's address.
+// X-Real-IP and X-Real-Port are set anew too, to the client's address
+// and port.
 const (
 	headerRealIP       = "X-Real-Ip"
+	headerRealPort     = "X-Real-Port"
 	headerTrueClientIP = "True-Client-Ip"
 )
 
 // setForwarded sets the forwarding headers of an outbound request from
 // the connection the request came on: X-Forwarded-For, -Host and -Proto
-// (SetXForwarded) and X-Real-IP; it drops True-Client-IP.
+// (SetXForwarded), X-Real-IP and X-Real-Port; it drops True-Client-IP.
 func setForwarded(pr *httputil.ProxyRequest) {
 	pr.SetXForwarded()
 	pr.Out.Header.Del(headerTrueClientIP)
-	if ip := clientIP(pr.In); ip != "" {
+	pr.Out.Header.Del(headerRealIP)
+	pr.Out.Header.Del(headerRealPort)
+	if ip, port := clientIPPort(pr.In); ip != "" {
 		pr.Out.Header.Set(headerRealIP, ip)
-	} else {
-		pr.Out.Header.Del(headerRealIP)
+		pr.Out.Header.Set(headerRealPort, port)
 	}
 }
 
-// clientIP is the address of the request's client, "" when RemoteAddr
-// has none.
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+// clientIPPort is the address and port of the request's client, "" when
+// RemoteAddr has none.
+func clientIPPort(r *http.Request) (ip, port string) {
+	host, port, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return ""
+		return "", ""
 	}
-	return host
+	return host, port
 }
 
 // clientAddr is the address of the request's client, the connection's
@@ -83,6 +86,7 @@ func (q *request) record() {
 	if status == 0 && q.w.upgraded {
 		status = http.StatusSwitchingProtocols
 	}
+	ip, _ := clientIPPort(r)
 	p.d.AccessLog.Record(wire.AccessLogEntry{
 		Time:         q.wait.start.UTC(),
 		DurationNs:   int64(end.Sub(q.wait.start)),
@@ -99,7 +103,7 @@ func (q *request) record() {
 		Reason:       q.reason,
 		BytesIn:      in,
 		BytesOut:     q.w.written,
-		ClientIP:     clientIP(r),
+		ClientIP:     ip,
 		UserAgent:    cutField(r.UserAgent(), wire.MaxAccessLogUserAgent),
 		Attempts:     q.attempts,
 		HeldNs:       int64(q.held),

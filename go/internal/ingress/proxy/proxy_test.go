@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"net/http/httptrace"
 	"net/textproto"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -102,7 +103,7 @@ func upstream(t *testing.T, fn *fakeNet, name, addr string) *httptest.Server {
 		e := echo{Upstream: name, Method: r.Method, Path: r.URL.Path, RequestURI: r.RequestURI,
 			Query: r.URL.RawQuery, Host: r.Host, Body: string(b), Headers: map[string]string{}}
 		for _, h := range []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded",
-			"X-Real-Ip", "True-Client-Ip", "Traceparent", "Tracestate"} {
+			"X-Real-Ip", "X-Real-Port", "True-Client-Ip", "Traceparent", "Tracestate"} {
 			e.Headers[h] = strings.Join(r.Header.Values(h), ",")
 		}
 		// The cookies and every header that is or could be read as a
@@ -328,8 +329,8 @@ func TestRouting(t *testing.T) {
 	}
 }
 
-// The upstream gets X-Forwarded-For, -Proto and -Host and X-Real-IP from
-// the proxy alone, no True-Client-IP, and the client's Host.
+// The upstream gets X-Forwarded-For, -Proto and -Host, X-Real-IP and
+// X-Real-Port from the proxy alone, no True-Client-IP, and the client's Host.
 func TestForwardedHeaders(t *testing.T) {
 	fn := newFakeNet()
 	upstream(t, fn, "web", "fd00::1")
@@ -348,6 +349,7 @@ func TestForwardedHeaders(t *testing.T) {
 	req.Header.Set("X-Forwarded-Proto", "http")
 	req.Header.Set("Forwarded", "for=203.0.113.9")
 	req.Header.Set("X-Real-IP", "203.0.113.9")
+	req.Header.Set("X-Real-Port", "1")
 	req.Header.Set("True-Client-IP", "203.0.113.9")
 	res, err := srv.Client().Do(req)
 	if err != nil {
@@ -362,6 +364,9 @@ func TestForwardedHeaders(t *testing.T) {
 		if e.Headers[h] != v {
 			t.Errorf("%s: %q, want %q", h, e.Headers[h], v)
 		}
+	}
+	if port, err := strconv.Atoi(e.Headers["X-Real-Port"]); err != nil || port <= 1 {
+		t.Errorf("X-Real-Port %q, want the client's port", e.Headers["X-Real-Port"])
 	}
 	if e.Host != testHost {
 		t.Errorf("host %q", e.Host)
