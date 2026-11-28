@@ -70,6 +70,7 @@ want is in [BACKLOG.md](BACKLOG.md).
 | [0061](0061-what-ferun-called-a-tenant-is-a-project.md) | What FeRun called a tenant is a project <!-- KEEP-TENANT: ADR 0061's title and file name --> | Accepted |
 | [0062](0062-a-project-is-its-id-and-its-name-is-a-slug.md) | A project is its ID, and its name is a slug | Proposed |
 | [0063](0063-a-project-has-its-own-label.md) | A project has its own label, its environments `<environment>--<project>` | Accepted |
+| [0064](0064-a-postgres-addon-is-backed-up-through-its-node-and-kept-by-the-platform.md) | A postgres addon is backed up through its node, restored anywhere, and kept by the platform | Proposed |
 
 ## Rules
 

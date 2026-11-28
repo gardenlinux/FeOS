@@ -41,7 +41,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0012: References for UDP and other protocols; a reference names a TCP port, and a service's port has no protocol in the spec.
 - ADR 0012: References across environments (stage reaching a shared service), how another environment's workload is named and whose deployment admits it.
 - ADR 0012: A project's private networks over a VPN or peering, which need a route as well as a block and an exception to the denied prefixes for that project.
-- ADR 0012: An addon's egress once addons back up to the object store or replicate to another region; it is the internet now.
+- ADR 0012: An addon's egress once addons replicate to another region; it is the internet now, and a postgres addon's backups go through its node (ADR 0064).
 - ADR 0012: Refusing server names the egress did not allow, from the copies feosd takes for its records, to close the CDN limit of address-based FQDN egress.
 - ADR 0012: Whether a secret may name the workload its URL points at, so that a service whose peer's address is sealed derives an edge.
 - ADR 0012: A binding's upstream host as egress the binding declares, once a binding dials from the pod's own address instead of the node's.
@@ -85,7 +85,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0016: growing a volume: diskd's device, Firecracker's drive and the filesystem online, which writes zeroed inode tables into the top.
 - ADR 0016: ephemeral volumes as Kubernetes's `emptyDir`, a directory on the pod's disk shared by its containers and gone with the pod; waits for sidecars (ADR 0004).
 - ADR 0016: moving a free volume between nodes without a pod, as a checkpoint of the volume alone.
-- ADR 0016: snapshots and clones of a volume, which diskd's layers make cheap.
+- ADR 0016: snapshots and clones of a service's volume, which diskd's layers make cheap; a postgres addon's are ADR 0064's.
 - ADR 0016: quotas: how much of a node's disk its volumes may take.
 
 ## ADR 0018
@@ -197,8 +197,7 @@ names; a line that is given up is deleted. Nothing here is a decision.
 ## ADR 0038
 
 - ADR 0038: a PostgreSQL session that outlives its grant; `pg_stat_ssl` truncates the client's DN, so the step cannot match a session to the line it lost.
-- ADR 0038: `tls.key` on the addon's volume until the OpenSSL provider, and whether a checkpoint or a clone with data (ADR 0016, 0018) leaves it behind.
-- ADR 0038: a developer's `psql` from a sandbox without an attached service, by `reaches` entries that name a role as lines of the map.
+- ADR 0038: `tls.key` on the addon's volume until the OpenSSL provider; a checkpoint and a snapshot (ADR 0064) carry it into the object store, and a restored addon writes its own over it.
 - ADR 0038: PostgreSQL before 17 through a binding, whether the binding learns the one `SSLRequest` message or 16 is left to FeID and the OpenSSL provider.
 - ADR 0038: Valkey keys and channels per workload, with an option that names them, as PostgreSQL's roles.
 - ADR 0038: a new root that an addon's old trust file does not hold; the step's own TLS connection would be refused until a restart reads the new files.
@@ -206,8 +205,8 @@ names; a line that is given up is deleted. Nothing here is a decision.
 
 ## ADR 0040
 
-- ADR 0040: backups of an addon to the object store, and a clone that brings an addon's data along.
-- ADR 0040: minor upgrades of an addon, and more types (`clickhouse`).
+- ADR 0040: backups of valkey and nats addons, and a clone that brings their data along; postgres's are ADR 0064.
+- ADR 0040: minor upgrades of valkey and nats addons (postgres's are ADR 0064), and more types (`clickhouse`).
 - ADR 0040: rotating an addon's generated credentials (nats's password); they are never changed.
 - ADR 0040: whether a lost addon whose data ties it to no node is recreated wherever it fits, as a service's lost replica is.
 - ADR 0040: postgres's `SIGTERM` is its smart shutdown, which waits for every client to go, so a stopped addon ends by its microVM after 10 s and recovers from its WAL; `SIGINT`, its fast shutdown, would end it cleanly within that.
@@ -309,3 +308,14 @@ names; a line that is given up is deleted. Nothing here is a decision.
 ## ADR 0062
 
 - ADR 0062: renaming a project: whether it may be renamed, and what follows its name (its hosts, its domains' claims, its workloads' identities, a FeCode project's name).
+
+## ADR 0064
+
+- ADR 0064: growing a volume while its pod runs, where the node's kernel can resize a running ublk device, instead of at the addon's next start.
+- ADR 0064: a key per project for the disk daemon's objects, checkpoints and snapshots alike, and what it costs the chunks that projects share today.
+- ADR 0064: synchronous replication to the standby, for an addon that may lose nothing.
+- ADR 0064: read replicas with an address of their own, and a pooler in front of an addon.
+- ADR 0064: backups copied to a second region or store, and a restore there.
+- ADR 0064: an import by logical replication, with a switch of seconds instead of a dump's downtime.
+- ADR 0064: `pg_rewind` for a primary whose node comes back, instead of a new standby from a snapshot.
+- ADR 0064: a major upgrade beside the running addon, by logical replication and a switch, as RDS's blue/green deployments do.
