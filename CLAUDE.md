@@ -30,6 +30,13 @@ runs in the guest, also `make guest test-guest test-guest-container` (needs
 /dev/kvm, and sudo for the test network). When you change the pod or
 microVM service, also `make test-pods` (needs docker).
 
+**Deploy from master only.** What the landscape (`~/fecode-landscape`)
+rolls out is built from a commit on `origin/master`: merge and push
+first, then build and deploy, never from a branch or a worktree's
+commit, so that master says what runs and does not fall behind it.
+`bin/set-image` there refuses another (`--commit` names it for a
+digest).
+
 FeRun, the control plane (ADR 0015), is Go in `go/` (`ferund`,
 `ferun-testnode`) with its management UI in `web/`; read
 `docs/architecture/control-plane.md` before larger changes there. Its rules:
