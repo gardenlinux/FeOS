@@ -33,7 +33,6 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0011: how long a pod's I/O may wait for a recovering diskd before the pod is given up.
 - ADR 0011: whether the host's page cache stays in front of the ublk devices, or what was served is dropped.
 - ADR 0011: whether the chunk pool stays global, which is deduplication across projects.
-- ADR 0011: the control plane runs diskd's sweep with every live head and baked layer; nothing sweeps yet.
 
 ## ADR 0012
 
@@ -319,3 +318,9 @@ names; a line that is given up is deleted. Nothing here is a decision.
 - ADR 0064: an import by logical replication, with a switch of seconds instead of a dump's downtime.
 - ADR 0064: `pg_rewind` for a primary whose node comes back, instead of a new standby from a snapshot.
 - ADR 0064: a major upgrade beside the running addon, by logical replication and a switch, as RDS's blue/green deployments do.
+
+## ADR 0065
+
+- ADR 0065: a project's own default for `expiresAfterIdle`, between the installation's and the creator's.
+- ADR 0065: a notice before a sandbox expires, as an event its creator can watch.
+- ADR 0065: how long an expired sandbox's row stays when its creator never deletes it.
