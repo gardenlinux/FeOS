@@ -21,7 +21,8 @@ use feos_proto::disk_service::{
     disk_service_client::DiskServiceClient, BakeRequest, CloseMemoryRequest, CreateDiskRequest,
     GetHeadRequest, GetObjectRequest, Head, ImportBaseRequest, Layer, LayerRef, MemoryRef,
     OpenDiskRequest, OpenMemoryRequest, PutHeadRequest, PutObjectRequest, RemoveDeviceRequest,
-    SealFileRequest, SealRequest, StatsRequest, StatsResponse, StopDiskRequest,
+    SealFileRequest, SealRequest, StatsRequest, StatsResponse, StopDiskRequest, SweepReport,
+    SweepRequest,
 };
 use feos_proto::pod_service::BakedLayer;
 use feos_proto::volume_service::{Volume, VolumeState};
@@ -439,6 +440,13 @@ impl Disks {
         };
         self.client().remove_device(request).await.map_err(diskd)?;
         Ok(())
+    }
+
+    /// Sweeps the object store through diskd (ADR 0011, ADR 0065): the
+    /// caller names what is live, diskd deletes the rest past its grace.
+    pub async fn sweep(&self, request: SweepRequest) -> Result<SweepReport, Status> {
+        let report = self.client().sweep(request).await.map_err(diskd)?;
+        Ok(report.into_inner())
     }
 
     /// diskd's figures of the node, without those of its devices: its

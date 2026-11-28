@@ -49,10 +49,10 @@ describe('stateWords', () => {
 
 describe('counts', () => {
   it('buckets the states as the list shows them', () => {
-    expect(['running', 'paused', 'hibernated', 'resuming', 'pending', 'lost', 'stopped', 'odd'].map(bucketOf))
-      .toEqual(['running', 'paused', 'hibernated', 'changing', 'changing', 'failed', 'other', 'other']);
-    expect(stateCounts([SB, SB, as('paused'), as('failed'), as('hibernating')]))
-      .toEqual({ running: 2, paused: 1, hibernated: 0, changing: 1, failed: 1, other: 0 });
+    expect(['running', 'paused', 'hibernated', 'resuming', 'pending', 'lost', 'stopped', 'odd', 'expired'].map(bucketOf))
+      .toEqual(['running', 'paused', 'hibernated', 'changing', 'changing', 'failed', 'other', 'other', 'expired']);
+    expect(stateCounts([SB, SB, as('paused'), as('failed'), as('hibernating'), as('expired')]))
+      .toEqual({ running: 2, paused: 1, hibernated: 0, changing: 1, failed: 1, other: 0, expired: 1 });
     expect(stateCounts(null).running).toBe(0);
   });
 
@@ -210,5 +210,15 @@ describe('the sidebar\'s sandboxes', () => {
     expect(sandboxMeta({ clientState: 'lost' })).toBe('lost');
     expect(sandboxMeta({ clientState: 'hibernated' })).toBe('');
     expect(sandboxMeta({ clientState: 'running' })).toBe('');
+  });
+});
+
+describe('expiry', () => {
+  it('says when a sandbox expires, and that an expired one is gone', () => {
+    const hib = { ...as('hibernated'), expiresAt: '2026-12-28T10:00:00Z', expiresAfterIdle: '30d' };
+    expect(stateWords(hib).long).toContain('expires 2026-12-28 unless used');
+    expect(stateWords({ ...hib, clientState: 'running' }).long).not.toContain('expires');
+    const gone = { ...as('expired'), expiredAt: '2026-12-28T10:00:00Z', expiresAfterIdle: '30d' };
+    expect(stateWords(gone).long).toBe('expired on 2026-12-28 after 30d idle · its disk and memory are gone · delete it or create anew');
   });
 });

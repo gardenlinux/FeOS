@@ -82,6 +82,7 @@ import (
 	"github.com/gardenlinux/feos/go/internal/sandbox"
 	"github.com/gardenlinux/feos/go/internal/seal"
 	"github.com/gardenlinux/feos/go/internal/store"
+	"github.com/gardenlinux/feos/go/internal/sweep"
 	"github.com/gardenlinux/feos/go/internal/tools"
 	"github.com/gardenlinux/feos/go/internal/ui"
 	"github.com/gardenlinux/feos/go/internal/visits"
@@ -393,6 +394,8 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 	}
 	i.Elector.Register(fl.Loops()...)
 	i.Elector.Register(i.Engine.Loops()...)
+	i.Elector.Register(sweep.New(sweep.Config{Mode: cfg.ObjectStoreSweep, Every: cfg.ObjectStoreSweepEvery, Log: i.log},
+		i.DB, i.Links, nil).Loops()...)
 	i.Elector.Register(activity.Loops(i.DB, activity.RetentionConfig{Activity: cfg.ActivityRetention,
 		Traffic: cfg.TrafficRetention}, i.log)...)
 	i.Elector.Register(api.Loops(deps)...)
@@ -405,7 +408,8 @@ func New(ctx context.Context, cfg config.Config, log *slog.Logger) (_ *Instance,
 		AdminUsers: cfg.AdminUsers, DenyPrefixes: cfg.DenyPrefixes, InstanceID: i.id, PreparationWaitMs: config.PreparationBudget.Milliseconds(),
 		PublicURL: cfg.PublicURL, OIDC: oidc, APIAudience: cfg.APIAudience, SessionTTL: cfg.SessionTTL, DefaultImage: cfg.DefaultImage,
 		DefaultVCPUs: cfg.DefaultVCPUs, DefaultMemoryMiB: cfg.DefaultMemoryMiB, JoinTokenTTL: config.JoinTokenTTL,
-		TelemetryInterval: config.TelemetryInterval, NodeTTL: cfg.NodeTTL, LostGrace: cfg.LostGrace,
+		SandboxExpiresAfterIdle: cfg.SandboxExpiresAfterIdle,
+		TelemetryInterval:       config.TelemetryInterval, NodeTTL: cfg.NodeTTL, LostGrace: cfg.LostGrace,
 		DrainTimeout: cfg.DrainTimeout, ProjectCreation: cfg.ProjectCreation, ProjectsPerPerson: cfg.ProjectsPerPerson,
 		ReservedProjectNames: reservedProjectNames(cfg), ProjectDefaults: projectDefaults(cfg), Zones: cfg.Zones(),
 		DiskBudget: cfg.DiskBudget, Log: i.log,

@@ -121,7 +121,15 @@ type convSession struct {
 	token     string
 	conn      *mcp.ClientSession // nil until connected
 	image     string             // the image passed at creation; empty: not known
+	// note goes before the next tool result, once: the conversation's
+	// sandbox before this one expired (ADR 0065).
+	note string
 }
+
+// expiredNote tells the model, and through it the person, that the
+// conversation's sandbox is a new one.
+const expiredNote = "Note: this conversation's previous sandbox expired because it was not used for a long time. " +
+	"This is a new sandbox: the files, installed packages and processes from before are gone. Tell the user.\n\n"
 
 // chatSandbox is one chat request's view of its conversation's sandbox:
 // whose conversation, the reference the browser sent, the image, and how
@@ -134,6 +142,20 @@ type chatSandbox struct {
 
 	mu   sync.Mutex
 	told string
+	// retried: a tool call found the sandbox expired and ran once more.
+	retried bool
+}
+
+// retryOnce reports whether a call that found the sandbox expired may
+// run once more: the first time in the request.
+func (b *chatSandbox) retryOnce() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.retried {
+		return false
+	}
+	b.retried = true
+	return true
 }
 
 // tell passes ref on to the browser unless it has it already.
@@ -173,6 +195,12 @@ type apiError struct {
 
 func (e *apiError) Error() string {
 	return fmt.Sprintf("%s %s: HTTP %d: %s", e.method, e.path, e.status, e.body)
+}
+
+// isExpired: the sandbox expired after its idle time (410, ADR 0065).
+func isExpired(err error) bool {
+	var ae *apiError
+	return errors.As(err, &ae) && ae.status == http.StatusGone
 }
 
 // isNoSuchSandbox: ferund knows no sandbox of the ID (404), or takes no
@@ -229,11 +257,14 @@ func (s *sandboxClient) sessionFor(ctx context.Context, b *chatSandbox) (*convSe
 				b.key.conv, b.image, cs.image, cs.image)
 		}
 	} else {
-		id, token, err := s.adopt(ctx, b)
+		id, token, expired, err := s.adopt(ctx, b)
 		if err != nil {
 			return nil, err
 		}
-		image := ""
+		image, note := "", ""
+		if expired {
+			note = expiredNote
+		}
 		if id == "" {
 			if id, token, err = s.create(ctx, b.image); err != nil {
 				return nil, err
@@ -241,7 +272,7 @@ func (s *sandboxClient) sessionFor(ctx context.Context, b *chatSandbox) (*convSe
 			image = b.image
 			log.Printf("conversation %s: sandbox %s created (image=%q)", b.key.conv, id, b.image)
 		}
-		cs = &convSession{sandboxID: id, token: token, image: image,
+		cs = &convSession{sandboxID: id, token: token, image: image, note: note,
 			ref: signSandboxRef(s.refKey, b.key.subject, b.key.conv, id)}
 		s.sessions[b.key] = cs
 	}
@@ -262,7 +293,8 @@ func (s *sandboxClient) sessionFor(ctx context.Context, b *chatSandbox) (*convSe
 // before, and it is still enough for those; new sandboxes are only ever
 // reached through a reference. Only ferund's 404 (or 400) means "none":
 // any other failure is an error, not a reason to make a second sandbox.
-func (s *sandboxClient) adopt(ctx context.Context, b *chatSandbox) (id, token string, err error) {
+// An expired sandbox (410) is none either, and expired says so.
+func (s *sandboxClient) adopt(ctx context.Context, b *chatSandbox) (id, token string, expired bool, err error) {
 	if b.ref != "" {
 		if id, ok := verifySandboxRef(s.refKey, b.key.subject, b.key.conv, b.ref); ok {
 			return s.adoptID(ctx, b, id, "its reference")
@@ -272,22 +304,26 @@ func (s *sandboxClient) adopt(ctx context.Context, b *chatSandbox) (id, token st
 	if uuidPattern.MatchString(b.key.conv) {
 		return s.adoptID(ctx, b, b.key.conv, "its conversation ID")
 	}
-	return "", "", nil
+	return "", "", false, nil
 }
 
-func (s *sandboxClient) adoptID(ctx context.Context, b *chatSandbox, id, via string) (string, string, error) {
+func (s *sandboxClient) adoptID(ctx context.Context, b *chatSandbox, id, via string) (string, string, bool, error) {
 	token, err := s.mintToken(ctx, id)
+	if isExpired(err) {
+		log.Printf("conversation %s: sandbox %s expired, making a new one", b.key.conv, id)
+		return "", "", true, nil
+	}
 	if isNoSuchSandbox(err) {
 		if via == "its reference" {
 			log.Printf("conversation %s: sandbox %s is gone, making a new one", b.key.conv, id)
 		}
-		return "", "", nil
+		return "", "", false, nil
 	}
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	log.Printf("conversation %s: sandbox %s by %s", b.key.conv, id, via)
-	return id, token, nil
+	return id, token, false, nil
 }
 
 // create makes a sandbox; ferund mints its ID.
@@ -399,13 +435,21 @@ func (s *sandboxClient) executeSandboxTool(ctx context.Context, ts *toolset, b *
 	if err != nil {
 		return "error: mcp: " + err.Error()
 	}
-	var out strings.Builder
-	for _, c := range res.Content {
-		if tc, ok := c.(*mcp.TextContent); ok {
-			out.WriteString(tc.Text)
+	result := textOf(res)
+	if res.IsError && strings.Contains(result, "sandbox "+cs.sandboxID+" expired") && b.retryOnce() {
+		// Expired while this backend held its session: forget it, and the
+		// next lookup adopts nothing and makes a new sandbox.
+		s.mu.Lock()
+		if s.sessions[b.key] == cs {
+			delete(s.sessions, b.key)
 		}
+		s.mu.Unlock()
+		return s.executeSandboxTool(ctx, ts, b, tool, argsJSON)
 	}
-	result := out.String()
+	s.mu.Lock()
+	note := cs.note
+	cs.note = ""
+	s.mu.Unlock()
 	if len(result) > maxToolOutput {
 		result = result[:maxToolOutput] + "\n... [truncated]\n"
 	}
@@ -415,7 +459,18 @@ func (s *sandboxClient) executeSandboxTool(ctx context.Context, ts *toolset, b *
 	if strings.TrimSpace(result) == "" {
 		result = "(no output)"
 	}
-	return result
+	return note + result
+}
+
+// textOf is the text of a tool result.
+func textOf(res *mcp.CallToolResult) string {
+	var out strings.Builder
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			out.WriteString(tc.Text)
+		}
+	}
+	return out.String()
 }
 
 // callTimeout bounds one tool call: ferund's preparation wait plus the

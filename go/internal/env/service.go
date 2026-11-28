@@ -192,6 +192,10 @@ func (s *Service) DeleteEnv(ctx context.Context, project, env string) error {
 		if !inUse.Empty() {
 			return apierr.EnvironmentInUse(e.Name, idStrings(inUse.Sandboxes), idStrings(inUse.Jobs))
 		}
+		// Its expired sandboxes hold nothing and go with it (ADR 0065).
+		if _, err := tx.DeleteExpiredSandboxesOf(ctx, e.ID); err != nil {
+			return err
+		}
 		after := e
 		after.Deleting = true
 		if _, err := tx.UpdateEnvironment(ctx, e, after); err != nil {

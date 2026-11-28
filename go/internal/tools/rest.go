@@ -15,6 +15,7 @@ import (
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/auth"
+	"github.com/gardenlinux/feos/go/internal/model"
 )
 
 // maxRequestBody caps what a tool route reads of a JSON request, which
@@ -188,6 +189,9 @@ func (h *REST) answer(w http.ResponseWriter, r *http.Request, tool string,
 		return
 	case errors.As(err, &tooLarge):
 		apierr.Write(w, apierr.New(http.StatusRequestEntityTooLarge, "%s: %v", tool, err))
+		return
+	case errors.Is(err, model.ErrExpired):
+		apierr.Write(w, apierr.WithCode(http.StatusGone, apierr.CodeExpired, "%s: %v", tool, err))
 		return
 	case err != nil:
 		e := apierr.New(http.StatusBadGateway, "%s: %v", tool, err)

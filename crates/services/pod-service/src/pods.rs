@@ -48,7 +48,7 @@ use feos_proto::container_service::{
     ListContainersRequest, LogEntry, StartContainerRequest, StopContainerRequest,
     StreamContainerLogsRequest, VolumeMount as GuestVolumeMount,
 };
-use feos_proto::disk_service::{Head, MemoryRef};
+use feos_proto::disk_service::{Head, MemoryRef, SweepRequest};
 use feos_proto::guest_service::{
     guest_service_client::GuestServiceClient, MountVolumesRequest, SetFeidRequest,
     SetInterceptCasRequest, TlsBinding as GuestTlsBinding, Volume as GuestVolume,
@@ -70,7 +70,7 @@ use feos_proto::pod_service::{
     BakedLayer, Checkpoint, ContainerSpec, ContainerState, ContainerStatus, HibernatePodResponse,
     Hibernation as HibernationInfo, HibernationPhase, ImageLayers, MicroVm, PodConsoleInput,
     PodConsoleOutput, PodEvent, PodHttpBindings, PodInfo, PodNetwork, PodSpec, PodState,
-    RestorePodResponse, TlsBinding,
+    RestorePodResponse, SweepObjectStoreRequest, SweepObjectStoreResponse, TlsBinding,
 };
 use feos_proto::volume_service::{Volume, VolumeCheckpoint, VolumeState};
 use feos_utils::vsock::{self, API_PORT};
@@ -98,6 +98,10 @@ use tonic::{Code, Request, Status};
 
 /// How long a booting guest may take to attach.
 const GUEST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The keys a sweep's answer carries at most: enough to see what it
+/// deletes, few enough for one message whatever the store holds.
+const SWEEP_SAMPLE_KEYS: u32 = 1000;
 /// How often a step looks again while it waits.
 const POLL: Duration = Duration::from_millis(250);
 /// How long the VM service may take to record a change it made: a part of
@@ -1159,6 +1163,46 @@ impl Pods {
                 e.message()
             );
         }
+    }
+
+    /// Sweeps the node's object store through diskd (ADR 0065): what the
+    /// control plane names live stays, diskd deletes the rest past its
+    /// grace. An empty live set is refused, for it would name nothing live
+    /// and leave only the grace between the store and its deletion. The
+    /// answer carries the first [`SWEEP_SAMPLE_KEYS`] keys.
+    pub async fn sweep_store(
+        &self,
+        request: SweepObjectStoreRequest,
+    ) -> Result<SweepObjectStoreResponse, Status> {
+        if request.live_heads.is_empty() {
+            return Err(Status::invalid_argument(
+                "a sweep names the live heads; an empty live set is refused",
+            ));
+        }
+        let report = self
+            .inner
+            .disks
+            .sweep(SweepRequest {
+                live_heads: request.live_heads,
+                live_layers: request.live_layers,
+                dry_run: request.dry_run,
+                budget_seconds: request.budget_seconds,
+                max_keys: SWEEP_SAMPLE_KEYS,
+                ..Default::default()
+            })
+            .await?;
+        Ok(SweepObjectStoreResponse {
+            snapshot_objects_seen: report.snapshot_objects_seen,
+            snapshot_objects_deleted: report.snapshot_objects_deleted,
+            layers_seen: report.layers_seen,
+            layers_deleted: report.layers_deleted,
+            chunks_seen: report.chunks_seen,
+            chunks_deleted: report.chunks_deleted,
+            bytes_deleted: report.bytes_deleted,
+            budget_exhausted: report.budget_exhausted,
+            sample_keys: report.deleted_keys,
+            keys_deleted: report.keys_deleted,
+        })
     }
 
     /// Takes the pod off the node into object storage (ADR 0008), in a task

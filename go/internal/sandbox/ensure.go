@@ -196,6 +196,8 @@ func (en *ensurer) step(ctx context.Context, row store.Sandbox) (model.Lease, er
 		return model.Lease{}, en.place(ctx, row, OpCreate)
 	case model.StateLost:
 		return model.Lease{}, en.lost(ctx, row)
+	case model.StateExpired:
+		return model.Lease{}, errorf(model.ErrExpired, "sandbox %s expired: %s", row.ID, row.StatusDescription)
 	}
 	// unknown, and a transitional state without an op, which cannot
 	// persist: the truth is to be asked for.
@@ -873,7 +875,7 @@ func (e *Engine) Pause(ctx context.Context, id podid.ID) error {
 			return err
 		}
 		switch row.ClientState {
-		case model.StatePaused, model.StateHibernated, model.StatePending:
+		case model.StatePaused, model.StateHibernated, model.StatePending, model.StateExpired:
 			return nil
 		case model.StateRunning:
 		default:

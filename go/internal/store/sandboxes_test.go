@@ -374,3 +374,50 @@ func TestLockSandboxesOfOwner(t *testing.T) {
 		return nil
 	})
 }
+
+// The expiry's candidates (ADR 0065) are the caller's sandboxes idle for
+// longer than their idle time in a state they can expire from, nothing
+// holding them; the sweep's live set is every row's checkpoint head and
+// every baked layer.
+func TestExpiryCandidatesAndSweepLiveSet(t *testing.T) {
+	s, _ := newStore(t)
+	mkProject(t, s, "acme")
+	due, never, fresh, held, running := mkSandbox(t, s, "acme"), mkSandbox(t, s, "acme"), mkSandbox(t, s, "acme"),
+		mkSandbox(t, s, "acme"), mkSandbox(t, s, "acme")
+	exec(t, s, `UPDATE sandboxes SET client_state = 'hibernated', expires_after_idle_s = 3600,
+		last_active_at = now() - interval '2 hours' WHERE id = ANY($1)`, []podid.ID{due.ID, held.ID})
+	exec(t, s, `UPDATE sandboxes SET client_state = 'hibernated', last_active_at = now() - interval '2 hours' WHERE id = $1`, never.ID)
+	exec(t, s, `UPDATE sandboxes SET client_state = 'hibernated', expires_after_idle_s = 3600 WHERE id = $1`, fresh.ID)
+	exec(t, s, `UPDATE sandboxes SET client_state = 'running', expires_after_idle_s = 3600,
+		last_active_at = now() - interval '2 hours' WHERE id = $1`, running.ID)
+	exec(t, s, `INSERT INTO sandbox_holds (sandbox_id, holder, kind, lease_until) VALUES ($1, 'h', 'exec', now() + interval '1 minute')`,
+		held.ID)
+	got, err := s.ExpiryCandidates(bg, 10)
+	if err != nil || len(got) != 1 || got[0].ID != due.ID {
+		t.Fatalf("candidates %v, %v", got, err)
+	}
+	if ok, err := s.ExpiryDue(bg, due.ID); err != nil || !ok {
+		t.Fatalf("due: %v %v", ok, err)
+	}
+	exec(t, s, `UPDATE sandboxes SET checkpoint_head = 'snapshots/x/1/head.json', checkpoint_store = 's1' WHERE id = $1`, due.ID)
+	exec(t, s, `UPDATE sandboxes SET checkpoint_head = 'snapshots/y/1/head.json', checkpoint_store = 's2' WHERE id = $1`, never.ID)
+	exec(t, s, `INSERT INTO image_bakes (image, guest_version, l0, layer, node) VALUES ('img@sha256:'||repeat('a', 64), 'g', 'l0', 'bake', 'n')`)
+	live, err := s.SweepLiveSet(bg, "s1")
+	if err != nil || !slices.Equal(live.Heads, []string{"snapshots/x/1/head.json"}) || !slices.Equal(live.Layers, []string{"bake"}) {
+		t.Fatalf("live %+v, %v", live, err)
+	}
+
+	after, err := s.MarkSandboxExpired(bg, due.ID, due.Incarnation, "expired")
+	if err != nil || after.ClientState != model.StateExpired || after.CheckpointHead != "" || after.ExpiredAt.IsZero() {
+		t.Fatalf("expired %+v, %v", after, err)
+	}
+	if live, _ := s.SweepLiveSet(bg, "s1"); len(live.Heads) != 0 {
+		t.Fatalf("an expired sandbox's head is live: %v", live.Heads)
+	}
+	if ok, err := s.ExpiryDue(bg, due.ID); err != nil || ok {
+		t.Fatalf("an expired sandbox is due again: %v %v", ok, err)
+	}
+	if n, err := s.DeleteExpiredSandboxesOf(bg, due.EnvironmentID); err != nil || n != 1 {
+		t.Fatalf("deleted %d, %v", n, err)
+	}
+}

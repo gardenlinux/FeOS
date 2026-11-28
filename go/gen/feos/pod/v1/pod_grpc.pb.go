@@ -33,6 +33,7 @@ const (
 	PodService_HibernatePod_FullMethodName       = "/feos.pod.v1.PodService/HibernatePod"
 	PodService_RestorePod_FullMethodName         = "/feos.pod.v1.PodService/RestorePod"
 	PodService_StreamPodConsole_FullMethodName   = "/feos.pod.v1.PodService/StreamPodConsole"
+	PodService_SweepObjectStore_FullMethodName   = "/feos.pod.v1.PodService/SweepObjectStore"
 )
 
 // PodServiceClient is the client API for PodService service.
@@ -139,6 +140,11 @@ type PodServiceClient interface {
 	// The serial console of the pod's microVM: the first message names the
 	// pod, the ones after it carry input.
 	StreamPodConsole(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[PodConsoleInput, PodConsoleOutput], error)
+	// Sweeps the node's object store through its disk daemon (ADR 0011,
+	// ADR 0065): what none of the live heads and layers reaches, and is
+	// older than the daemon's grace, is deleted. The control plane names
+	// what is live; it calls one node per object store.
+	SweepObjectStore(ctx context.Context, in *SweepObjectStoreRequest, opts ...grpc.CallOption) (*SweepObjectStoreResponse, error)
 }
 
 type podServiceClient struct {
@@ -301,6 +307,16 @@ func (c *podServiceClient) StreamPodConsole(ctx context.Context, opts ...grpc.Ca
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type PodService_StreamPodConsoleClient = grpc.BidiStreamingClient[PodConsoleInput, PodConsoleOutput]
 
+func (c *podServiceClient) SweepObjectStore(ctx context.Context, in *SweepObjectStoreRequest, opts ...grpc.CallOption) (*SweepObjectStoreResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SweepObjectStoreResponse)
+	err := c.cc.Invoke(ctx, PodService_SweepObjectStore_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PodServiceServer is the server API for PodService service.
 // All implementations must embed UnimplementedPodServiceServer
 // for forward compatibility.
@@ -405,6 +421,11 @@ type PodServiceServer interface {
 	// The serial console of the pod's microVM: the first message names the
 	// pod, the ones after it carry input.
 	StreamPodConsole(grpc.BidiStreamingServer[PodConsoleInput, PodConsoleOutput]) error
+	// Sweeps the node's object store through its disk daemon (ADR 0011,
+	// ADR 0065): what none of the live heads and layers reaches, and is
+	// older than the daemon's grace, is deleted. The control plane names
+	// what is live; it calls one node per object store.
+	SweepObjectStore(context.Context, *SweepObjectStoreRequest) (*SweepObjectStoreResponse, error)
 	mustEmbedUnimplementedPodServiceServer()
 }
 
@@ -456,6 +477,9 @@ func (UnimplementedPodServiceServer) RestorePod(context.Context, *RestorePodRequ
 }
 func (UnimplementedPodServiceServer) StreamPodConsole(grpc.BidiStreamingServer[PodConsoleInput, PodConsoleOutput]) error {
 	return status.Error(codes.Unimplemented, "method StreamPodConsole not implemented")
+}
+func (UnimplementedPodServiceServer) SweepObjectStore(context.Context, *SweepObjectStoreRequest) (*SweepObjectStoreResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SweepObjectStore not implemented")
 }
 func (UnimplementedPodServiceServer) mustEmbedUnimplementedPodServiceServer() {}
 func (UnimplementedPodServiceServer) testEmbeddedByValue()                    {}
@@ -712,6 +736,24 @@ func _PodService_StreamPodConsole_Handler(srv interface{}, stream grpc.ServerStr
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type PodService_StreamPodConsoleServer = grpc.BidiStreamingServer[PodConsoleInput, PodConsoleOutput]
 
+func _PodService_SweepObjectStore_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SweepObjectStoreRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PodServiceServer).SweepObjectStore(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PodService_SweepObjectStore_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PodServiceServer).SweepObjectStore(ctx, req.(*SweepObjectStoreRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PodService_ServiceDesc is the grpc.ServiceDesc for PodService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -766,6 +808,10 @@ var PodService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RestorePod",
 			Handler:    _PodService_RestorePod_Handler,
+		},
+		{
+			MethodName: "SweepObjectStore",
+			Handler:    _PodService_SweepObjectStore_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

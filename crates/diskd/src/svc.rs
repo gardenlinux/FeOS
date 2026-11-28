@@ -1893,6 +1893,7 @@ impl DiskService for DiskSvc {
         request: Request<pb::SweepRequest>,
     ) -> Result<Response<pb::SweepReport>, Status> {
         let req = request.into_inner();
+        let max_keys = req.max_keys as usize;
         let s3 = self
             .s3
             .clone()
@@ -1998,7 +1999,7 @@ impl DiskService for DiskSvc {
         }
         if started.elapsed() >= budget {
             rep.budget_exhausted = true;
-            return Ok(Response::new(rep));
+            return Ok(Response::new(cap_keys(rep, max_keys)));
         }
 
         // --- pass 2: layers/ ---------------------------------------
@@ -2023,7 +2024,7 @@ impl DiskService for DiskSvc {
         }
         if started.elapsed() >= budget {
             rep.budget_exhausted = true;
-            return Ok(Response::new(rep));
+            return Ok(Response::new(cap_keys(rep, max_keys)));
         }
 
         // --- pass 3: chunks/ ---------------------------------------
@@ -2079,7 +2080,7 @@ impl DiskService for DiskSvc {
             seconds = started.elapsed().as_secs_f64(),
             "sweep"
         );
-        Ok(Response::new(rep))
+        Ok(Response::new(cap_keys(rep, max_keys)))
     }
 
     // Generic object gateway (the caller writes and reads vmstate and
@@ -2489,6 +2490,16 @@ fn append_journal(
     f.write_all(lines.as_bytes())?;
     f.sync_data()?;
     Ok(true)
+}
+
+/// A sweep's report with at most `max` of its deleted keys (0: all), and
+/// the count of them all.
+fn cap_keys(mut rep: pb::SweepReport, max: usize) -> pb::SweepReport {
+    rep.keys_deleted = rep.deleted_keys.len() as u64;
+    if max > 0 && rep.deleted_keys.len() > max {
+        rep.deleted_keys.truncate(max);
+    }
+    rep
 }
 
 #[cfg(test)]

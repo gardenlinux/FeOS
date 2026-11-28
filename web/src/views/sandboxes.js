@@ -37,6 +37,7 @@ export const STATE_BUCKETS = [
   { key: 'changing', label: 'changing', dot: 'resuming', states: ['pending', 'creating', 'pausing', 'resuming', 'hibernating'] },
   { key: 'failed', label: 'failed', dot: 'failed', states: ['failed', 'lost'] },
   { key: 'other', label: 'stopped or unknown', dot: 'unknown', states: ['stopped', 'unknown'] },
+  { key: 'expired', label: 'expired', dot: 'expired', states: ['expired'] },
 ];
 
 // bucketOf is a clientState's bucket key; anything unnamed is other.
@@ -56,6 +57,17 @@ export function stateCounts(sandboxes) {
 // word; long the head's sentence with where it is, what it costs and
 // what comes next.
 export function stateWords(sb) {
+  const w = stateWordsNow(sb);
+  const at = sb && sb.expiresAt;
+  return at && sb.clientState !== 'running' ? { ...w, long: `${w.long} · expires ${dayOf(at)} unless used` } : w;
+}
+
+// dayOf is the day of an RFC 3339 time, YYYY-MM-DD.
+function dayOf(t) {
+  return String(t).slice(0, 10);
+}
+
+function stateWordsNow(sb) {
   const st = (sb && sb.clientState) || 'unknown';
   const node = (sb && sb.node) || '';
   const on = node ? ` on ${node}` : '';
@@ -82,6 +94,9 @@ export function stateWords(sb) {
       return { short: st, long: 'the next call tries to start it again, or delete it' };
     case 'lost':
       return { short: st, long: 'no checkpoint · delete it or create anew' };
+    case 'expired':
+      return { short: st, long: `expired${sb.expiredAt ? ` on ${dayOf(sb.expiredAt)}` : ''} after ${
+        sb.expiresAfterIdle || 'its time'} idle · its disk and memory are gone · delete it or create anew` };
     case 'unknown':
       return { short: st, long: `not known now${node ? ` · node ${node} not reachable` : ''} · a sync resolves it` };
     default:
@@ -112,8 +127,8 @@ export const SIDE_FOLD = 4;
 // the selected one: {shown, folded} with folded their number.
 export function sideSandboxes(sandboxes, { open = false, selected = '' } = {}) {
   const list = byActivity(sandboxes);
-  const awake = list.filter((s) => s.clientState !== 'hibernated');
-  const asleep = list.filter((s) => s.clientState === 'hibernated');
+  const asleep = list.filter((s) => s.clientState === 'hibernated' || s.clientState === 'expired');
+  const awake = list.filter((s) => !asleep.includes(s));
   if (open || asleep.length < SIDE_FOLD) return { shown: [...awake, ...asleep], folded: 0 };
   const sel = asleep.filter((s) => s.sandboxId === selected);
   return { shown: [...awake, ...sel], folded: asleep.length - sel.length };

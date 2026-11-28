@@ -134,6 +134,9 @@ conversion).
 | `--disk-budget` | `4GiB` | placement's disk gate per pod: the free disk a node must have beside a pod's own disk, and what it keeps out of the disks of their own size it books ([Placement](#placement)) |
 | `--idle-pause` | `10s` | a running sandbox idle this long is paused; 0 disables |
 | `--hibernate-after` | 0 | a sandbox paused this long is hibernated; 0 disables |
+| `--sandbox-expires-after-idle` | `30d` | the idle time of a sandbox whose create names none: `<n>d`, `<n>h` or `never` ([Expiry](#expiry), ADR 0065) |
+| `--object-store-sweep` | `off` | `dry-run` reports what the sweep would delete, `on` deletes it ([The object store's sweep](#the-object-stores-sweep)) |
+| `--object-store-sweep-every` | `24h` | how often each object store is swept, at least an hour |
 | `--node-ttl` | `15s` | the age of a node's telemetry before it is down |
 | `--lost-grace` | `10m` | how long a node is down before its sandboxes count as lost |
 | `--node-wait` | `5s` | how long a call waits for a node's connection |
@@ -420,6 +423,8 @@ audit is its activity row.
 | pending re-description | 30 s | tells a sandbox waiting for capacity that there is some |
 | process holds, expired holds | 60 s | releases holds of processes that ended, and expired leases; expired holds only under the same condition |
 | project deletion | 60 s | finishes deleting projects |
+| `sandbox-expiry` | 60 s | expires the sandboxes idle for longer than their `expires_after_idle_s` ([Expiry](#expiry)) |
+| `object-store-sweep` | 10 min | sweeps each object store whose last sweep in this leadership is older than `--object-store-sweep-every`, through one of its ready nodes; not while `--object-store-sweep=off` ([The object store's sweep](#the-object-stores-sweep)) |
 | `sandbox-http-bindings` | 15 s | sends the pods on connected nodes the clear part of their HTTP bindings that their node did not take ([HTTP bindings](#http-bindings)) |
 | `sandbox-tls-bindings` | 30 s | sends every running pod with TLS bindings on a connected node its bindings of now, once a node in each leadership; a pod that runs again other than by a create (a resume, a restore, a start, a repair, an adoption) is sent them after its commit, so a workload ID that changed (ADR 0061) heals by itself |
 | watch expiry | 60 s | deletes watches past their lease |
@@ -1432,9 +1437,11 @@ lowercase Crockford base32, the first a letter, or a UUID". `POST
 /api/v1/sandboxes` takes `environment` (required), `reaches`, `egress`,
 `image`, `vcpus`, `memoryMib`, `imageCredentials` ([Images](#images)),
 `credentials` ([Sandboxes and jobs in an
-environment](#sandboxes-and-jobs-in-an-environment)) and `workdir`
+environment](#sandboxes-and-jobs-in-an-environment)), `workdir`
 ([Tools and MCP](#tools-and-mcp); 400 "workdir must be an absolute, clean
-path of at most 1024 bytes, like /workspace/app; left out: the root"),
+path of at most 1024 bytes, like /workspace/app; left out: the root")
+and `expiresAfterIdle` ([Expiry](#expiry); 400 for anything but
+`<n>d`, `<n>h` of at least an hour, or `never`),
 and no `sandboxId`: one that is neither absent, null nor `""` is 400
 "sandboxId is not accepted: ferund mints a sandbox's ID; leave it out
 and keep status.sandboxId of the answer". Every create makes a new
@@ -2091,6 +2098,42 @@ UPDATE` (a project without limits `FOR SHARE`, as before) and counts and
 inserts under it, and an apply rechecks its finding under it; the
 creates of one project with limits run one after the other. The sink's
 daily quotas for logs and traces are apart.
+
+### Expiry
+
+A caller's sandbox **expires** once it has been idle for its
+`expiresAfterIdle` (ADR 0065): `sandboxes.expires_after_idle_s`, NULL
+for `never`. A create writes the request's value or
+`--sandbox-expires-after-idle`; every row from before migration 0045
+has NULL. An instance and a project's job have none. The status shows
+`expiresAfterIdle`, `expiresAt` (`last_active_at` plus the idle time,
+absent while the sandbox runs and for `never`) and `expiredAt`.
+
+The leader's `sandbox-expiry` loop takes the rows without an op in
+`pending`, `paused`, `hibernated`, `stopped`, `failed` or `lost` whose
+`last_active_at` is older than their idle time and that no hold keeps
+(`store.ExpiryCandidates`), and expires each in a fenced transaction of
+its own after a recheck on the locked row (`ExpiryDue`): tombstones for
+its node and its lost node (its pod goes as a deleted one's does), its
+run ends, `store.MarkSandboxExpired` writes `client_state = 'expired'`,
+`expired_at`, no node, no checkpoint, and its booking and process holds
+go. The row stays. Ensure answers `model.ErrExpired`: 410 `expired` on
+the tool routes, `POST …/resume` and the port door. An expired sandbox
+counts toward no quota, holds no environment against its delete, and
+goes with its environment (`DeleteExpiredSandboxesOf`).
+
+### The object store's sweep
+
+The leader's `object-store-sweep` loop (package `sweep`) reads, in one
+transaction, every row's `checkpoint_head` of the object store (and the
+heads that name none) and every layer of `image_bakes`
+(`store.SweepLiveSet`), adds what a `sweep.LiveSource` names (the backups
+of ADR 0064), and calls `SweepObjectStore` on a ready node of that store
+it is connected to. feosd refuses an empty live set and has diskd sweep
+with it (`Sweep`, its grace of 24 hours, a budget of 20 minutes, at most
+1000 of its keys in the answer). A node whose feosd does not know the
+call is passed over. `--object-store-sweep=dry-run` deletes nothing and
+logs what it would; every run logs what it saw and deleted.
 
 ### Tools and MCP
 
@@ -3499,6 +3542,7 @@ an environment without deployments is a valid place for them.
 | `POST /api/v1/sandboxes` `{environment, reaches?, egress?, image?, vcpus?, memoryMib?, imageCredentials?, credentials?, workdir?}` | 201 `{status, token, created}`; 400 without `environment`, for `securityGroups` ("securityGroups is gone (ADR 0034, revised); use reaches"), a malformed `reaches` entry or `egress`, and for a body with `attachable`; 404 "no such environment"; 409 for an environment or a project being deleted; 422 for an entry naming an object or a port the deployed deployment does not have, with what it has |
 | `GET /api/v1/sandboxes[?environment=]` | `{sandboxes}`, oldest first: those the principal reads, of the one environment when it names one (by name or ID) |
 | `GET /api/v1/sandboxes/{id}` | the view: the status with `environment {id, name}`, `reaches` (`"all"` or the entries, `[]` for nothing), `egress` (`"internet"` when the create left it out, `"none"` or `{domains, blocks}`) and `workdir` (`"/"` when the create left it out) |
+| `PUT /api/v1/sandboxes/{id}/expiry` `{expiresAfterIdle}` | 200 the view with the new idle time; 400 without it or for a malformed one; 410 `expired` for an expired sandbox |
 | `PUT /api/v1/sandboxes/{id}/reaches` `{reaches}` | 200 the view, the rules changed in place; 400 without `reaches` or for one malformed, 422 as a create's. `…/security-groups` is gone (404) |
 | `POST /api/v1/jobs` `{environment, reaches?, egress?, …}` | as before ([Projects' jobs](#projects-jobs)), and as a sandbox's create for the two fields |
 | `DELETE /api/v1/environments/{env}` | 409 `environment_in_use` while sandboxes or queued or running jobs are in it |

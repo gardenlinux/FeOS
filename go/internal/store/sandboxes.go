@@ -115,6 +115,21 @@ type Sandbox struct {
 	// Workdir is the absolute directory the sandbox's tools start in, ""
 	// the root; fixed at the insert.
 	Workdir string
+	// ExpiresAfterIdleS is a caller's sandbox's idle time in seconds after
+	// which it expires (ADR 0065); nil (NULL) never. ExpiredAt is when it
+	// expired, zero while it has not.
+	ExpiresAfterIdleS *int64
+	ExpiredAt         time.Time
+}
+
+// ExpiresAt is when the sandbox expires if nothing uses it before: its
+// last activity plus its idle time. ok is false for a sandbox that never
+// expires, one that expired, and one that runs.
+func (s Sandbox) ExpiresAt() (t time.Time, ok bool) {
+	if s.ExpiresAfterIdleS == nil || s.ClientState == model.StateExpired || s.ClientState == model.StateRunning {
+		return time.Time{}, false
+	}
+	return s.LastActiveAt.Add(time.Duration(*s.ExpiresAfterIdleS) * time.Second), true
 }
 
 // IsOwn reports whether the row is a sandbox, the project's own (POST
@@ -181,7 +196,8 @@ func sandboxColumns(p string) string {
 		"pending_since", "unreachable_since", "run_id", "kube_version", "ssh_version",
 		"created_at", "updated_at", "last_active_at", "paused_at", "policy_failed", "policy_failures",
 		"policy_not_before", "environment_id", "instance", "pod_template", "pin_node", "idle_after_s", "address",
-		"project_job", "log_labels", "http_version", "http_pushed", "reaches", "egress", "workdir", "disk_gib"}
+		"project_job", "log_labels", "http_version", "http_pushed", "reaches", "egress", "workdir", "disk_gib",
+		"expires_after_idle_s", "expired_at"}
 	if p != "" {
 		for i, c := range cols {
 			cols[i] = p + "." + c
@@ -196,7 +212,7 @@ func scanSandbox(row pgx.Row) (Sandbox, error) {
 	var s Sandbox
 	var node, lostFrom *string
 	var opID *uuid.UUID
-	var opDeadline, cpAt, pendingSince, unreachableSince, pausedAt, policyNotBefore *time.Time
+	var opDeadline, cpAt, pendingSince, unreachableSince, pausedAt, policyNotBefore, expiredAt *time.Time
 	var template, reaches, egress []byte
 	err := row.Scan(&s.ID, &s.Incarnation, &s.Owner, &s.Image, &s.ImageRef, &s.VCPUs, &s.MemoryMiB,
 		&s.ClientState, &s.StatusDescription, &node, &s.Materialised, &lostFrom, &s.AvoidNodes,
@@ -205,13 +221,15 @@ func scanSandbox(row pgx.Row) (Sandbox, error) {
 		&pendingSince, &unreachableSince, &s.RunID, &s.KubeVersion, &s.SSHVersion,
 		&s.CreatedAt, &s.UpdatedAt, &s.LastActiveAt, &pausedAt, &s.PolicyFailed, &s.PolicyFailures,
 		&policyNotBefore, &s.EnvironmentID, &s.Instance, &template, &s.PinNode, &s.IdleAfterS, &s.Address,
-		&s.ProjectJob, &s.LogLabels, &s.HTTPVersion, &s.HTTPPushed, &reaches, &egress, &s.Workdir, &s.DiskGiB)
+		&s.ProjectJob, &s.LogLabels, &s.HTTPVersion, &s.HTTPPushed, &reaches, &egress, &s.Workdir, &s.DiskGiB,
+		&s.ExpiresAfterIdleS, &expiredAt)
 	if err != nil {
 		return Sandbox{}, err
 	}
 	s.Node, s.LostFrom, s.OpID = stringOf(node), stringOf(lostFrom), uuidOf(opID)
 	s.OpDeadline, s.CheckpointAt, s.PendingSince = timeOf(opDeadline), timeOf(cpAt), timeOf(pendingSince)
 	s.UnreachableSince, s.PausedAt, s.PolicyNotBefore = timeOf(unreachableSince), timeOf(pausedAt), timeOf(policyNotBefore)
+	s.ExpiredAt = timeOf(expiredAt)
 	s.AvoidNodes, s.LogLabels = nonNil(s.AvoidNodes), stringMap(s.LogLabels)
 	if s.Reaches, s.Egress, err = scanReach(reaches, egress); err != nil {
 		return Sandbox{}, fmt.Errorf("sandbox %s: %w", s.ID, err)
@@ -331,6 +349,10 @@ type NewSandbox struct {
 	// Workdir is the absolute directory its tools start in (validated by
 	// the caller); "": the root.
 	Workdir string
+	// ExpiresAfterIdleS is a caller's sandbox's idle time in seconds (at
+	// least an hour, validated by the caller); nil never. An instance and
+	// a project's job have none.
+	ExpiresAfterIdleS *int64
 }
 
 // CreateSandbox inserts the sandbox unless its ID exists. It returns the
@@ -356,12 +378,13 @@ func (s *Store) CreateSandbox(ctx context.Context, n NewSandbox) (Sandbox, bool,
 	for range 3 {
 		sb, err := scanSandbox(s.q.QueryRow(ctx, `INSERT INTO sandboxes (id, owner, image, vcpus, memory_mib, image_ref,
 				environment_id, instance, pod_template, pin_node, idle_after_s, project_job, log_labels, made_by,
-				reaches, egress, workdir, disk_gib)
+				reaches, egress, workdir, disk_gib, expires_after_idle_s)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13::jsonb, $14, $15::jsonb, $16::jsonb, $17,
-				$18)
+				$18, $19)
 			ON CONFLICT (id) DO NOTHING RETURNING `+sandboxCols,
 			n.ID, n.Owner, n.Image, n.VCPUs, n.MemoryMiB, n.ImageRef, n.EnvironmentID, n.Instance, template, n.PinNode,
-			n.IdleAfterS, n.ProjectJob, logLabels, n.MadeBy, reaches, egress, n.Workdir, n.DiskGiB))
+			n.IdleAfterS, n.ProjectJob, logLabels, n.MadeBy, reaches, egress, n.Workdir, n.DiskGiB,
+			n.ExpiresAfterIdleS))
 		if err == nil {
 			return sb, true, s.Notify(ctx, chanSandbox, sb.ID.String())
 		}
@@ -1071,4 +1094,114 @@ func (s *Store) SetSandboxTLSBindings(ctx context.Context, id podid.ID, inc uuid
 		return false, fmt.Errorf("TLS bindings of sandbox %s: %w", id, err)
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+// expiryStates are the client states a sandbox can expire from (ADR
+// 0065): none that runs and none between two others.
+var expiryStates = []string{model.StatePending, model.StatePaused, model.StateHibernated,
+	model.StateStopped, model.StateFailed, model.StateLost}
+
+// ExpiryStates are the client states a sandbox can expire from.
+func ExpiryStates() []string { return slices.Clone(expiryStates) }
+
+// expiryDue is the condition of a row whose idle time has passed: a
+// caller's sandbox with an idle time, without an op, in a state it can
+// expire from, nothing holding it, last active before its idle time.
+const expiryDue = `s.expires_after_idle_s IS NOT NULL AND s.op = '' AND NOT s.instance AND NOT s.project_job
+	AND s.client_state = ANY($1)
+	AND s.last_active_at < now() - make_interval(secs => s.expires_after_idle_s)
+	AND NOT EXISTS (SELECT 1 FROM sandbox_holds h WHERE h.sandbox_id = s.id AND h.lease_until > now())`
+
+// ExpiryCandidates returns up to limit sandboxes whose idle time has
+// passed, the longest idle first.
+func (s *Store) ExpiryCandidates(ctx context.Context, limit int) ([]Sandbox, error) {
+	return collectSandboxes(s.q.Query(ctx, "SELECT "+sandboxColumns("s")+" FROM sandboxes s WHERE "+expiryDue+`
+		ORDER BY s.last_active_at LIMIT $2`, expiryStates, limit))
+}
+
+// ExpiryDue reports whether the sandbox's idle time has passed as the
+// database reads it now: the recheck of an expiry on the locked row.
+func (s *Store) ExpiryDue(ctx context.Context, id podid.ID) (bool, error) {
+	var due bool
+	err := s.q.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM sandboxes s WHERE s.id = $2 AND "+expiryDue+")",
+		expiryStates, id).Scan(&due)
+	return due, err
+}
+
+// MarkSandboxExpired writes the expiry of the locked row id of
+// incarnation inc (ADR 0065): client state expired, expired_at now, no
+// node, no checkpoint, no op markers, desc as its description, gen + 1.
+// It returns the row after; ErrNoRow when the row is gone or of another
+// incarnation. It sends ferun_sandbox.
+func (s *Store) MarkSandboxExpired(ctx context.Context, id podid.ID, inc uuid.UUID, desc string) (Sandbox, error) {
+	sb, err := scanSandbox(s.q.QueryRow(ctx, `UPDATE sandboxes SET client_state = 'expired', expired_at = now(),
+			status_description = $3, node = NULL, materialised = false, lost_from = NULL, avoid_nodes = '{}',
+			checkpoint_epoch = 0, checkpoint_head = '', checkpoint_memory = false, checkpoint_at = NULL,
+			checkpoint_store = '', pending_since = NULL, unreachable_since = NULL, run_id = '', address = '',
+			paused_at = NULL, policy_failed = '', policy_failures = 0, policy_not_before = NULL,
+			gen = gen + 1, updated_at = now()
+		WHERE id = $1 AND incarnation = $2 AND op = '' RETURNING `+sandboxCols, id, inc, desc))
+	if err != nil {
+		return Sandbox{}, noRow(err, ErrNoRow)
+	}
+	return sb, s.Notify(ctx, chanSandbox, sb.ID.String())
+}
+
+// SetSandboxExpiry sets a caller's sandbox's idle time (nil: never). It
+// reports whether the row was there; an instance's or a project's job's
+// row is not. It sends ferun_sandbox.
+func (s *Store) SetSandboxExpiry(ctx context.Context, id podid.ID, after *int64) (bool, error) {
+	tag, err := s.q.Exec(ctx, `UPDATE sandboxes SET expires_after_idle_s = $2, updated_at = now()
+		WHERE id = $1 AND NOT instance AND NOT project_job`, id, after)
+	if err != nil {
+		return false, err
+	}
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
+	return true, s.Notify(ctx, chanSandbox, id.String())
+}
+
+// SweepLive is what the object store's sweep keeps (ADR 0065): the
+// checkpoint head every sandbox row names, in any state, and every layer
+// of the image catalog, read in one statement each of the caller's
+// transaction. store "" reads the heads of every object store.
+type SweepLive struct {
+	Heads  []string
+	Layers []string
+}
+
+// SweepLiveSet reads the sweep's live set for the object store store.
+// Every head that names no store (a row from before the column) is live
+// in every store.
+func (s *Store) SweepLiveSet(ctx context.Context, store string) (SweepLive, error) {
+	var l SweepLive
+	if err := s.q.QueryRow(ctx, `SELECT coalesce(array_agg(DISTINCT checkpoint_head ORDER BY checkpoint_head), '{}')
+		FROM sandboxes WHERE checkpoint_head <> '' AND ($1 = '' OR checkpoint_store IN ($1, ''))`, store).Scan(&l.Heads); err != nil {
+		return SweepLive{}, fmt.Errorf("sweep: heads: %w", err)
+	}
+	if err := s.q.QueryRow(ctx, `SELECT coalesce(array_agg(DISTINCT layer ORDER BY layer), '{}') FROM image_bakes`).Scan(&l.Layers); err != nil {
+		return SweepLive{}, fmt.Errorf("sweep: layers: %w", err)
+	}
+	return l, nil
+}
+
+// DeleteExpiredSandboxesOf deletes the expired sandboxes of environment
+// env, which have no pod and no checkpoint (ADR 0065): they go with their
+// environment. It returns how many went and sends ferun_sandbox for each.
+func (s *Store) DeleteExpiredSandboxesOf(ctx context.Context, env uuid.UUID) (int, error) {
+	rows, err := s.q.Query(ctx, `DELETE FROM sandboxes WHERE environment_id = $1 AND client_state = 'expired' RETURNING id`, env)
+	if err != nil {
+		return 0, err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[podid.ID])
+	if err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if err := s.Notify(ctx, chanSandbox, id.String()); err != nil {
+			return 0, err
+		}
+	}
+	return len(ids), nil
 }

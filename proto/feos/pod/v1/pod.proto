@@ -102,6 +102,39 @@ service PodService {
   // The serial console of the pod's microVM: the first message names the
   // pod, the ones after it carry input.
   rpc StreamPodConsole(stream PodConsoleInput) returns (stream PodConsoleOutput);
+  // Sweeps the node's object store through its disk daemon (ADR 0011,
+  // ADR 0065): what none of the live heads and layers reaches, and is
+  // older than the daemon's grace, is deleted. The control plane names
+  // what is live; it calls one node per object store.
+  rpc SweepObjectStore(SweepObjectStoreRequest) returns (SweepObjectStoreResponse);
+}
+
+message SweepObjectStoreRequest {
+  // S3 keys of the heads still in use; the heads of the volumes they name
+  // are, too. Never empty: an empty live set is refused.
+  repeated string live_heads = 1;
+  // Layer ids still in use outside a head: the baked layers.
+  repeated string live_layers = 2;
+  // Report what would be deleted, delete nothing.
+  bool dry_run = 3;
+  // A soft limit on the sweep's duration; 0 is the daemon's 15 minutes.
+  uint64 budget_seconds = 4;
+}
+
+message SweepObjectStoreResponse {
+  uint64 snapshot_objects_seen = 1;
+  uint64 snapshot_objects_deleted = 2;
+  uint64 layers_seen = 3;
+  uint64 layers_deleted = 4;
+  uint64 chunks_seen = 5;
+  uint64 chunks_deleted = 6;
+  // Compressed bytes deleted, or with dry_run that would be.
+  uint64 bytes_deleted = 7;
+  bool budget_exhausted = 8;
+  // The first keys deleted (or, with dry_run, that would be), at most
+  // 1000 of them; keys_deleted counts them all.
+  repeated string sample_keys = 9;
+  uint64 keys_deleted = 10;
 }
 
 message PodSpec {

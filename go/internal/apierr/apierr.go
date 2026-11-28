@@ -121,6 +121,9 @@ func RoleRequired(role, scope string) *Error {
 // one of its project's limits (ADR 0031, "Quotas per project").
 const CodeQuotaExceeded = api.CodeQuotaExceeded
 
+// CodeExpired is the code of a 410 for a sandbox that expired (ADR 0065).
+const CodeExpired = api.CodeExpired
+
 // QuotaExceeded is 422 {"code": "quota_exceeded", "resource", "limit",
 // "use"}: asking for ask more of resource passes the limit, use being in
 // use already.

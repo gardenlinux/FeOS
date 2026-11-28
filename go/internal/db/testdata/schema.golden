@@ -1024,13 +1024,17 @@ TABLE sandboxes
   COLUMN egress jsonb
   COLUMN workdir text NOT NULL DEFAULT ''::text
   COLUMN disk_gib integer NOT NULL DEFAULT 0
+  COLUMN expires_after_idle_s bigint
+  COLUMN expired_at timestamp with time zone
+  CONSTRAINT CHECK (((client_state = 'expired'::text) = (expired_at IS NOT NULL)))
   CONSTRAINT CHECK (((disk_gib >= 0) AND (disk_gib <= 1024)))
+  CONSTRAINT CHECK (((expires_after_idle_s IS NULL) OR (expires_after_idle_s >= 3600)))
   CONSTRAINT CHECK (((memory_mib >= 256) AND (memory_mib <= 65536)))
   CONSTRAINT CHECK (((op = ''::text) = (op_id IS NULL)))
   CONSTRAINT CHECK (((reaches = '"all"'::jsonb) OR (jsonb_typeof(reaches) = 'array'::text)))
   CONSTRAINT CHECK (((vcpus >= 1) AND (vcpus <= 32)))
   CONSTRAINT CHECK ((NOT (instance AND project_job)))
-  CONSTRAINT CHECK ((client_state = ANY (ARRAY['pending'::text, 'creating'::text, 'running'::text, 'pausing'::text, 'paused'::text, 'resuming'::text, 'hibernating'::text, 'hibernated'::text, 'stopped'::text, 'failed'::text, 'unknown'::text, 'lost'::text])))
+  CONSTRAINT CHECK ((client_state = ANY (ARRAY['pending'::text, 'creating'::text, 'running'::text, 'pausing'::text, 'paused'::text, 'resuming'::text, 'hibernating'::text, 'hibernated'::text, 'stopped'::text, 'failed'::text, 'unknown'::text, 'lost'::text, 'expired'::text])))
   CONSTRAINT CHECK ((id ~ '^([a-hjkmnp-tv-z][0-9a-hjkmnp-tv-z]{10}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$'::text))
   CONSTRAINT CHECK ((idle_after_s >= 0))
   CONSTRAINT CHECK ((op = ANY (ARRAY[''::text, 'create'::text, 'start'::text, 'resume'::text, 'restore'::text, 'pause'::text, 'hibernate'::text, 'repair'::text, 'stop'::text])))
@@ -1041,6 +1045,7 @@ TABLE sandboxes
   CONSTRAINT PRIMARY KEY (id)
   CREATE INDEX sandboxes_attention ON public.sandboxes USING btree (client_state) WHERE ((client_state = ANY (ARRAY['unknown'::text, 'creating'::text, 'pending'::text])) OR (unreachable_since IS NOT NULL))
   CREATE INDEX sandboxes_environment ON public.sandboxes USING btree (environment_id)
+  CREATE INDEX sandboxes_expiry ON public.sandboxes USING btree (last_active_at) WHERE ((expires_after_idle_s IS NOT NULL) AND (op = ''::text) AND (client_state = ANY (ARRAY['pending'::text, 'paused'::text, 'hibernated'::text, 'stopped'::text, 'failed'::text, 'lost'::text])))
   CREATE INDEX sandboxes_idle ON public.sandboxes USING btree (last_active_at) WHERE ((client_state = 'running'::text) AND (op = ''::text))
   CREATE INDEX sandboxes_lost_from ON public.sandboxes USING btree (lost_from) WHERE (lost_from IS NOT NULL)
   CREATE INDEX sandboxes_node ON public.sandboxes USING btree (node) WHERE (node IS NOT NULL)

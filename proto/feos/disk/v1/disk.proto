@@ -288,6 +288,8 @@ message SweepRequest {
   // Tests only: no grace at all. Never against a bucket in use, where the
   // grace protects uploads in flight.
   bool no_grace = 6;
+  // At most this many keys in the report's deleted_keys; 0: all of them.
+  uint32 max_keys = 7;
 }
 
 message SweepReport {
@@ -300,8 +302,11 @@ message SweepReport {
   uint64 layers_seen = 6;
   uint64 chunks_seen = 7;
   bool budget_exhausted = 8;
-  // The keys deleted, or with dry_run the keys that would be.
+  // The keys deleted, or with dry_run the keys that would be: the first
+  // max_keys of them when the request set it.
   repeated string deleted_keys = 9;
+  // All the keys deleted (or that would be), also those left out.
+  uint64 keys_deleted = 10;
 }
 
 message OpenMemoryRequest {

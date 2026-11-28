@@ -191,7 +191,8 @@ func (u InUse) Empty() bool { return len(u.Sandboxes) == 0 && len(u.Jobs) == 0 }
 func (s *Store) EnvironmentInUse(ctx context.Context, envID uuid.UUID) (InUse, error) {
 	var out InUse
 	err := s.q.QueryRow(ctx, `SELECT
-			ARRAY(SELECT id FROM sandboxes WHERE environment_id = $1 AND NOT instance AND NOT project_job ORDER BY id),
+			ARRAY(SELECT id FROM sandboxes WHERE environment_id = $1 AND NOT instance AND NOT project_job
+				AND client_state <> 'expired' ORDER BY id),
 			ARRAY(SELECT id FROM jobs WHERE environment_id = $1 AND finished_at IS NULL ORDER BY id)`, envID).
 		Scan(&out.Sandboxes, &out.Jobs)
 	if err != nil {

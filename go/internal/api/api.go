@@ -244,6 +244,9 @@ type Config struct {
 
 	DefaultImage                   string
 	DefaultVCPUs, DefaultMemoryMiB int
+	// SandboxExpiresAfterIdle is the idle time of a sandbox whose create
+	// names none (--sandbox-expires-after-idle, ADR 0065).
+	SandboxExpiresAfterIdle string
 	// DiskBudget is placement's disk budget (--disk-budget), which a
 	// node's capacity for disks of their own size leaves free.
 	DiskBudget int64
@@ -539,6 +542,7 @@ func (s *server) routes() []route {
 	project(onSandbox(write), "POST /api/v1/sandboxes/{id}/pause", s.pauseSandbox)
 	project(onSandbox(write), "POST /api/v1/sandboxes/{id}/resume", s.resumeSandbox)
 	project(onSandbox(write), "PUT /api/v1/sandboxes/{id}/reaches", s.putSandboxReaches)
+	project(onSandbox(write), "PUT /api/v1/sandboxes/{id}/expiry", s.putSandboxExpiry)
 	project(onSandbox(write), "PUT /api/v1/sandboxes/{id}/image-credentials", s.putImageCredentials)
 	project(onSandbox(write), "DELETE /api/v1/sandboxes/{id}/image-credentials", s.deleteImageCredentials)
 	project(onSandbox(read), "GET /api/v1/sandboxes/{id}/tokens", s.listSandboxTokens)

@@ -429,6 +429,7 @@ async fn main() -> Result<(), String> {
                     dry_run,
                     budget_seconds: budget.unwrap_or(0),
                     no_grace,
+                    max_keys: 0,
                 })
                 .await
                 .map_err(|e| e.message().to_string())?

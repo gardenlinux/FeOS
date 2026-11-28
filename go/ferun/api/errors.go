@@ -41,6 +41,9 @@ const (
 	// CodeEnvironmentInUse: 409, an environment's delete while sandboxes
 	// or queued or running jobs are in it (sandboxes, jobs).
 	CodeEnvironmentInUse = "environment_in_use"
+	// CodeExpired: 410, the sandbox expired after its idle time (ADR
+	// 0065): only reading and deleting it are left.
+	CodeExpired = "expired"
 	// CodeInvalidSpec: 422, the spec has error findings (findings).
 	CodeInvalidSpec = "invalid_spec"
 	// CodeBaseMismatch: 409, the request's base is not the current

@@ -60,9 +60,9 @@ sweep's question.
 - It applies to the sandboxes a caller makes. An environment's instances
   and a project's jobs are not made by a caller: they live and go with
   their deployments, and they have no `expiresAfterIdle`.
-- Rows that exist at the release get the default, counted from the
-  release at the earliest. A sandbox that was idle for months before the
-  release still has its full default after it.
+- Rows that exist at the release get `never`. Nothing made before
+  expiry existed loses its data to it; its creator may set a time in
+  place.
 
 ### An expiry ends the pod and keeps the row
 
@@ -115,6 +115,10 @@ sweep's question.
   what the sandbox was, who made it and when it last ran. A caller that
   finds a 404 cannot tell an expired sandbox from one that never
   existed. The row is small, and the caller decides when it goes.
+- **The default for the rows from before, counted from the release**:
+  it would have cleaned up FeChat's old conversations within a month,
+  and it would have ended any sandbox whose creator did not know expiry
+  was coming. Nothing that existed before expires by itself.
 - **Deleting a sandbox's own chunks at its expiry**: no chunk is a
   sandbox's own. Whether one is shared is only known against
   everything else that is live, and an expiry that asked that question
@@ -141,8 +145,8 @@ sweep's question.
   conversation whose sandbox expired gets a new sandbox at its next
   command, and both the person and the model are told that the files
   from before are gone.
-- FeCode makes its sandboxes with `never` and sets `never` in place on
-  the ones it made before the release (FeCode ADR 0021).
+- FeCode makes its sandboxes with `never` (FeCode ADR 0021). Its
+  sandboxes from before have `never` already.
 - The console shows an expired sandbox with its day, offers only
   deleting it, and shows `expiresAt` for every sandbox that is not
   running.
@@ -154,4 +158,6 @@ sweep's question.
 Proposed on 2026-11-28 after measuring the store: 83 GB across the
 installation's buckets, 56 GB of it checkpoints, and no sweep ever run.
 ADR 0064 had decided the sweep for the backups of postgres addons; this
-ADR runs the sweep on its own, ahead of those backups.
+ADR runs the sweep on its own, ahead of those backups. The same day the
+rows from before were given `never` instead of the default counted from
+the release, so that no data is lost to the change (migration 0045).

@@ -16,6 +16,7 @@ import (
 
 	"github.com/gardenlinux/feos/go/internal/apierr"
 	"github.com/gardenlinux/feos/go/internal/env/spec"
+	"github.com/gardenlinux/feos/go/internal/model"
 	"github.com/gardenlinux/feos/go/internal/podid"
 	"github.com/gardenlinux/feos/go/internal/store"
 )
@@ -233,6 +234,13 @@ type sandboxStatus struct {
 	MemoryMib         int    `json:"memoryMib"`
 	// DiskGib is its disk of its own size; absent: the guest's, 8 GiB.
 	DiskGib int `json:"diskGib,omitempty"`
+	// ExpiresAfterIdle is a caller's sandbox's idle time (ADR 0065),
+	// "<n>d", "<n>h" or "never"; absent for an instance and a project's
+	// job. ExpiresAt is when it expires if nothing uses it before, absent
+	// while it runs and for never; ExpiredAt when it expired.
+	ExpiresAfterIdle string `json:"expiresAfterIdle,omitempty"`
+	ExpiresAt        string `json:"expiresAt,omitempty"`
+	ExpiredAt        string `json:"expiredAt,omitempty"`
 }
 
 // statusOf renders a row.
@@ -241,7 +249,7 @@ func statusOf(sb store.Sandbox) sandboxStatus {
 	if sb.LastActiveAt.After(updated) {
 		updated = sb.LastActiveAt
 	}
-	return sandboxStatus{
+	st := sandboxStatus{
 		SandboxID:         sb.ID.String(),
 		State:             sb.ClientState,
 		Image:             sb.Image,
@@ -259,6 +267,14 @@ func statusOf(sb store.Sandbox) sandboxStatus {
 		MemoryMib:         sb.MemoryMiB,
 		DiskGib:           sb.DiskGiB,
 	}
+	if sb.IsOwn() {
+		st.ExpiresAfterIdle = model.IdleTimeText(sb.ExpiresAfterIdleS)
+		if t, ok := sb.ExpiresAt(); ok {
+			st.ExpiresAt = rfc3339(t)
+		}
+		st.ExpiredAt = rfc3339(sb.ExpiredAt)
+	}
+	return st
 }
 
 // internalf is a 500 with a text of its own, whatever err wraps (an

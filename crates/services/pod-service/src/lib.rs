@@ -30,6 +30,7 @@ use feos_proto::pod_service::{
     ResumePodResponse, SetPodHttpBindingsRequest, SetPodHttpBindingsResponse,
     SetPodTlsBindingsRequest, SetPodTlsBindingsResponse, StartPodRequest, StartPodResponse,
     StopPodRequest, StopPodResponse, StreamPodEventsRequest, SuspendPodRequest, SuspendPodResponse,
+    SweepObjectStoreRequest, SweepObjectStoreResponse,
 };
 use feos_proto::volume_service::volume_service_server::VolumeService;
 use feos_proto::volume_service::{
@@ -254,6 +255,14 @@ impl PodService for Pods {
             )
             .await?,
         ))
+    }
+
+    async fn sweep_object_store(
+        &self,
+        request: Request<SweepObjectStoreRequest>,
+    ) -> Result<Response<SweepObjectStoreResponse>, Status> {
+        self.check_serving()?;
+        Ok(Response::new(self.sweep_store(request.into_inner()).await?))
     }
 }
 

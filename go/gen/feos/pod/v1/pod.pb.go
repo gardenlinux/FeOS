@@ -222,6 +222,198 @@ func (ContainerState) EnumDescriptor() ([]byte, []int) {
 	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{2}
 }
 
+type SweepObjectStoreRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// S3 keys of the heads still in use; the heads of the volumes they name
+	// are, too. Never empty: an empty live set is refused.
+	LiveHeads []string `protobuf:"bytes,1,rep,name=live_heads,json=liveHeads,proto3" json:"live_heads,omitempty"`
+	// Layer ids still in use outside a head: the baked layers.
+	LiveLayers []string `protobuf:"bytes,2,rep,name=live_layers,json=liveLayers,proto3" json:"live_layers,omitempty"`
+	// Report what would be deleted, delete nothing.
+	DryRun bool `protobuf:"varint,3,opt,name=dry_run,json=dryRun,proto3" json:"dry_run,omitempty"`
+	// A soft limit on the sweep's duration; 0 is the daemon's 15 minutes.
+	BudgetSeconds uint64 `protobuf:"varint,4,opt,name=budget_seconds,json=budgetSeconds,proto3" json:"budget_seconds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SweepObjectStoreRequest) Reset() {
+	*x = SweepObjectStoreRequest{}
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SweepObjectStoreRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SweepObjectStoreRequest) ProtoMessage() {}
+
+func (x *SweepObjectStoreRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SweepObjectStoreRequest.ProtoReflect.Descriptor instead.
+func (*SweepObjectStoreRequest) Descriptor() ([]byte, []int) {
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *SweepObjectStoreRequest) GetLiveHeads() []string {
+	if x != nil {
+		return x.LiveHeads
+	}
+	return nil
+}
+
+func (x *SweepObjectStoreRequest) GetLiveLayers() []string {
+	if x != nil {
+		return x.LiveLayers
+	}
+	return nil
+}
+
+func (x *SweepObjectStoreRequest) GetDryRun() bool {
+	if x != nil {
+		return x.DryRun
+	}
+	return false
+}
+
+func (x *SweepObjectStoreRequest) GetBudgetSeconds() uint64 {
+	if x != nil {
+		return x.BudgetSeconds
+	}
+	return 0
+}
+
+type SweepObjectStoreResponse struct {
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	SnapshotObjectsSeen    uint64                 `protobuf:"varint,1,opt,name=snapshot_objects_seen,json=snapshotObjectsSeen,proto3" json:"snapshot_objects_seen,omitempty"`
+	SnapshotObjectsDeleted uint64                 `protobuf:"varint,2,opt,name=snapshot_objects_deleted,json=snapshotObjectsDeleted,proto3" json:"snapshot_objects_deleted,omitempty"`
+	LayersSeen             uint64                 `protobuf:"varint,3,opt,name=layers_seen,json=layersSeen,proto3" json:"layers_seen,omitempty"`
+	LayersDeleted          uint64                 `protobuf:"varint,4,opt,name=layers_deleted,json=layersDeleted,proto3" json:"layers_deleted,omitempty"`
+	ChunksSeen             uint64                 `protobuf:"varint,5,opt,name=chunks_seen,json=chunksSeen,proto3" json:"chunks_seen,omitempty"`
+	ChunksDeleted          uint64                 `protobuf:"varint,6,opt,name=chunks_deleted,json=chunksDeleted,proto3" json:"chunks_deleted,omitempty"`
+	// Compressed bytes deleted, or with dry_run that would be.
+	BytesDeleted    uint64 `protobuf:"varint,7,opt,name=bytes_deleted,json=bytesDeleted,proto3" json:"bytes_deleted,omitempty"`
+	BudgetExhausted bool   `protobuf:"varint,8,opt,name=budget_exhausted,json=budgetExhausted,proto3" json:"budget_exhausted,omitempty"`
+	// The first keys deleted (or, with dry_run, that would be), at most
+	// 1000 of them; keys_deleted counts them all.
+	SampleKeys    []string `protobuf:"bytes,9,rep,name=sample_keys,json=sampleKeys,proto3" json:"sample_keys,omitempty"`
+	KeysDeleted   uint64   `protobuf:"varint,10,opt,name=keys_deleted,json=keysDeleted,proto3" json:"keys_deleted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SweepObjectStoreResponse) Reset() {
+	*x = SweepObjectStoreResponse{}
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SweepObjectStoreResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SweepObjectStoreResponse) ProtoMessage() {}
+
+func (x *SweepObjectStoreResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SweepObjectStoreResponse.ProtoReflect.Descriptor instead.
+func (*SweepObjectStoreResponse) Descriptor() ([]byte, []int) {
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SweepObjectStoreResponse) GetSnapshotObjectsSeen() uint64 {
+	if x != nil {
+		return x.SnapshotObjectsSeen
+	}
+	return 0
+}
+
+func (x *SweepObjectStoreResponse) GetSnapshotObjectsDeleted() uint64 {
+	if x != nil {
+		return x.SnapshotObjectsDeleted
+	}
+	return 0
+}
+
+func (x *SweepObjectStoreResponse) GetLayersSeen() uint64 {
+	if x != nil {
+		return x.LayersSeen
+	}
+	return 0
+}
+
+func (x *SweepObjectStoreResponse) GetLayersDeleted() uint64 {
+	if x != nil {
+		return x.LayersDeleted
+	}
+	return 0
+}
+
+func (x *SweepObjectStoreResponse) GetChunksSeen() uint64 {
+	if x != nil {
+		return x.ChunksSeen
+	}
+	return 0
+}
+
+func (x *SweepObjectStoreResponse) GetChunksDeleted() uint64 {
+	if x != nil {
+		return x.ChunksDeleted
+	}
+	return 0
+}
+
+func (x *SweepObjectStoreResponse) GetBytesDeleted() uint64 {
+	if x != nil {
+		return x.BytesDeleted
+	}
+	return 0
+}
+
+func (x *SweepObjectStoreResponse) GetBudgetExhausted() bool {
+	if x != nil {
+		return x.BudgetExhausted
+	}
+	return false
+}
+
+func (x *SweepObjectStoreResponse) GetSampleKeys() []string {
+	if x != nil {
+		return x.SampleKeys
+	}
+	return nil
+}
+
+func (x *SweepObjectStoreResponse) GetKeysDeleted() uint64 {
+	if x != nil {
+		return x.KeysDeleted
+	}
+	return 0
+}
+
 type PodSpec struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Resources *Resources             `protobuf:"bytes,1,opt,name=resources,proto3" json:"resources,omitempty"`
@@ -274,7 +466,7 @@ type PodSpec struct {
 
 func (x *PodSpec) Reset() {
 	*x = PodSpec{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[0]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -286,7 +478,7 @@ func (x *PodSpec) String() string {
 func (*PodSpec) ProtoMessage() {}
 
 func (x *PodSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[0]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -299,7 +491,7 @@ func (x *PodSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PodSpec.ProtoReflect.Descriptor instead.
 func (*PodSpec) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{0}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *PodSpec) GetResources() *Resources {
@@ -394,7 +586,7 @@ type TlsBinding struct {
 
 func (x *TlsBinding) Reset() {
 	*x = TlsBinding{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[1]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -406,7 +598,7 @@ func (x *TlsBinding) String() string {
 func (*TlsBinding) ProtoMessage() {}
 
 func (x *TlsBinding) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[1]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -419,7 +611,7 @@ func (x *TlsBinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TlsBinding.ProtoReflect.Descriptor instead.
 func (*TlsBinding) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{1}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *TlsBinding) GetListen() string {
@@ -481,7 +673,7 @@ type PodHttpBindings struct {
 
 func (x *PodHttpBindings) Reset() {
 	*x = PodHttpBindings{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[2]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -493,7 +685,7 @@ func (x *PodHttpBindings) String() string {
 func (*PodHttpBindings) ProtoMessage() {}
 
 func (x *PodHttpBindings) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[2]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -506,7 +698,7 @@ func (x *PodHttpBindings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PodHttpBindings.ProtoReflect.Descriptor instead.
 func (*PodHttpBindings) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{2}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PodHttpBindings) GetNames() []string {
@@ -551,7 +743,7 @@ type PodVolume struct {
 
 func (x *PodVolume) Reset() {
 	*x = PodVolume{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[3]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -563,7 +755,7 @@ func (x *PodVolume) String() string {
 func (*PodVolume) ProtoMessage() {}
 
 func (x *PodVolume) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[3]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -576,7 +768,7 @@ func (x *PodVolume) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PodVolume.ProtoReflect.Descriptor instead.
 func (*PodVolume) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{3}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *PodVolume) GetName() string {
@@ -613,7 +805,7 @@ type Resources struct {
 
 func (x *Resources) Reset() {
 	*x = Resources{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[4]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -625,7 +817,7 @@ func (x *Resources) String() string {
 func (*Resources) ProtoMessage() {}
 
 func (x *Resources) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[4]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -638,7 +830,7 @@ func (x *Resources) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Resources.ProtoReflect.Descriptor instead.
 func (*Resources) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{4}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Resources) GetVcpus() uint32 {
@@ -681,7 +873,7 @@ type ContainerSpec struct {
 
 func (x *ContainerSpec) Reset() {
 	*x = ContainerSpec{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[5]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -693,7 +885,7 @@ func (x *ContainerSpec) String() string {
 func (*ContainerSpec) ProtoMessage() {}
 
 func (x *ContainerSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[5]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -706,7 +898,7 @@ func (x *ContainerSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerSpec.ProtoReflect.Descriptor instead.
 func (*ContainerSpec) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{5}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ContainerSpec) GetName() string {
@@ -759,7 +951,7 @@ type VolumeMount struct {
 
 func (x *VolumeMount) Reset() {
 	*x = VolumeMount{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[6]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -771,7 +963,7 @@ func (x *VolumeMount) String() string {
 func (*VolumeMount) ProtoMessage() {}
 
 func (x *VolumeMount) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[6]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -784,7 +976,7 @@ func (x *VolumeMount) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VolumeMount.ProtoReflect.Descriptor instead.
 func (*VolumeMount) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{6}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *VolumeMount) GetVolume() string {
@@ -846,7 +1038,7 @@ type PodNetwork struct {
 
 func (x *PodNetwork) Reset() {
 	*x = PodNetwork{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[7]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -858,7 +1050,7 @@ func (x *PodNetwork) String() string {
 func (*PodNetwork) ProtoMessage() {}
 
 func (x *PodNetwork) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[7]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -871,7 +1063,7 @@ func (x *PodNetwork) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PodNetwork.ProtoReflect.Descriptor instead.
 func (*PodNetwork) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{7}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *PodNetwork) GetNone() bool {
@@ -962,7 +1154,7 @@ type PodInfo struct {
 
 func (x *PodInfo) Reset() {
 	*x = PodInfo{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[8]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -974,7 +1166,7 @@ func (x *PodInfo) String() string {
 func (*PodInfo) ProtoMessage() {}
 
 func (x *PodInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[8]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -987,7 +1179,7 @@ func (x *PodInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PodInfo.ProtoReflect.Descriptor instead.
 func (*PodInfo) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{8}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *PodInfo) GetPodId() string {
@@ -1112,7 +1304,7 @@ type Hibernation struct {
 
 func (x *Hibernation) Reset() {
 	*x = Hibernation{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[9]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1124,7 +1316,7 @@ func (x *Hibernation) String() string {
 func (*Hibernation) ProtoMessage() {}
 
 func (x *Hibernation) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[9]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1137,7 +1329,7 @@ func (x *Hibernation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hibernation.ProtoReflect.Descriptor instead.
 func (*Hibernation) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{9}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Hibernation) GetPhase() HibernationPhase {
@@ -1185,7 +1377,7 @@ type Checkpoint struct {
 
 func (x *Checkpoint) Reset() {
 	*x = Checkpoint{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[10]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1197,7 +1389,7 @@ func (x *Checkpoint) String() string {
 func (*Checkpoint) ProtoMessage() {}
 
 func (x *Checkpoint) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[10]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1210,7 +1402,7 @@ func (x *Checkpoint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Checkpoint.ProtoReflect.Descriptor instead.
 func (*Checkpoint) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{10}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Checkpoint) GetHeadKey() string {
@@ -1248,7 +1440,7 @@ type MicroVm struct {
 
 func (x *MicroVm) Reset() {
 	*x = MicroVm{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[11]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1260,7 +1452,7 @@ func (x *MicroVm) String() string {
 func (*MicroVm) ProtoMessage() {}
 
 func (x *MicroVm) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[11]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1273,7 +1465,7 @@ func (x *MicroVm) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MicroVm.ProtoReflect.Descriptor instead.
 func (*MicroVm) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{11}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *MicroVm) GetPid() int64 {
@@ -1309,7 +1501,7 @@ type ContainerStatus struct {
 
 func (x *ContainerStatus) Reset() {
 	*x = ContainerStatus{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[12]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1321,7 +1513,7 @@ func (x *ContainerStatus) String() string {
 func (*ContainerStatus) ProtoMessage() {}
 
 func (x *ContainerStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[12]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1334,7 +1526,7 @@ func (x *ContainerStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerStatus.ProtoReflect.Descriptor instead.
 func (*ContainerStatus) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{12}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ContainerStatus) GetName() string {
@@ -1398,7 +1590,7 @@ type CreatePodRequest struct {
 
 func (x *CreatePodRequest) Reset() {
 	*x = CreatePodRequest{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[13]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1410,7 +1602,7 @@ func (x *CreatePodRequest) String() string {
 func (*CreatePodRequest) ProtoMessage() {}
 
 func (x *CreatePodRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[13]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1423,7 +1615,7 @@ func (x *CreatePodRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreatePodRequest.ProtoReflect.Descriptor instead.
 func (*CreatePodRequest) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{13}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *CreatePodRequest) GetPodId() string {
@@ -1491,7 +1683,7 @@ type ImageLayers struct {
 
 func (x *ImageLayers) Reset() {
 	*x = ImageLayers{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[14]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1503,7 +1695,7 @@ func (x *ImageLayers) String() string {
 func (*ImageLayers) ProtoMessage() {}
 
 func (x *ImageLayers) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[14]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1516,7 +1708,7 @@ func (x *ImageLayers) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImageLayers.ProtoReflect.Descriptor instead.
 func (*ImageLayers) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{14}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ImageLayers) GetImageRef() string {
@@ -1559,7 +1751,7 @@ type BakedLayer struct {
 
 func (x *BakedLayer) Reset() {
 	*x = BakedLayer{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[15]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1571,7 +1763,7 @@ func (x *BakedLayer) String() string {
 func (*BakedLayer) ProtoMessage() {}
 
 func (x *BakedLayer) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[15]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1584,7 +1776,7 @@ func (x *BakedLayer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BakedLayer.ProtoReflect.Descriptor instead.
 func (*BakedLayer) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{15}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *BakedLayer) GetImageRef() string {
@@ -1624,7 +1816,7 @@ type CreatePodResponse struct {
 
 func (x *CreatePodResponse) Reset() {
 	*x = CreatePodResponse{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[16]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1636,7 +1828,7 @@ func (x *CreatePodResponse) String() string {
 func (*CreatePodResponse) ProtoMessage() {}
 
 func (x *CreatePodResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[16]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1649,7 +1841,7 @@ func (x *CreatePodResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreatePodResponse.ProtoReflect.Descriptor instead.
 func (*CreatePodResponse) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{16}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CreatePodResponse) GetPod() *PodInfo {
@@ -1671,7 +1863,7 @@ type StartPodRequest struct {
 
 func (x *StartPodRequest) Reset() {
 	*x = StartPodRequest{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[17]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1683,7 +1875,7 @@ func (x *StartPodRequest) String() string {
 func (*StartPodRequest) ProtoMessage() {}
 
 func (x *StartPodRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[17]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1696,7 +1888,7 @@ func (x *StartPodRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartPodRequest.ProtoReflect.Descriptor instead.
 func (*StartPodRequest) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{17}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *StartPodRequest) GetPodId() string {
@@ -1721,7 +1913,7 @@ type StartPodResponse struct {
 
 func (x *StartPodResponse) Reset() {
 	*x = StartPodResponse{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[18]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1733,7 +1925,7 @@ func (x *StartPodResponse) String() string {
 func (*StartPodResponse) ProtoMessage() {}
 
 func (x *StartPodResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[18]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1746,7 +1938,7 @@ func (x *StartPodResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartPodResponse.ProtoReflect.Descriptor instead.
 func (*StartPodResponse) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{18}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{20}
 }
 
 type StopPodRequest struct {
@@ -1758,7 +1950,7 @@ type StopPodRequest struct {
 
 func (x *StopPodRequest) Reset() {
 	*x = StopPodRequest{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[19]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1770,7 +1962,7 @@ func (x *StopPodRequest) String() string {
 func (*StopPodRequest) ProtoMessage() {}
 
 func (x *StopPodRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[19]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1783,7 +1975,7 @@ func (x *StopPodRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopPodRequest.ProtoReflect.Descriptor instead.
 func (*StopPodRequest) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{19}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *StopPodRequest) GetPodId() string {
@@ -1801,7 +1993,7 @@ type StopPodResponse struct {
 
 func (x *StopPodResponse) Reset() {
 	*x = StopPodResponse{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[20]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1813,7 +2005,7 @@ func (x *StopPodResponse) String() string {
 func (*StopPodResponse) ProtoMessage() {}
 
 func (x *StopPodResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[20]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1826,7 +2018,7 @@ func (x *StopPodResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopPodResponse.ProtoReflect.Descriptor instead.
 func (*StopPodResponse) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{20}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{22}
 }
 
 type DeletePodRequest struct {
@@ -1838,7 +2030,7 @@ type DeletePodRequest struct {
 
 func (x *DeletePodRequest) Reset() {
 	*x = DeletePodRequest{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[21]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1850,7 +2042,7 @@ func (x *DeletePodRequest) String() string {
 func (*DeletePodRequest) ProtoMessage() {}
 
 func (x *DeletePodRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[21]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1863,7 +2055,7 @@ func (x *DeletePodRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePodRequest.ProtoReflect.Descriptor instead.
 func (*DeletePodRequest) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{21}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DeletePodRequest) GetPodId() string {
@@ -1881,7 +2073,7 @@ type DeletePodResponse struct {
 
 func (x *DeletePodResponse) Reset() {
 	*x = DeletePodResponse{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[22]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1893,7 +2085,7 @@ func (x *DeletePodResponse) String() string {
 func (*DeletePodResponse) ProtoMessage() {}
 
 func (x *DeletePodResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[22]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1906,7 +2098,7 @@ func (x *DeletePodResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeletePodResponse.ProtoReflect.Descriptor instead.
 func (*DeletePodResponse) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{22}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{24}
 }
 
 type GetPodRequest struct {
@@ -1918,7 +2110,7 @@ type GetPodRequest struct {
 
 func (x *GetPodRequest) Reset() {
 	*x = GetPodRequest{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[23]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1930,7 +2122,7 @@ func (x *GetPodRequest) String() string {
 func (*GetPodRequest) ProtoMessage() {}
 
 func (x *GetPodRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[23]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1943,7 +2135,7 @@ func (x *GetPodRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPodRequest.ProtoReflect.Descriptor instead.
 func (*GetPodRequest) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{23}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *GetPodRequest) GetPodId() string {
@@ -1961,7 +2153,7 @@ type ListPodsRequest struct {
 
 func (x *ListPodsRequest) Reset() {
 	*x = ListPodsRequest{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[24]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1973,7 +2165,7 @@ func (x *ListPodsRequest) String() string {
 func (*ListPodsRequest) ProtoMessage() {}
 
 func (x *ListPodsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[24]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1986,7 +2178,7 @@ func (x *ListPodsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPodsRequest.ProtoReflect.Descriptor instead.
 func (*ListPodsRequest) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{24}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{26}
 }
 
 type ListPodsResponse struct {
@@ -1998,7 +2190,7 @@ type ListPodsResponse struct {
 
 func (x *ListPodsResponse) Reset() {
 	*x = ListPodsResponse{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[25]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2010,7 +2202,7 @@ func (x *ListPodsResponse) String() string {
 func (*ListPodsResponse) ProtoMessage() {}
 
 func (x *ListPodsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[25]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2023,7 +2215,7 @@ func (x *ListPodsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPodsResponse.ProtoReflect.Descriptor instead.
 func (*ListPodsResponse) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{25}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ListPodsResponse) GetPods() []*PodInfo {
@@ -2043,7 +2235,7 @@ type StreamPodEventsRequest struct {
 
 func (x *StreamPodEventsRequest) Reset() {
 	*x = StreamPodEventsRequest{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[26]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2055,7 +2247,7 @@ func (x *StreamPodEventsRequest) String() string {
 func (*StreamPodEventsRequest) ProtoMessage() {}
 
 func (x *StreamPodEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[26]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2068,7 +2260,7 @@ func (x *StreamPodEventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamPodEventsRequest.ProtoReflect.Descriptor instead.
 func (*StreamPodEventsRequest) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{26}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *StreamPodEventsRequest) GetPodId() string {
@@ -2091,7 +2283,7 @@ type PodEvent struct {
 
 func (x *PodEvent) Reset() {
 	*x = PodEvent{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[27]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2103,7 +2295,7 @@ func (x *PodEvent) String() string {
 func (*PodEvent) ProtoMessage() {}
 
 func (x *PodEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[27]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2116,7 +2308,7 @@ func (x *PodEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PodEvent.ProtoReflect.Descriptor instead.
 func (*PodEvent) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{27}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *PodEvent) GetPodId() string {
@@ -2156,7 +2348,7 @@ type SuspendPodRequest struct {
 
 func (x *SuspendPodRequest) Reset() {
 	*x = SuspendPodRequest{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[28]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2168,7 +2360,7 @@ func (x *SuspendPodRequest) String() string {
 func (*SuspendPodRequest) ProtoMessage() {}
 
 func (x *SuspendPodRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[28]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2181,7 +2373,7 @@ func (x *SuspendPodRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SuspendPodRequest.ProtoReflect.Descriptor instead.
 func (*SuspendPodRequest) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{28}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *SuspendPodRequest) GetPodId() string {
@@ -2201,7 +2393,7 @@ type SuspendPodResponse struct {
 
 func (x *SuspendPodResponse) Reset() {
 	*x = SuspendPodResponse{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[29]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2213,7 +2405,7 @@ func (x *SuspendPodResponse) String() string {
 func (*SuspendPodResponse) ProtoMessage() {}
 
 func (x *SuspendPodResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[29]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2226,7 +2418,7 @@ func (x *SuspendPodResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SuspendPodResponse.ProtoReflect.Descriptor instead.
 func (*SuspendPodResponse) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{29}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *SuspendPodResponse) GetMemoryBytes() uint64 {
@@ -2245,7 +2437,7 @@ type ResumePodRequest struct {
 
 func (x *ResumePodRequest) Reset() {
 	*x = ResumePodRequest{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[30]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2257,7 +2449,7 @@ func (x *ResumePodRequest) String() string {
 func (*ResumePodRequest) ProtoMessage() {}
 
 func (x *ResumePodRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[30]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2270,7 +2462,7 @@ func (x *ResumePodRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumePodRequest.ProtoReflect.Descriptor instead.
 func (*ResumePodRequest) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{30}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ResumePodRequest) GetPodId() string {
@@ -2288,7 +2480,7 @@ type ResumePodResponse struct {
 
 func (x *ResumePodResponse) Reset() {
 	*x = ResumePodResponse{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[31]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2300,7 +2492,7 @@ func (x *ResumePodResponse) String() string {
 func (*ResumePodResponse) ProtoMessage() {}
 
 func (x *ResumePodResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[31]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2313,7 +2505,7 @@ func (x *ResumePodResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumePodResponse.ProtoReflect.Descriptor instead.
 func (*ResumePodResponse) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{31}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{33}
 }
 
 type HibernatePodRequest struct {
@@ -2334,7 +2526,7 @@ type HibernatePodRequest struct {
 
 func (x *HibernatePodRequest) Reset() {
 	*x = HibernatePodRequest{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[32]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2346,7 +2538,7 @@ func (x *HibernatePodRequest) String() string {
 func (*HibernatePodRequest) ProtoMessage() {}
 
 func (x *HibernatePodRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[32]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2359,7 +2551,7 @@ func (x *HibernatePodRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HibernatePodRequest.ProtoReflect.Descriptor instead.
 func (*HibernatePodRequest) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{32}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *HibernatePodRequest) GetPodId() string {
@@ -2396,7 +2588,7 @@ type HibernatePodResponse struct {
 
 func (x *HibernatePodResponse) Reset() {
 	*x = HibernatePodResponse{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[33]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2408,7 +2600,7 @@ func (x *HibernatePodResponse) String() string {
 func (*HibernatePodResponse) ProtoMessage() {}
 
 func (x *HibernatePodResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[33]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2421,7 +2613,7 @@ func (x *HibernatePodResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HibernatePodResponse.ProtoReflect.Descriptor instead.
 func (*HibernatePodResponse) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{33}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *HibernatePodResponse) GetCheckpoint() *Checkpoint {
@@ -2475,7 +2667,7 @@ type RestorePodRequest struct {
 
 func (x *RestorePodRequest) Reset() {
 	*x = RestorePodRequest{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[34]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2487,7 +2679,7 @@ func (x *RestorePodRequest) String() string {
 func (*RestorePodRequest) ProtoMessage() {}
 
 func (x *RestorePodRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[34]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2500,7 +2692,7 @@ func (x *RestorePodRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestorePodRequest.ProtoReflect.Descriptor instead.
 func (*RestorePodRequest) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{34}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *RestorePodRequest) GetPodId() string {
@@ -2564,7 +2756,7 @@ type RestorePodResponse struct {
 
 func (x *RestorePodResponse) Reset() {
 	*x = RestorePodResponse{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[35]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2576,7 +2768,7 @@ func (x *RestorePodResponse) String() string {
 func (*RestorePodResponse) ProtoMessage() {}
 
 func (x *RestorePodResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[35]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2589,7 +2781,7 @@ func (x *RestorePodResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestorePodResponse.ProtoReflect.Descriptor instead.
 func (*RestorePodResponse) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{35}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *RestorePodResponse) GetPod() *PodInfo {
@@ -2624,7 +2816,7 @@ type PodConsoleInput struct {
 
 func (x *PodConsoleInput) Reset() {
 	*x = PodConsoleInput{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[36]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2636,7 +2828,7 @@ func (x *PodConsoleInput) String() string {
 func (*PodConsoleInput) ProtoMessage() {}
 
 func (x *PodConsoleInput) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[36]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2649,7 +2841,7 @@ func (x *PodConsoleInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PodConsoleInput.ProtoReflect.Descriptor instead.
 func (*PodConsoleInput) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{36}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *PodConsoleInput) GetPodId() string {
@@ -2675,7 +2867,7 @@ type PodConsoleOutput struct {
 
 func (x *PodConsoleOutput) Reset() {
 	*x = PodConsoleOutput{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[37]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2687,7 +2879,7 @@ func (x *PodConsoleOutput) String() string {
 func (*PodConsoleOutput) ProtoMessage() {}
 
 func (x *PodConsoleOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[37]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2700,7 +2892,7 @@ func (x *PodConsoleOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PodConsoleOutput.ProtoReflect.Descriptor instead.
 func (*PodConsoleOutput) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{37}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *PodConsoleOutput) GetOutput() []byte {
@@ -2720,7 +2912,7 @@ type SetPodHttpBindingsRequest struct {
 
 func (x *SetPodHttpBindingsRequest) Reset() {
 	*x = SetPodHttpBindingsRequest{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[38]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2732,7 +2924,7 @@ func (x *SetPodHttpBindingsRequest) String() string {
 func (*SetPodHttpBindingsRequest) ProtoMessage() {}
 
 func (x *SetPodHttpBindingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[38]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2745,7 +2937,7 @@ func (x *SetPodHttpBindingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPodHttpBindingsRequest.ProtoReflect.Descriptor instead.
 func (*SetPodHttpBindingsRequest) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{38}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *SetPodHttpBindingsRequest) GetPodId() string {
@@ -2770,7 +2962,7 @@ type SetPodHttpBindingsResponse struct {
 
 func (x *SetPodHttpBindingsResponse) Reset() {
 	*x = SetPodHttpBindingsResponse{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[39]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2782,7 +2974,7 @@ func (x *SetPodHttpBindingsResponse) String() string {
 func (*SetPodHttpBindingsResponse) ProtoMessage() {}
 
 func (x *SetPodHttpBindingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[39]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2795,7 +2987,7 @@ func (x *SetPodHttpBindingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPodHttpBindingsResponse.ProtoReflect.Descriptor instead.
 func (*SetPodHttpBindingsResponse) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{39}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{41}
 }
 
 type SetPodTlsBindingsRequest struct {
@@ -2808,7 +3000,7 @@ type SetPodTlsBindingsRequest struct {
 
 func (x *SetPodTlsBindingsRequest) Reset() {
 	*x = SetPodTlsBindingsRequest{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[40]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2820,7 +3012,7 @@ func (x *SetPodTlsBindingsRequest) String() string {
 func (*SetPodTlsBindingsRequest) ProtoMessage() {}
 
 func (x *SetPodTlsBindingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[40]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2833,7 +3025,7 @@ func (x *SetPodTlsBindingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPodTlsBindingsRequest.ProtoReflect.Descriptor instead.
 func (*SetPodTlsBindingsRequest) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{40}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *SetPodTlsBindingsRequest) GetPodId() string {
@@ -2858,7 +3050,7 @@ type SetPodTlsBindingsResponse struct {
 
 func (x *SetPodTlsBindingsResponse) Reset() {
 	*x = SetPodTlsBindingsResponse{}
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[41]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2870,7 +3062,7 @@ func (x *SetPodTlsBindingsResponse) String() string {
 func (*SetPodTlsBindingsResponse) ProtoMessage() {}
 
 func (x *SetPodTlsBindingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_pod_v1_pod_proto_msgTypes[41]
+	mi := &file_feos_pod_v1_pod_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2883,14 +3075,36 @@ func (x *SetPodTlsBindingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetPodTlsBindingsResponse.ProtoReflect.Descriptor instead.
 func (*SetPodTlsBindingsResponse) Descriptor() ([]byte, []int) {
-	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{41}
+	return file_feos_pod_v1_pod_proto_rawDescGZIP(), []int{43}
 }
 
 var File_feos_pod_v1_pod_proto protoreflect.FileDescriptor
 
 const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\n" +
-	"\x15feos/pod/v1/pod.proto\x12\vfeos.pod.v1\"\x9b\x05\n" +
+	"\x15feos/pod/v1/pod.proto\x12\vfeos.pod.v1\"\x99\x01\n" +
+	"\x17SweepObjectStoreRequest\x12\x1d\n" +
+	"\n" +
+	"live_heads\x18\x01 \x03(\tR\tliveHeads\x12\x1f\n" +
+	"\vlive_layers\x18\x02 \x03(\tR\n" +
+	"liveLayers\x12\x17\n" +
+	"\adry_run\x18\x03 \x01(\bR\x06dryRun\x12%\n" +
+	"\x0ebudget_seconds\x18\x04 \x01(\x04R\rbudgetSeconds\"\xac\x03\n" +
+	"\x18SweepObjectStoreResponse\x122\n" +
+	"\x15snapshot_objects_seen\x18\x01 \x01(\x04R\x13snapshotObjectsSeen\x128\n" +
+	"\x18snapshot_objects_deleted\x18\x02 \x01(\x04R\x16snapshotObjectsDeleted\x12\x1f\n" +
+	"\vlayers_seen\x18\x03 \x01(\x04R\n" +
+	"layersSeen\x12%\n" +
+	"\x0elayers_deleted\x18\x04 \x01(\x04R\rlayersDeleted\x12\x1f\n" +
+	"\vchunks_seen\x18\x05 \x01(\x04R\n" +
+	"chunksSeen\x12%\n" +
+	"\x0echunks_deleted\x18\x06 \x01(\x04R\rchunksDeleted\x12#\n" +
+	"\rbytes_deleted\x18\a \x01(\x04R\fbytesDeleted\x12)\n" +
+	"\x10budget_exhausted\x18\b \x01(\bR\x0fbudgetExhausted\x12\x1f\n" +
+	"\vsample_keys\x18\t \x03(\tR\n" +
+	"sampleKeys\x12!\n" +
+	"\fkeys_deleted\x18\n" +
+	" \x01(\x04R\vkeysDeleted\"\x9b\x05\n" +
 	"\aPodSpec\x124\n" +
 	"\tresources\x18\x01 \x01(\v2\x16.feos.pod.v1.ResourcesR\tresources\x12:\n" +
 	"\n" +
@@ -3123,7 +3337,7 @@ const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\x18CONTAINER_STATE_CREATING\x10\x01\x12\x1b\n" +
 	"\x17CONTAINER_STATE_CREATED\x10\x02\x12\x1b\n" +
 	"\x17CONTAINER_STATE_RUNNING\x10\x03\x12\x1a\n" +
-	"\x16CONTAINER_STATE_EXITED\x10\x042\xe8\b\n" +
+	"\x16CONTAINER_STATE_EXITED\x10\x042\xc9\t\n" +
 	"\n" +
 	"PodService\x12J\n" +
 	"\tCreatePod\x12\x1d.feos.pod.v1.CreatePodRequest\x1a\x1e.feos.pod.v1.CreatePodResponse\x12G\n" +
@@ -3141,7 +3355,8 @@ const file_feos_pod_v1_pod_proto_rawDesc = "" +
 	"\fHibernatePod\x12 .feos.pod.v1.HibernatePodRequest\x1a!.feos.pod.v1.HibernatePodResponse\x12M\n" +
 	"\n" +
 	"RestorePod\x12\x1e.feos.pod.v1.RestorePodRequest\x1a\x1f.feos.pod.v1.RestorePodResponse\x12S\n" +
-	"\x10StreamPodConsole\x12\x1c.feos.pod.v1.PodConsoleInput\x1a\x1d.feos.pod.v1.PodConsoleOutput(\x010\x01b\x06proto3"
+	"\x10StreamPodConsole\x12\x1c.feos.pod.v1.PodConsoleInput\x1a\x1d.feos.pod.v1.PodConsoleOutput(\x010\x01\x12_\n" +
+	"\x10SweepObjectStore\x12$.feos.pod.v1.SweepObjectStoreRequest\x1a%.feos.pod.v1.SweepObjectStoreResponseb\x06proto3"
 
 var (
 	file_feos_pod_v1_pod_proto_rawDescOnce sync.Once
@@ -3156,125 +3371,129 @@ func file_feos_pod_v1_pod_proto_rawDescGZIP() []byte {
 }
 
 var file_feos_pod_v1_pod_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_feos_pod_v1_pod_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
+var file_feos_pod_v1_pod_proto_msgTypes = make([]protoimpl.MessageInfo, 50)
 var file_feos_pod_v1_pod_proto_goTypes = []any{
 	(PodState)(0),                      // 0: feos.pod.v1.PodState
 	(HibernationPhase)(0),              // 1: feos.pod.v1.HibernationPhase
 	(ContainerState)(0),                // 2: feos.pod.v1.ContainerState
-	(*PodSpec)(nil),                    // 3: feos.pod.v1.PodSpec
-	(*TlsBinding)(nil),                 // 4: feos.pod.v1.TlsBinding
-	(*PodHttpBindings)(nil),            // 5: feos.pod.v1.PodHttpBindings
-	(*PodVolume)(nil),                  // 6: feos.pod.v1.PodVolume
-	(*Resources)(nil),                  // 7: feos.pod.v1.Resources
-	(*ContainerSpec)(nil),              // 8: feos.pod.v1.ContainerSpec
-	(*VolumeMount)(nil),                // 9: feos.pod.v1.VolumeMount
-	(*PodNetwork)(nil),                 // 10: feos.pod.v1.PodNetwork
-	(*PodInfo)(nil),                    // 11: feos.pod.v1.PodInfo
-	(*Hibernation)(nil),                // 12: feos.pod.v1.Hibernation
-	(*Checkpoint)(nil),                 // 13: feos.pod.v1.Checkpoint
-	(*MicroVm)(nil),                    // 14: feos.pod.v1.MicroVm
-	(*ContainerStatus)(nil),            // 15: feos.pod.v1.ContainerStatus
-	(*CreatePodRequest)(nil),           // 16: feos.pod.v1.CreatePodRequest
-	(*ImageLayers)(nil),                // 17: feos.pod.v1.ImageLayers
-	(*BakedLayer)(nil),                 // 18: feos.pod.v1.BakedLayer
-	(*CreatePodResponse)(nil),          // 19: feos.pod.v1.CreatePodResponse
-	(*StartPodRequest)(nil),            // 20: feos.pod.v1.StartPodRequest
-	(*StartPodResponse)(nil),           // 21: feos.pod.v1.StartPodResponse
-	(*StopPodRequest)(nil),             // 22: feos.pod.v1.StopPodRequest
-	(*StopPodResponse)(nil),            // 23: feos.pod.v1.StopPodResponse
-	(*DeletePodRequest)(nil),           // 24: feos.pod.v1.DeletePodRequest
-	(*DeletePodResponse)(nil),          // 25: feos.pod.v1.DeletePodResponse
-	(*GetPodRequest)(nil),              // 26: feos.pod.v1.GetPodRequest
-	(*ListPodsRequest)(nil),            // 27: feos.pod.v1.ListPodsRequest
-	(*ListPodsResponse)(nil),           // 28: feos.pod.v1.ListPodsResponse
-	(*StreamPodEventsRequest)(nil),     // 29: feos.pod.v1.StreamPodEventsRequest
-	(*PodEvent)(nil),                   // 30: feos.pod.v1.PodEvent
-	(*SuspendPodRequest)(nil),          // 31: feos.pod.v1.SuspendPodRequest
-	(*SuspendPodResponse)(nil),         // 32: feos.pod.v1.SuspendPodResponse
-	(*ResumePodRequest)(nil),           // 33: feos.pod.v1.ResumePodRequest
-	(*ResumePodResponse)(nil),          // 34: feos.pod.v1.ResumePodResponse
-	(*HibernatePodRequest)(nil),        // 35: feos.pod.v1.HibernatePodRequest
-	(*HibernatePodResponse)(nil),       // 36: feos.pod.v1.HibernatePodResponse
-	(*RestorePodRequest)(nil),          // 37: feos.pod.v1.RestorePodRequest
-	(*RestorePodResponse)(nil),         // 38: feos.pod.v1.RestorePodResponse
-	(*PodConsoleInput)(nil),            // 39: feos.pod.v1.PodConsoleInput
-	(*PodConsoleOutput)(nil),           // 40: feos.pod.v1.PodConsoleOutput
-	(*SetPodHttpBindingsRequest)(nil),  // 41: feos.pod.v1.SetPodHttpBindingsRequest
-	(*SetPodHttpBindingsResponse)(nil), // 42: feos.pod.v1.SetPodHttpBindingsResponse
-	(*SetPodTlsBindingsRequest)(nil),   // 43: feos.pod.v1.SetPodTlsBindingsRequest
-	(*SetPodTlsBindingsResponse)(nil),  // 44: feos.pod.v1.SetPodTlsBindingsResponse
-	nil,                                // 45: feos.pod.v1.PodSpec.LabelsEntry
-	nil,                                // 46: feos.pod.v1.PodSpec.MetadataEntry
-	nil,                                // 47: feos.pod.v1.ContainerSpec.EnvEntry
-	nil,                                // 48: feos.pod.v1.PodInfo.LogLabelsEntry
-	nil,                                // 49: feos.pod.v1.CreatePodRequest.LogLabelsEntry
-	nil,                                // 50: feos.pod.v1.RestorePodRequest.LogLabelsEntry
+	(*SweepObjectStoreRequest)(nil),    // 3: feos.pod.v1.SweepObjectStoreRequest
+	(*SweepObjectStoreResponse)(nil),   // 4: feos.pod.v1.SweepObjectStoreResponse
+	(*PodSpec)(nil),                    // 5: feos.pod.v1.PodSpec
+	(*TlsBinding)(nil),                 // 6: feos.pod.v1.TlsBinding
+	(*PodHttpBindings)(nil),            // 7: feos.pod.v1.PodHttpBindings
+	(*PodVolume)(nil),                  // 8: feos.pod.v1.PodVolume
+	(*Resources)(nil),                  // 9: feos.pod.v1.Resources
+	(*ContainerSpec)(nil),              // 10: feos.pod.v1.ContainerSpec
+	(*VolumeMount)(nil),                // 11: feos.pod.v1.VolumeMount
+	(*PodNetwork)(nil),                 // 12: feos.pod.v1.PodNetwork
+	(*PodInfo)(nil),                    // 13: feos.pod.v1.PodInfo
+	(*Hibernation)(nil),                // 14: feos.pod.v1.Hibernation
+	(*Checkpoint)(nil),                 // 15: feos.pod.v1.Checkpoint
+	(*MicroVm)(nil),                    // 16: feos.pod.v1.MicroVm
+	(*ContainerStatus)(nil),            // 17: feos.pod.v1.ContainerStatus
+	(*CreatePodRequest)(nil),           // 18: feos.pod.v1.CreatePodRequest
+	(*ImageLayers)(nil),                // 19: feos.pod.v1.ImageLayers
+	(*BakedLayer)(nil),                 // 20: feos.pod.v1.BakedLayer
+	(*CreatePodResponse)(nil),          // 21: feos.pod.v1.CreatePodResponse
+	(*StartPodRequest)(nil),            // 22: feos.pod.v1.StartPodRequest
+	(*StartPodResponse)(nil),           // 23: feos.pod.v1.StartPodResponse
+	(*StopPodRequest)(nil),             // 24: feos.pod.v1.StopPodRequest
+	(*StopPodResponse)(nil),            // 25: feos.pod.v1.StopPodResponse
+	(*DeletePodRequest)(nil),           // 26: feos.pod.v1.DeletePodRequest
+	(*DeletePodResponse)(nil),          // 27: feos.pod.v1.DeletePodResponse
+	(*GetPodRequest)(nil),              // 28: feos.pod.v1.GetPodRequest
+	(*ListPodsRequest)(nil),            // 29: feos.pod.v1.ListPodsRequest
+	(*ListPodsResponse)(nil),           // 30: feos.pod.v1.ListPodsResponse
+	(*StreamPodEventsRequest)(nil),     // 31: feos.pod.v1.StreamPodEventsRequest
+	(*PodEvent)(nil),                   // 32: feos.pod.v1.PodEvent
+	(*SuspendPodRequest)(nil),          // 33: feos.pod.v1.SuspendPodRequest
+	(*SuspendPodResponse)(nil),         // 34: feos.pod.v1.SuspendPodResponse
+	(*ResumePodRequest)(nil),           // 35: feos.pod.v1.ResumePodRequest
+	(*ResumePodResponse)(nil),          // 36: feos.pod.v1.ResumePodResponse
+	(*HibernatePodRequest)(nil),        // 37: feos.pod.v1.HibernatePodRequest
+	(*HibernatePodResponse)(nil),       // 38: feos.pod.v1.HibernatePodResponse
+	(*RestorePodRequest)(nil),          // 39: feos.pod.v1.RestorePodRequest
+	(*RestorePodResponse)(nil),         // 40: feos.pod.v1.RestorePodResponse
+	(*PodConsoleInput)(nil),            // 41: feos.pod.v1.PodConsoleInput
+	(*PodConsoleOutput)(nil),           // 42: feos.pod.v1.PodConsoleOutput
+	(*SetPodHttpBindingsRequest)(nil),  // 43: feos.pod.v1.SetPodHttpBindingsRequest
+	(*SetPodHttpBindingsResponse)(nil), // 44: feos.pod.v1.SetPodHttpBindingsResponse
+	(*SetPodTlsBindingsRequest)(nil),   // 45: feos.pod.v1.SetPodTlsBindingsRequest
+	(*SetPodTlsBindingsResponse)(nil),  // 46: feos.pod.v1.SetPodTlsBindingsResponse
+	nil,                                // 47: feos.pod.v1.PodSpec.LabelsEntry
+	nil,                                // 48: feos.pod.v1.PodSpec.MetadataEntry
+	nil,                                // 49: feos.pod.v1.ContainerSpec.EnvEntry
+	nil,                                // 50: feos.pod.v1.PodInfo.LogLabelsEntry
+	nil,                                // 51: feos.pod.v1.CreatePodRequest.LogLabelsEntry
+	nil,                                // 52: feos.pod.v1.RestorePodRequest.LogLabelsEntry
 }
 var file_feos_pod_v1_pod_proto_depIdxs = []int32{
-	7,  // 0: feos.pod.v1.PodSpec.resources:type_name -> feos.pod.v1.Resources
-	8,  // 1: feos.pod.v1.PodSpec.containers:type_name -> feos.pod.v1.ContainerSpec
-	10, // 2: feos.pod.v1.PodSpec.network:type_name -> feos.pod.v1.PodNetwork
-	45, // 3: feos.pod.v1.PodSpec.labels:type_name -> feos.pod.v1.PodSpec.LabelsEntry
-	6,  // 4: feos.pod.v1.PodSpec.volumes:type_name -> feos.pod.v1.PodVolume
-	46, // 5: feos.pod.v1.PodSpec.metadata:type_name -> feos.pod.v1.PodSpec.MetadataEntry
-	5,  // 6: feos.pod.v1.PodSpec.http_bindings:type_name -> feos.pod.v1.PodHttpBindings
-	4,  // 7: feos.pod.v1.PodSpec.tls_bindings:type_name -> feos.pod.v1.TlsBinding
-	47, // 8: feos.pod.v1.ContainerSpec.env:type_name -> feos.pod.v1.ContainerSpec.EnvEntry
-	9,  // 9: feos.pod.v1.ContainerSpec.volume_mounts:type_name -> feos.pod.v1.VolumeMount
-	3,  // 10: feos.pod.v1.PodInfo.spec:type_name -> feos.pod.v1.PodSpec
+	9,  // 0: feos.pod.v1.PodSpec.resources:type_name -> feos.pod.v1.Resources
+	10, // 1: feos.pod.v1.PodSpec.containers:type_name -> feos.pod.v1.ContainerSpec
+	12, // 2: feos.pod.v1.PodSpec.network:type_name -> feos.pod.v1.PodNetwork
+	47, // 3: feos.pod.v1.PodSpec.labels:type_name -> feos.pod.v1.PodSpec.LabelsEntry
+	8,  // 4: feos.pod.v1.PodSpec.volumes:type_name -> feos.pod.v1.PodVolume
+	48, // 5: feos.pod.v1.PodSpec.metadata:type_name -> feos.pod.v1.PodSpec.MetadataEntry
+	7,  // 6: feos.pod.v1.PodSpec.http_bindings:type_name -> feos.pod.v1.PodHttpBindings
+	6,  // 7: feos.pod.v1.PodSpec.tls_bindings:type_name -> feos.pod.v1.TlsBinding
+	49, // 8: feos.pod.v1.ContainerSpec.env:type_name -> feos.pod.v1.ContainerSpec.EnvEntry
+	11, // 9: feos.pod.v1.ContainerSpec.volume_mounts:type_name -> feos.pod.v1.VolumeMount
+	5,  // 10: feos.pod.v1.PodInfo.spec:type_name -> feos.pod.v1.PodSpec
 	0,  // 11: feos.pod.v1.PodInfo.state:type_name -> feos.pod.v1.PodState
-	15, // 12: feos.pod.v1.PodInfo.containers:type_name -> feos.pod.v1.ContainerStatus
-	14, // 13: feos.pod.v1.PodInfo.microvm:type_name -> feos.pod.v1.MicroVm
-	13, // 14: feos.pod.v1.PodInfo.checkpoint:type_name -> feos.pod.v1.Checkpoint
-	12, // 15: feos.pod.v1.PodInfo.hibernation:type_name -> feos.pod.v1.Hibernation
-	17, // 16: feos.pod.v1.PodInfo.image_layers:type_name -> feos.pod.v1.ImageLayers
-	18, // 17: feos.pod.v1.PodInfo.disk:type_name -> feos.pod.v1.BakedLayer
-	18, // 18: feos.pod.v1.PodInfo.baked:type_name -> feos.pod.v1.BakedLayer
-	48, // 19: feos.pod.v1.PodInfo.log_labels:type_name -> feos.pod.v1.PodInfo.LogLabelsEntry
+	17, // 12: feos.pod.v1.PodInfo.containers:type_name -> feos.pod.v1.ContainerStatus
+	16, // 13: feos.pod.v1.PodInfo.microvm:type_name -> feos.pod.v1.MicroVm
+	15, // 14: feos.pod.v1.PodInfo.checkpoint:type_name -> feos.pod.v1.Checkpoint
+	14, // 15: feos.pod.v1.PodInfo.hibernation:type_name -> feos.pod.v1.Hibernation
+	19, // 16: feos.pod.v1.PodInfo.image_layers:type_name -> feos.pod.v1.ImageLayers
+	20, // 17: feos.pod.v1.PodInfo.disk:type_name -> feos.pod.v1.BakedLayer
+	20, // 18: feos.pod.v1.PodInfo.baked:type_name -> feos.pod.v1.BakedLayer
+	50, // 19: feos.pod.v1.PodInfo.log_labels:type_name -> feos.pod.v1.PodInfo.LogLabelsEntry
 	1,  // 20: feos.pod.v1.Hibernation.phase:type_name -> feos.pod.v1.HibernationPhase
 	2,  // 21: feos.pod.v1.ContainerStatus.state:type_name -> feos.pod.v1.ContainerState
-	3,  // 22: feos.pod.v1.CreatePodRequest.spec:type_name -> feos.pod.v1.PodSpec
-	17, // 23: feos.pod.v1.CreatePodRequest.image_layers:type_name -> feos.pod.v1.ImageLayers
-	49, // 24: feos.pod.v1.CreatePodRequest.log_labels:type_name -> feos.pod.v1.CreatePodRequest.LogLabelsEntry
-	18, // 25: feos.pod.v1.ImageLayers.layers:type_name -> feos.pod.v1.BakedLayer
-	11, // 26: feos.pod.v1.CreatePodResponse.pod:type_name -> feos.pod.v1.PodInfo
-	11, // 27: feos.pod.v1.ListPodsResponse.pods:type_name -> feos.pod.v1.PodInfo
+	5,  // 22: feos.pod.v1.CreatePodRequest.spec:type_name -> feos.pod.v1.PodSpec
+	19, // 23: feos.pod.v1.CreatePodRequest.image_layers:type_name -> feos.pod.v1.ImageLayers
+	51, // 24: feos.pod.v1.CreatePodRequest.log_labels:type_name -> feos.pod.v1.CreatePodRequest.LogLabelsEntry
+	20, // 25: feos.pod.v1.ImageLayers.layers:type_name -> feos.pod.v1.BakedLayer
+	13, // 26: feos.pod.v1.CreatePodResponse.pod:type_name -> feos.pod.v1.PodInfo
+	13, // 27: feos.pod.v1.ListPodsResponse.pods:type_name -> feos.pod.v1.PodInfo
 	0,  // 28: feos.pod.v1.PodEvent.state:type_name -> feos.pod.v1.PodState
-	13, // 29: feos.pod.v1.HibernatePodResponse.checkpoint:type_name -> feos.pod.v1.Checkpoint
-	50, // 30: feos.pod.v1.RestorePodRequest.log_labels:type_name -> feos.pod.v1.RestorePodRequest.LogLabelsEntry
-	11, // 31: feos.pod.v1.RestorePodResponse.pod:type_name -> feos.pod.v1.PodInfo
-	5,  // 32: feos.pod.v1.SetPodHttpBindingsRequest.http_bindings:type_name -> feos.pod.v1.PodHttpBindings
-	4,  // 33: feos.pod.v1.SetPodTlsBindingsRequest.tls_bindings:type_name -> feos.pod.v1.TlsBinding
-	16, // 34: feos.pod.v1.PodService.CreatePod:input_type -> feos.pod.v1.CreatePodRequest
-	20, // 35: feos.pod.v1.PodService.StartPod:input_type -> feos.pod.v1.StartPodRequest
-	22, // 36: feos.pod.v1.PodService.StopPod:input_type -> feos.pod.v1.StopPodRequest
-	24, // 37: feos.pod.v1.PodService.DeletePod:input_type -> feos.pod.v1.DeletePodRequest
-	26, // 38: feos.pod.v1.PodService.GetPod:input_type -> feos.pod.v1.GetPodRequest
-	27, // 39: feos.pod.v1.PodService.ListPods:input_type -> feos.pod.v1.ListPodsRequest
-	29, // 40: feos.pod.v1.PodService.StreamPodEvents:input_type -> feos.pod.v1.StreamPodEventsRequest
-	31, // 41: feos.pod.v1.PodService.SuspendPod:input_type -> feos.pod.v1.SuspendPodRequest
-	33, // 42: feos.pod.v1.PodService.ResumePod:input_type -> feos.pod.v1.ResumePodRequest
-	41, // 43: feos.pod.v1.PodService.SetPodHttpBindings:input_type -> feos.pod.v1.SetPodHttpBindingsRequest
-	43, // 44: feos.pod.v1.PodService.SetPodTlsBindings:input_type -> feos.pod.v1.SetPodTlsBindingsRequest
-	35, // 45: feos.pod.v1.PodService.HibernatePod:input_type -> feos.pod.v1.HibernatePodRequest
-	37, // 46: feos.pod.v1.PodService.RestorePod:input_type -> feos.pod.v1.RestorePodRequest
-	39, // 47: feos.pod.v1.PodService.StreamPodConsole:input_type -> feos.pod.v1.PodConsoleInput
-	19, // 48: feos.pod.v1.PodService.CreatePod:output_type -> feos.pod.v1.CreatePodResponse
-	21, // 49: feos.pod.v1.PodService.StartPod:output_type -> feos.pod.v1.StartPodResponse
-	23, // 50: feos.pod.v1.PodService.StopPod:output_type -> feos.pod.v1.StopPodResponse
-	25, // 51: feos.pod.v1.PodService.DeletePod:output_type -> feos.pod.v1.DeletePodResponse
-	11, // 52: feos.pod.v1.PodService.GetPod:output_type -> feos.pod.v1.PodInfo
-	28, // 53: feos.pod.v1.PodService.ListPods:output_type -> feos.pod.v1.ListPodsResponse
-	30, // 54: feos.pod.v1.PodService.StreamPodEvents:output_type -> feos.pod.v1.PodEvent
-	32, // 55: feos.pod.v1.PodService.SuspendPod:output_type -> feos.pod.v1.SuspendPodResponse
-	34, // 56: feos.pod.v1.PodService.ResumePod:output_type -> feos.pod.v1.ResumePodResponse
-	42, // 57: feos.pod.v1.PodService.SetPodHttpBindings:output_type -> feos.pod.v1.SetPodHttpBindingsResponse
-	44, // 58: feos.pod.v1.PodService.SetPodTlsBindings:output_type -> feos.pod.v1.SetPodTlsBindingsResponse
-	36, // 59: feos.pod.v1.PodService.HibernatePod:output_type -> feos.pod.v1.HibernatePodResponse
-	38, // 60: feos.pod.v1.PodService.RestorePod:output_type -> feos.pod.v1.RestorePodResponse
-	40, // 61: feos.pod.v1.PodService.StreamPodConsole:output_type -> feos.pod.v1.PodConsoleOutput
-	48, // [48:62] is the sub-list for method output_type
-	34, // [34:48] is the sub-list for method input_type
+	15, // 29: feos.pod.v1.HibernatePodResponse.checkpoint:type_name -> feos.pod.v1.Checkpoint
+	52, // 30: feos.pod.v1.RestorePodRequest.log_labels:type_name -> feos.pod.v1.RestorePodRequest.LogLabelsEntry
+	13, // 31: feos.pod.v1.RestorePodResponse.pod:type_name -> feos.pod.v1.PodInfo
+	7,  // 32: feos.pod.v1.SetPodHttpBindingsRequest.http_bindings:type_name -> feos.pod.v1.PodHttpBindings
+	6,  // 33: feos.pod.v1.SetPodTlsBindingsRequest.tls_bindings:type_name -> feos.pod.v1.TlsBinding
+	18, // 34: feos.pod.v1.PodService.CreatePod:input_type -> feos.pod.v1.CreatePodRequest
+	22, // 35: feos.pod.v1.PodService.StartPod:input_type -> feos.pod.v1.StartPodRequest
+	24, // 36: feos.pod.v1.PodService.StopPod:input_type -> feos.pod.v1.StopPodRequest
+	26, // 37: feos.pod.v1.PodService.DeletePod:input_type -> feos.pod.v1.DeletePodRequest
+	28, // 38: feos.pod.v1.PodService.GetPod:input_type -> feos.pod.v1.GetPodRequest
+	29, // 39: feos.pod.v1.PodService.ListPods:input_type -> feos.pod.v1.ListPodsRequest
+	31, // 40: feos.pod.v1.PodService.StreamPodEvents:input_type -> feos.pod.v1.StreamPodEventsRequest
+	33, // 41: feos.pod.v1.PodService.SuspendPod:input_type -> feos.pod.v1.SuspendPodRequest
+	35, // 42: feos.pod.v1.PodService.ResumePod:input_type -> feos.pod.v1.ResumePodRequest
+	43, // 43: feos.pod.v1.PodService.SetPodHttpBindings:input_type -> feos.pod.v1.SetPodHttpBindingsRequest
+	45, // 44: feos.pod.v1.PodService.SetPodTlsBindings:input_type -> feos.pod.v1.SetPodTlsBindingsRequest
+	37, // 45: feos.pod.v1.PodService.HibernatePod:input_type -> feos.pod.v1.HibernatePodRequest
+	39, // 46: feos.pod.v1.PodService.RestorePod:input_type -> feos.pod.v1.RestorePodRequest
+	41, // 47: feos.pod.v1.PodService.StreamPodConsole:input_type -> feos.pod.v1.PodConsoleInput
+	3,  // 48: feos.pod.v1.PodService.SweepObjectStore:input_type -> feos.pod.v1.SweepObjectStoreRequest
+	21, // 49: feos.pod.v1.PodService.CreatePod:output_type -> feos.pod.v1.CreatePodResponse
+	23, // 50: feos.pod.v1.PodService.StartPod:output_type -> feos.pod.v1.StartPodResponse
+	25, // 51: feos.pod.v1.PodService.StopPod:output_type -> feos.pod.v1.StopPodResponse
+	27, // 52: feos.pod.v1.PodService.DeletePod:output_type -> feos.pod.v1.DeletePodResponse
+	13, // 53: feos.pod.v1.PodService.GetPod:output_type -> feos.pod.v1.PodInfo
+	30, // 54: feos.pod.v1.PodService.ListPods:output_type -> feos.pod.v1.ListPodsResponse
+	32, // 55: feos.pod.v1.PodService.StreamPodEvents:output_type -> feos.pod.v1.PodEvent
+	34, // 56: feos.pod.v1.PodService.SuspendPod:output_type -> feos.pod.v1.SuspendPodResponse
+	36, // 57: feos.pod.v1.PodService.ResumePod:output_type -> feos.pod.v1.ResumePodResponse
+	44, // 58: feos.pod.v1.PodService.SetPodHttpBindings:output_type -> feos.pod.v1.SetPodHttpBindingsResponse
+	46, // 59: feos.pod.v1.PodService.SetPodTlsBindings:output_type -> feos.pod.v1.SetPodTlsBindingsResponse
+	38, // 60: feos.pod.v1.PodService.HibernatePod:output_type -> feos.pod.v1.HibernatePodResponse
+	40, // 61: feos.pod.v1.PodService.RestorePod:output_type -> feos.pod.v1.RestorePodResponse
+	42, // 62: feos.pod.v1.PodService.StreamPodConsole:output_type -> feos.pod.v1.PodConsoleOutput
+	4,  // 63: feos.pod.v1.PodService.SweepObjectStore:output_type -> feos.pod.v1.SweepObjectStoreResponse
+	49, // [49:64] is the sub-list for method output_type
+	34, // [34:49] is the sub-list for method input_type
 	34, // [34:34] is the sub-list for extension type_name
 	34, // [34:34] is the sub-list for extension extendee
 	0,  // [0:34] is the sub-list for field type_name
@@ -3285,14 +3504,14 @@ func file_feos_pod_v1_pod_proto_init() {
 	if File_feos_pod_v1_pod_proto != nil {
 		return
 	}
-	file_feos_pod_v1_pod_proto_msgTypes[12].OneofWrappers = []any{}
+	file_feos_pod_v1_pod_proto_msgTypes[14].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_feos_pod_v1_pod_proto_rawDesc), len(file_feos_pod_v1_pod_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   48,
+			NumMessages:   50,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

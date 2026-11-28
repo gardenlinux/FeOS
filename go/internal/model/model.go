@@ -64,6 +64,10 @@ const (
 	StateFailed      = "failed"
 	StateUnknown     = "unknown"
 	StateLost        = "lost"
+	// StateExpired is a caller's sandbox that was idle for its time (ADR
+	// 0065): its row stays, its pod and its checkpoint are gone, and it is
+	// never resumed.
+	StateExpired = "expired"
 )
 
 // The statuses of a node (nodes.status).
@@ -75,8 +79,11 @@ const (
 )
 
 var (
-	ErrNotFound        = errors.New("no such sandbox")
-	ErrLost            = errors.New("sandbox lost")
+	ErrNotFound = errors.New("no such sandbox")
+	ErrLost     = errors.New("sandbox lost")
+	// ErrExpired is a sandbox that expired (ADR 0065): it has nothing to
+	// resume, and only reading and deleting it are left.
+	ErrExpired         = errors.New("sandbox expired")
 	ErrNoCapacity      = errors.New("no capacity")      // wrapped with the gates; retryable
 	ErrNodeUnavailable = errors.New("node unavailable") // wrapped with the node and cause; retryable
 	ErrBusy            = errors.New("an op is in flight")

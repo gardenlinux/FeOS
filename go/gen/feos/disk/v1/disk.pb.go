@@ -1512,7 +1512,9 @@ type SweepRequest struct {
 	BudgetSeconds uint64 `protobuf:"varint,5,opt,name=budget_seconds,json=budgetSeconds,proto3" json:"budget_seconds,omitempty"`
 	// Tests only: no grace at all. Never against a bucket in use, where the
 	// grace protects uploads in flight.
-	NoGrace       bool `protobuf:"varint,6,opt,name=no_grace,json=noGrace,proto3" json:"no_grace,omitempty"`
+	NoGrace bool `protobuf:"varint,6,opt,name=no_grace,json=noGrace,proto3" json:"no_grace,omitempty"`
+	// At most this many keys in the report's deleted_keys; 0: all of them.
+	MaxKeys       uint32 `protobuf:"varint,7,opt,name=max_keys,json=maxKeys,proto3" json:"max_keys,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1589,6 +1591,13 @@ func (x *SweepRequest) GetNoGrace() bool {
 	return false
 }
 
+func (x *SweepRequest) GetMaxKeys() uint32 {
+	if x != nil {
+		return x.MaxKeys
+	}
+	return 0
+}
+
 type SweepReport struct {
 	state                  protoimpl.MessageState `protogen:"open.v1"`
 	SnapshotObjectsDeleted uint64                 `protobuf:"varint,1,opt,name=snapshot_objects_deleted,json=snapshotObjectsDeleted,proto3" json:"snapshot_objects_deleted,omitempty"`
@@ -1600,8 +1609,11 @@ type SweepReport struct {
 	LayersSeen          uint64 `protobuf:"varint,6,opt,name=layers_seen,json=layersSeen,proto3" json:"layers_seen,omitempty"`
 	ChunksSeen          uint64 `protobuf:"varint,7,opt,name=chunks_seen,json=chunksSeen,proto3" json:"chunks_seen,omitempty"`
 	BudgetExhausted     bool   `protobuf:"varint,8,opt,name=budget_exhausted,json=budgetExhausted,proto3" json:"budget_exhausted,omitempty"`
-	// The keys deleted, or with dry_run the keys that would be.
-	DeletedKeys   []string `protobuf:"bytes,9,rep,name=deleted_keys,json=deletedKeys,proto3" json:"deleted_keys,omitempty"`
+	// The keys deleted, or with dry_run the keys that would be: the first
+	// max_keys of them when the request set it.
+	DeletedKeys []string `protobuf:"bytes,9,rep,name=deleted_keys,json=deletedKeys,proto3" json:"deleted_keys,omitempty"`
+	// All the keys deleted (or that would be), also those left out.
+	KeysDeleted   uint64 `protobuf:"varint,10,opt,name=keys_deleted,json=keysDeleted,proto3" json:"keys_deleted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1697,6 +1709,13 @@ func (x *SweepReport) GetDeletedKeys() []string {
 		return x.DeletedKeys
 	}
 	return nil
+}
+
+func (x *SweepReport) GetKeysDeleted() uint64 {
+	if x != nil {
+		return x.KeysDeleted
+	}
+	return 0
 }
 
 type OpenMemoryRequest struct {
@@ -2540,7 +2559,7 @@ const file_feos_disk_v1_disk_proto_rawDesc = "" +
 	"\x0fcomplete_layers\x18\x01 \x03(\tR\x0ecompleteLayers\x12'\n" +
 	"\x0fdangling_layers\x18\x02 \x03(\tR\x0edanglingLayers\x12%\n" +
 	"\x0egarbage_chunks\x18\x03 \x03(\tR\rgarbageChunks\x12#\n" +
-	"\rgarbage_bytes\x18\x04 \x01(\x04R\fgarbageBytes\"\xce\x01\n" +
+	"\rgarbage_bytes\x18\x04 \x01(\x04R\fgarbageBytes\"\xe9\x01\n" +
 	"\fSweepRequest\x12\x1d\n" +
 	"\n" +
 	"live_heads\x18\x01 \x03(\tR\tliveHeads\x12\x1f\n" +
@@ -2549,7 +2568,8 @@ const file_feos_disk_v1_disk_proto_rawDesc = "" +
 	"\rgrace_seconds\x18\x03 \x01(\x04R\fgraceSeconds\x12\x17\n" +
 	"\adry_run\x18\x04 \x01(\bR\x06dryRun\x12%\n" +
 	"\x0ebudget_seconds\x18\x05 \x01(\x04R\rbudgetSeconds\x12\x19\n" +
-	"\bno_grace\x18\x06 \x01(\bR\anoGrace\"\xfe\x02\n" +
+	"\bno_grace\x18\x06 \x01(\bR\anoGrace\x12\x19\n" +
+	"\bmax_keys\x18\a \x01(\rR\amaxKeys\"\xa1\x03\n" +
 	"\vSweepReport\x128\n" +
 	"\x18snapshot_objects_deleted\x18\x01 \x01(\x04R\x16snapshotObjectsDeleted\x12%\n" +
 	"\x0elayers_deleted\x18\x02 \x01(\x04R\rlayersDeleted\x12%\n" +
@@ -2561,7 +2581,9 @@ const file_feos_disk_v1_disk_proto_rawDesc = "" +
 	"\vchunks_seen\x18\a \x01(\x04R\n" +
 	"chunksSeen\x12)\n" +
 	"\x10budget_exhausted\x18\b \x01(\bR\x0fbudgetExhausted\x12!\n" +
-	"\fdeleted_keys\x18\t \x03(\tR\vdeletedKeys\"a\n" +
+	"\fdeleted_keys\x18\t \x03(\tR\vdeletedKeys\x12!\n" +
+	"\fkeys_deleted\x18\n" +
+	" \x01(\x04R\vkeysDeleted\"a\n" +
 	"\x11OpenMemoryRequest\x12\x15\n" +
 	"\x06pod_id\x18\x01 \x01(\tR\x05podId\x12\x14\n" +
 	"\x05layer\x18\x02 \x01(\tR\x05layer\x12\x1f\n" +

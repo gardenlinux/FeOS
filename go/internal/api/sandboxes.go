@@ -59,6 +59,11 @@ func errUnknownSandbox(id string) error {
 	return apierr.New(http.StatusNotFound, "unknown sandbox %s", id)
 }
 
+// errExpired is the 410 of a call that needs an expired sandbox to run.
+func errExpired(id string) error {
+	return apierr.WithCode(http.StatusGone, apierr.CodeExpired, "sandbox %s expired; only reading and deleting it are left", id)
+}
+
 // owned reads the sandbox of the path's {id} that the request's project
 // owns; an environment's instance row and a project's job's pod are none.
 // The route's need (onSandbox) checked the principal's role on its
@@ -110,6 +115,23 @@ type createSandboxRequest struct {
 	// life: bash runs there, and the file tools take a relative path as
 	// relative to it. Empty: the root.
 	Workdir string `json:"workdir"`
+	// ExpiresAfterIdle is the idle time after which the sandbox expires
+	// (ADR 0065): "<n>d", "<n>h" or "never"; empty: the installation's
+	// default. PUT …/expiry changes it.
+	ExpiresAfterIdle string `json:"expiresAfterIdle"`
+}
+
+// expiryOf validates a create's or a PUT's idle time; "" takes the
+// installation's default.
+func (s *server) expiryOf(v string) (*int64, error) {
+	if v == "" {
+		v = cmp.Or(s.cfg.SandboxExpiresAfterIdle, model.DefaultIdleTime)
+	}
+	secs, err := model.ParseIdleTime(v)
+	if err != nil {
+		return nil, apierr.New(http.StatusBadRequest, "expiresAfterIdle: %v", err)
+	}
+	return secs, nil
 }
 
 // maxWorkdir is the longest working directory a sandbox takes, in bytes.
@@ -245,6 +267,10 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 	if msg := spec.CheckPod(sent["securityGroups"], req.Reaches, req.Egress, s.cfg.DenyPrefixes); msg != "" {
 		return apierr.New(http.StatusBadRequest, "%s", msg)
 	}
+	expiry, err := s.expiryOf(req.ExpiresAfterIdle)
+	if err != nil {
+		return err
+	}
 	if err := checkWorkdir(req.Workdir); err != nil {
 		return err
 	}
@@ -311,7 +337,8 @@ func (s *server) createSandbox(w http.ResponseWriter, r *http.Request) error {
 			tmpl := model.SandboxTemplate(env.ID, id.String(), req.Egress.RestrictsNames(), req.Egress.NameDomains())
 			return store.NewSandbox{ID: id, Owner: project, Image: image, VCPUs: vcpus, MemoryMiB: memoryMiB,
 				EnvironmentID: env.ID, Reaches: req.Reaches, Egress: req.Egress, PodTemplate: tmpl,
-				LogLabels: ctl.SandboxLogLabels(project, id, env.ID), MadeBy: auth.MadeBy(r.Context()), Workdir: req.Workdir}
+				LogLabels: ctl.SandboxLogLabels(project, id, env.ID), MadeBy: auth.MadeBy(r.Context()), Workdir: req.Workdir,
+				ExpiresAfterIdleS: expiry}
 		})
 		if err != nil {
 			return err
@@ -499,6 +526,56 @@ func (s *server) putSandboxReaches(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	return writeJSON(w, http.StatusOK, v)
+}
+
+// sandboxExpiry is the body of PUT /api/v1/sandboxes/{id}/expiry.
+type sandboxExpiry struct {
+	ExpiresAfterIdle string `json:"expiresAfterIdle"`
+}
+
+// putSandboxExpiry is PUT /api/v1/sandboxes/{id}/expiry
+// {expiresAfterIdle}: the sandbox's idle time after which it expires (ADR
+// 0065), "<n>d", "<n>h" or "never", changed in place. An expired sandbox
+// is a 410: its time has run. The answer is the status after.
+func (s *server) putSandboxExpiry(w http.ResponseWriter, r *http.Request) error {
+	id, err := pathSandboxID(r)
+	if err != nil {
+		return err
+	}
+	var req sandboxExpiry
+	if _, err := decodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.ExpiresAfterIdle == "" {
+		return apierr.New(http.StatusBadRequest, `expiresAfterIdle is required: "<n>d", "<n>h" or "never"`)
+	}
+	secs, err := s.expiryOf(req.ExpiresAfterIdle)
+	if err != nil {
+		return err
+	}
+	project := projectOf(r)
+	var row store.Sandbox
+	err = s.st.InTx(r.Context(), func(tx *store.Store) error {
+		sb, err := tx.LockSandbox(r.Context(), id, store.ForUpdate)
+		if errors.Is(err, model.ErrNotFound) || (err == nil && (sb.Owner != project || !sb.IsOwn())) {
+			return errUnknownSandbox(id.String())
+		}
+		if err != nil {
+			return err
+		}
+		if sb.ClientState == model.StateExpired {
+			return errExpired(id.String())
+		}
+		if _, err := tx.SetSandboxExpiry(r.Context(), id, secs); err != nil {
+			return err
+		}
+		row, err = tx.GetSandbox(r.Context(), id)
+		return err
+	})
+	if err != nil {
+		return passOr(err, "expiry")
+	}
+	return s.writeView(w, r, row)
 }
 
 // sandboxCredentials is the answer of the credentials a sandbox names.
@@ -702,11 +779,16 @@ func (s *server) resumeSandbox(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if sb.ClientState == model.StateExpired {
+		return errExpired(sb.ID.String())
+	}
 	err = s.deps.Engine.Resume(r.Context(), sb.ID)
 	switch {
 	case err == nil:
 	case errors.Is(err, model.ErrNotFound):
 		return errUnknownSandbox(sb.ID.String())
+	case errors.Is(err, model.ErrExpired):
+		return errExpired(sb.ID.String())
 	default:
 		return internalf("resume: %v", err)
 	}
@@ -779,6 +861,9 @@ func (s *server) createSandboxToken(w http.ResponseWriter, r *http.Request) erro
 		}
 		if err != nil {
 			return err
+		}
+		if sb.ClientState == model.StateExpired {
+			return errExpired(id.String())
 		}
 		tok, err = tx.MintSandboxToken(r.Context(), hash, id, req.Label, auth.MadeBy(r.Context()), mintingIntegration(r.Context()))
 		if errors.Is(err, model.ErrNotFound) {

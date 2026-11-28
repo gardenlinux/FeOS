@@ -23,10 +23,10 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// statusFields are the 19 fields of a sandbox's status, in order.
+// statusFields are the 21 fields of a new sandbox's status, in order.
 var statusFields = []string{"sandboxId", "state", "image", "node", "owner", "createdAt", "updatedAt", "desiredState",
 	"clientState", "statusDescription", "checkpointEpoch", "checkpointHead", "checkpointAt", "vcpus", "memoryMib",
-	"environment", "reaches", "egress", "workdir"}
+	"expiresAfterIdle", "expiresAt", "environment", "reaches", "egress", "workdir"}
 
 // keysInOrder returns the keys of a JSON object in their order.
 func keysInOrder(t *testing.T, raw []byte) []string {
@@ -88,7 +88,7 @@ func TestCreateSandbox(t *testing.T) {
 	want := map[string]any{"sandboxId": id, "state": "pending", "image": "img:1", "node": "", "owner": testProject,
 		"desiredState": "active", "clientState": "pending", "statusDescription": "awaiting first tool call",
 		"checkpointEpoch": "0", "checkpointHead": "", "checkpointAt": "", "vcpus": 4.0, "memoryMib": 1024.0,
-		"workdir": "/workspace/app"}
+		"workdir": "/workspace/app", "expiresAfterIdle": "30d"}
 	for k, v := range want {
 		if st[k] != v {
 			t.Fatalf("%s = %#v, want %#v", k, st[k], v)
@@ -318,7 +318,7 @@ func TestStatusRendering(t *testing.T) {
 	want := `{"sandboxId":"0199f0a2-7b1c-7d3e-8f00-1234567890ab","state":"hibernated","image":"img","node":"n1",` +
 		`"owner":"acme","createdAt":"2026-01-02T03:04:05Z","updatedAt":"2026-01-02T04:04:05Z","desiredState":"active",` +
 		`"clientState":"hibernated","statusDescription":"x","checkpointEpoch":"1099511627776","checkpointHead":"h",` +
-		`"checkpointAt":"2026-01-02T05:04:05Z","vcpus":3,"memoryMib":768}`
+		`"checkpointAt":"2026-01-02T05:04:05Z","vcpus":3,"memoryMib":768,"expiresAfterIdle":"never"}`
 	if string(b) != want {
 		t.Fatalf("status\n%s\nwant\n%s", b, want)
 	}
@@ -579,5 +579,70 @@ func TestSandboxIDFormats(t *testing.T) {
 	for _, unknown := range []string{"abcdefghjkm", "0199f0a2-7b1c-7d3e-8f00-1234567890ab"} {
 		w := e.do("GET", "/api/v1/sandboxes/"+unknown, bearerOf(e.projectToken), nil)
 		expect(t, w, http.StatusNotFound, errBody("unknown sandbox "+unknown))
+	}
+}
+
+// A sandbox's idle time (ADR 0065): a create takes "<n>d", "<n>h" or
+// "never" and refuses anything else; PUT …/expiry changes it in place;
+// an expired sandbox answers its resume and its PUT with 410 expired and
+// is still read.
+func TestSandboxExpiry(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, envOptions{})
+	type view struct {
+		SandboxID        string `json:"sandboxId"`
+		ClientState      string `json:"clientState"`
+		ExpiresAfterIdle string `json:"expiresAfterIdle"`
+		ExpiresAt        string `json:"expiresAt"`
+		ExpiredAt        string `json:"expiredAt"`
+	}
+	create := func(v any) view {
+		t.Helper()
+		w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.projectToken),
+			map[string]any{"environment": "box", "expiresAfterIdle": v})
+		expect(t, w, http.StatusCreated, "")
+		return decode[struct {
+			Status view `json:"status"`
+		}](t, w).Status
+	}
+	never := create("never")
+	if never.ExpiresAfterIdle != "never" || never.ExpiresAt != "" {
+		t.Fatalf("never: %+v", never)
+	}
+	hours := create("12h")
+	if hours.ExpiresAfterIdle != "12h" || !rfc3339Seconds.MatchString(hours.ExpiresAt) {
+		t.Fatalf("12h: %+v", hours)
+	}
+	for _, bad := range []any{"30m", "0d", "forever", 30} {
+		w := e.do("POST", "/api/v1/sandboxes", bearerOf(e.projectToken),
+			map[string]any{"environment": "box", "expiresAfterIdle": bad})
+		expect(t, w, http.StatusBadRequest, "")
+	}
+
+	w := e.do("PUT", "/api/v1/sandboxes/"+hours.SandboxID+"/expiry", bearerOf(e.projectToken),
+		map[string]any{"expiresAfterIdle": "never"})
+	expect(t, w, http.StatusOK, "")
+	if got := decode[view](t, w); got.ExpiresAfterIdle != "never" || got.ExpiresAt != "" {
+		t.Fatalf("after PUT: %+v", got)
+	}
+	expect(t, e.do("PUT", "/api/v1/sandboxes/"+hours.SandboxID+"/expiry", bearerOf(e.projectToken),
+		map[string]any{}), http.StatusBadRequest, "")
+
+	if _, err := e.d.Pool.Exec(context.Background(), `UPDATE sandboxes SET client_state = 'expired', expired_at = now()
+		WHERE id = $1`, never.SandboxID); err != nil {
+		t.Fatal(err)
+	}
+	w = e.do("GET", "/api/v1/sandboxes/"+never.SandboxID, bearerOf(e.projectToken), nil)
+	expect(t, w, http.StatusOK, "")
+	if got := decode[view](t, w); got.ClientState != "expired" || !rfc3339Seconds.MatchString(got.ExpiredAt) || got.ExpiresAt != "" {
+		t.Fatalf("expired: %+v", got)
+	}
+	for _, c := range []struct{ method, path string }{{"POST", "/resume"}, {"PUT", "/expiry"}, {"POST", "/tokens"}} {
+		w := e.do(c.method, "/api/v1/sandboxes/"+never.SandboxID+c.path, bearerOf(e.projectToken),
+			map[string]any{"expiresAfterIdle": "30d"})
+		expect(t, w, http.StatusGone, "")
+		if b := decode[apierr.Error](t, w); b.Code != apierr.CodeExpired {
+			t.Fatalf("%s %s: code %q", c.method, c.path, b.Code)
+		}
 	}
 }

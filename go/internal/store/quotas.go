@@ -48,7 +48,7 @@ func (s *Store) ProjectUse(ctx context.Context, project string, exclude uuid.UUI
 	var u ProjectUseRows
 	err := s.q.QueryRow(ctx, `SELECT s.n, s.v, s.m, e.n, j.n, j.v, j.m FROM
 		(SELECT count(*) n, coalesce(sum(vcpus), 0) v, coalesce(sum(memory_mib), 0) m FROM sandboxes
-			WHERE owner = $1 AND NOT instance AND NOT project_job) s,
+			WHERE owner = $1 AND NOT instance AND NOT project_job AND client_state <> 'expired') s,
 		(SELECT count(*) n FROM environments WHERE owner = $1 AND NOT deleting) e,
 		(SELECT count(*) n, coalesce(sum(vcpus), 0) v, coalesce(sum(memory_mib), 0) m FROM jobs
 			WHERE owner = $1 AND finished_at IS NULL) j`, project).Scan(&u.Sandboxes, &u.SandboxVCPUs,

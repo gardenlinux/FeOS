@@ -78,6 +78,7 @@ type fakeFeRun struct {
 
 	mu        sync.Mutex
 	sandboxes map[string]bool   // existing sandboxes
+	expired   map[string]bool   // sandboxes that expired (ADR 0065)
 	tokens    map[string]string // token -> sandbox
 	creates   int
 	mints     []string // the sandboxes a token was minted for
@@ -88,7 +89,7 @@ type fakeFeRun struct {
 
 func newFakeFeRun(t *testing.T) *fakeFeRun {
 	t.Helper()
-	f := &fakeFeRun{sandboxes: map[string]bool{}, tokens: map[string]string{}}
+	f := &fakeFeRun{sandboxes: map[string]bool{}, expired: map[string]bool{}, tokens: map[string]string{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/sandboxes", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer tok" {
@@ -133,6 +134,10 @@ func newFakeFeRun(t *testing.T) *fakeFeRun {
 		}
 		if r.Header.Get("Authorization") != "Bearer tok" || !f.sandboxes[id] {
 			http.Error(w, `{"error":"unknown sandbox"}`, http.StatusNotFound)
+			return
+		}
+		if f.expired[id] {
+			http.Error(w, `{"error":"sandbox expired","code":"expired"}`, http.StatusGone)
 			return
 		}
 		f.mints = append(f.mints, id)
@@ -300,6 +305,27 @@ func TestReferenceToAGoneSandbox(t *testing.T) {
 	}
 	if got, ok := verifySandboxRef(testRefKey, "", "conv-a", newRefs[0]); !ok || got != again {
 		t.Fatalf("new reference %q", newRefs[0])
+	}
+}
+
+// A reference whose sandbox expired (ADR 0065) gets a new sandbox, and
+// the first tool result tells the model that the files from before are
+// gone; the next does not.
+func TestReferenceToAnExpiredSandbox(t *testing.T) {
+	f := newFakeFeRun(t)
+	c := f.backend(t)
+	id, refs := chat(t, c, "", "conv-a", "", 1)
+	f.mu.Lock()
+	f.expired[id] = true
+	f.mu.Unlock()
+	c = f.backend(t)
+	out, newRefs := chat(t, c, "", "conv-a", refs[0], 1)
+	again := strings.TrimPrefix(out, expiredNote)
+	if out == again || again == id || !validSandboxID(again) || len(newRefs) != 1 {
+		t.Fatalf("expired sandbox %s: now %q, references %q", id, out, newRefs)
+	}
+	if next, _ := chat(t, c, "", "conv-a", newRefs[0], 1); next != again {
+		t.Fatalf("the next call: %q, want %q", next, again)
 	}
 }
 

@@ -85,6 +85,13 @@ const (
 )
 
 // The placement policies.
+// The modes of the object store's sweep (--object-store-sweep).
+const (
+	SweepOff    = "off"
+	SweepDryRun = "dry-run"
+	SweepOn     = "on"
+)
+
 const (
 	PlacementBinpack = "binpack"
 	PlacementSpread  = "spread"
@@ -255,8 +262,15 @@ type Config struct {
 	// DiskBudget is placement's per-pod disk gate, in bytes.
 	DiskBudget int64
 
-	IdlePause              time.Duration // 0 disables
-	HibernateAfter         time.Duration // 0 disables
+	IdlePause      time.Duration // 0 disables
+	HibernateAfter time.Duration // 0 disables
+	// SandboxExpiresAfterIdle is the idle time of a caller's sandbox whose
+	// create names none (ADR 0065): "<n>d", "<n>h" or "never".
+	SandboxExpiresAfterIdle string
+	// ObjectStoreSweep is the object store's sweep (ADR 0065): SweepOff,
+	// SweepDryRun or SweepOn, every ObjectStoreSweepEvery.
+	ObjectStoreSweep       string
+	ObjectStoreSweepEvery  time.Duration
 	NodeTTL                time.Duration
 	LostGrace              time.Duration
 	NodeWait               time.Duration
@@ -337,6 +351,9 @@ func Default() Config {
 		DiskBudget:                 4 << 30,
 		IdlePause:                  10 * time.Second,
 		HibernateAfter:             0,
+		SandboxExpiresAfterIdle:    model.DefaultIdleTime,
+		ObjectStoreSweep:           SweepOff,
+		ObjectStoreSweepEvery:      24 * time.Hour,
 		NodeTTL:                    15 * time.Second,
 		LostGrace:                  10 * time.Minute,
 		NodeWait:                   5 * time.Second,
@@ -496,6 +513,11 @@ func registerServe(fs *flag.FlagSet, c *Config) *serveTexts {
 	fs.Var((*byteSize)(&c.DiskBudget), "disk-budget", "per-pod disk gate of placement (bytes, or with a KiB, MiB or GiB suffix)")
 	fs.DurationVar(&c.IdlePause, "idle-pause", c.IdlePause, "a running sandbox idle this long is paused; 0 disables")
 	fs.DurationVar(&c.HibernateAfter, "hibernate-after", c.HibernateAfter, "a sandbox paused this long is hibernated; 0 disables")
+	fs.StringVar(&c.SandboxExpiresAfterIdle, "sandbox-expires-after-idle", c.SandboxExpiresAfterIdle,
+		"the idle time after which a sandbox created without one expires: <n>d, <n>h or never")
+	fs.StringVar(&c.ObjectStoreSweep, "object-store-sweep", c.ObjectStoreSweep,
+		"the object store's sweep of what no sandbox, bake or backup reaches: off, dry-run or on")
+	fs.DurationVar(&c.ObjectStoreSweepEvery, "object-store-sweep-every", c.ObjectStoreSweepEvery, "how often the object store is swept")
 	fs.DurationVar(&c.NodeTTL, "node-ttl", c.NodeTTL, "telemetry age before a node is down")
 	fs.DurationVar(&c.LostGrace, "lost-grace", c.LostGrace, "how long a node is down before its sandboxes count as lost")
 	fs.DurationVar(&c.NodeWait, "node-wait", c.NodeWait, "how long a call waits for a node's connection")
@@ -718,6 +740,17 @@ func (c *Config) Validate() error {
 	}
 	if c.DiskBudget < 0 {
 		bad("--disk-budget must not be negative")
+	}
+	if _, err := model.ParseIdleTime(c.SandboxExpiresAfterIdle); err != nil {
+		bad("--sandbox-expires-after-idle: %v", err)
+	}
+	switch c.ObjectStoreSweep {
+	case SweepOff, SweepDryRun, SweepOn:
+	default:
+		bad("--object-store-sweep must be %s, %s or %s, not %q", SweepOff, SweepDryRun, SweepOn, c.ObjectStoreSweep)
+	}
+	if c.ObjectStoreSweepEvery < time.Hour {
+		bad("--object-store-sweep-every must be at least an hour")
 	}
 	if c.NodeMaxStreams < 4 {
 		bad("--node-max-streams must be at least 4")

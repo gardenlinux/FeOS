@@ -423,6 +423,8 @@ func (h *Handler) acquireFailed(ctx context.Context, w http.ResponseWriter, id p
 		reply{http.StatusNotFound, textNoSandbox, 0}.write(w)
 	case errors.Is(err, model.ErrNodeUnavailable):
 		reply{http.StatusServiceUnavailable, "the sandbox's node is unavailable", 5}.write(w)
+	case errors.Is(err, model.ErrExpired):
+		reply{http.StatusGone, "the sandbox expired", 0}.write(w)
 	default:
 		h.rl.warn("acquire", "forward: the sandbox could not be brought up", "sandbox", id, "err", err)
 		reply{http.StatusServiceUnavailable, "the sandbox could not be brought up: " + err.Error(), apierr.RetryAfterOf(err, 5)}.write(w)
