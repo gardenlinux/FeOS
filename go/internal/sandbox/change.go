@@ -262,7 +262,9 @@ func (c *change) notFound(node, why string) {
 	a := &c.after
 	a.Address = ""
 	switch {
-	case a.HasCheckpoint():
+	case a.HasCheckpoint() && !(a.Materialised && hasVolumes(*a)):
+		// A pod with volumes seen on node ran past its checkpoint: it is
+		// lost there, below, and never restored from the checkpoint.
 		a.ClientState, a.Node, a.Materialised = model.StateHibernated, "", false
 		if c.before.ClientState != model.StateHibernated {
 			a.StatusDescription = fmt.Sprintf("not on node %s; restored from the checkpoint of %s on the next use",

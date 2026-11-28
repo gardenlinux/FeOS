@@ -907,7 +907,8 @@ func (s *Store) LostGrace(ctx context.Context, grace time.Duration, limit int) (
 				AND (n.status = 'removed' OR (n.status = 'down' AND n.down_since < now() - $1::interval))
 			ORDER BY s.id LIMIT $2 FOR UPDATE OF s SKIP LOCKED),
 		old AS (SELECT s.id, s.node, s.status_description,
-				s.checkpoint_head <> '' AS checkpoint, s.checkpoint_head <> '' OR s.materialised AS kept,
+				s.checkpoint_head <> '' AND NOT (s.materialised AND `+withVolumes("s")+`) AS checkpoint,
+				s.checkpoint_head <> '' OR s.materialised AS kept,
 				s.address <> '' AS member
 			FROM sandboxes s JOIN c ON c.id = s.id)
 		UPDATE sandboxes s SET
@@ -953,6 +954,16 @@ func (s *Store) LostGrace(ctx context.Context, grace time.Duration, limit int) (
 		return nil, err
 	}
 	return lost, s.notifySandboxes(ctx, ids)
+}
+
+// withVolumes is the condition, never NULL, that a sandbox row s's pod
+// has volumes (its template names some). Such a pod seen on its node ran
+// past its checkpoint: the volume there is newer than the checkpoint's,
+// so it is lost with the node, not restored from the checkpoint
+// (ADR 0064, "Never from a checkpoint it ran past").
+func withVolumes(s string) string {
+	return "coalesce(jsonb_typeof(" + s + ".pod_template->'volumes') = 'array' AND " + s +
+		".pod_template->'volumes' <> '[]'::jsonb, false)"
 }
 
 // StaleOps returns up to limit sandboxes with an op in flight whose owner
