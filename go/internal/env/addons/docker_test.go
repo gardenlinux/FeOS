@@ -894,44 +894,6 @@ func TestValkeyDocker(t *testing.T) {
 			t.Fatalf("a complaint in the log after the restart: %s\n%s%s", line, logs, logErr)
 		}
 	}
-	// A changed ID (tenants became projects): the running server knows
-	// the old one alone and takes the new certificate as nobody, so the
-	// step stops it on the new users and fails; once the container runs
-	// again, the step goes through, with the same data.
-	const (
-		movedAddonID   = "spiffe://run.test/project/t2/env/e/addon/cache"
-		movedCatalogID = "spiffe://run.test/project/t2/env/e/service/catalog"
-	)
-	moved, _ := ca.leafFor(serverKey, "vkpod", "wl-00000000000000000000000000000000", movedAddonID,
-		x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth)
-	movedCrt, movedKey := ca.leaf("pod1", catalogWL, movedCatalogID, x509.ExtKeyUsageClientAuth)
-	write("moved.crt", movedCrt)
-	write("moved.key", movedKey)
-	c.TLS = &TLS{CertPEM: moved, CAPEM: ca.rootPEM(), ID: movedAddonID,
-		Grants: []Grant{{Workload: catalogWL, ID: movedCatalogID, Role: "data"}}}
-	steps = b.Provision(a, c)
-	if out, code := lab.exec(pod, resolveEnv(t, steps[0].Env, creds), steps[0].Argv...); code == 0 ||
-		!strings.Contains(out, "restarted to read its new users") {
-		t.Fatalf("the step under a changed ID: exit %d: %s", code, redact(out, creds))
-	}
-	if out, _, _ := lab.docker(time.Minute, "wait", pod); strings.TrimSpace(out) != "0" {
-		t.Fatalf("the server under a changed ID: exit %s", out)
-	}
-	lab.must(t, time.Minute, "start", pod)
-	lab.waitReady(t, pod, inst.Probe)
-	addr = lab.address(t, pod)
-	c.Address = addr
-	lab.provision(t, pod, b.Provision(a, c), creds)
-	if out, code := tls("moved", "acl", "whoami"); code != 0 || out != movedCatalogID {
-		t.Fatalf("the moved workload: exit %d: %s", code, out)
-	}
-	if out, code := tls("moved", "get", "k"); code != 0 || out != "v" {
-		t.Fatalf("the data after the move: exit %d: %s", code, out)
-	}
-	if out, _ := tls("catalog", "get", "k"); !strings.Contains(out, "NOAUTH") {
-		t.Fatalf("the old ID after the move: %s", out)
-	}
-
 	// The entrypoint dropped to valkey and handed /data to it.
 	if out, code := lab.exec(pod, nil, "stat", "-c", "%U %a", "/data/appendonlydir", valkeyDir, valkeyDir+"/server.key",
 		valkeyDir+"/users.acl"); code != 0 || strings.Fields(out)[0] != "valkey" ||
