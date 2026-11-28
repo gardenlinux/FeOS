@@ -107,6 +107,18 @@ service PodService {
   // older than the daemon's grace, is deleted. The control plane names
   // what is live; it calls one node per object store.
   rpc SweepObjectStore(SweepObjectStoreRequest) returns (SweepObjectStoreResponse);
+  // What of the object store this node needs now (ADR 0065): the layers
+  // of its open disks and memories and those it has not uploaded, and
+  // the checkpoint heads of its volumes, which a volume restored from a
+  // checkpoint reads from lazily. A sweep names them live.
+  rpc ListLiveObjects(ListLiveObjectsRequest) returns (ListLiveObjectsResponse);
+}
+
+message ListLiveObjectsRequest {}
+
+message ListLiveObjectsResponse {
+  repeated string layers = 1;
+  repeated string heads = 2;
 }
 
 message SweepObjectStoreRequest {

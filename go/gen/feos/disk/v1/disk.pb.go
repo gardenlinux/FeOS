@@ -1598,6 +1598,86 @@ func (x *SweepRequest) GetMaxKeys() uint32 {
 	return 0
 }
 
+type LiveLayersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LiveLayersRequest) Reset() {
+	*x = LiveLayersRequest{}
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LiveLayersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LiveLayersRequest) ProtoMessage() {}
+
+func (x *LiveLayersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LiveLayersRequest.ProtoReflect.Descriptor instead.
+func (*LiveLayersRequest) Descriptor() ([]byte, []int) {
+	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{23}
+}
+
+type LiveLayersResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Layers        []string               `protobuf:"bytes,1,rep,name=layers,proto3" json:"layers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LiveLayersResponse) Reset() {
+	*x = LiveLayersResponse{}
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LiveLayersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LiveLayersResponse) ProtoMessage() {}
+
+func (x *LiveLayersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LiveLayersResponse.ProtoReflect.Descriptor instead.
+func (*LiveLayersResponse) Descriptor() ([]byte, []int) {
+	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *LiveLayersResponse) GetLayers() []string {
+	if x != nil {
+		return x.Layers
+	}
+	return nil
+}
+
 type SweepReport struct {
 	state                  protoimpl.MessageState `protogen:"open.v1"`
 	SnapshotObjectsDeleted uint64                 `protobuf:"varint,1,opt,name=snapshot_objects_deleted,json=snapshotObjectsDeleted,proto3" json:"snapshot_objects_deleted,omitempty"`
@@ -1620,7 +1700,7 @@ type SweepReport struct {
 
 func (x *SweepReport) Reset() {
 	*x = SweepReport{}
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[23]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1632,7 +1712,7 @@ func (x *SweepReport) String() string {
 func (*SweepReport) ProtoMessage() {}
 
 func (x *SweepReport) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[23]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1645,7 +1725,7 @@ func (x *SweepReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SweepReport.ProtoReflect.Descriptor instead.
 func (*SweepReport) Descriptor() ([]byte, []int) {
-	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{23}
+	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *SweepReport) GetSnapshotObjectsDeleted() uint64 {
@@ -1734,7 +1814,7 @@ type OpenMemoryRequest struct {
 
 func (x *OpenMemoryRequest) Reset() {
 	*x = OpenMemoryRequest{}
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[24]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1746,7 +1826,7 @@ func (x *OpenMemoryRequest) String() string {
 func (*OpenMemoryRequest) ProtoMessage() {}
 
 func (x *OpenMemoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[24]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1759,7 +1839,7 @@ func (x *OpenMemoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenMemoryRequest.ProtoReflect.Descriptor instead.
 func (*OpenMemoryRequest) Descriptor() ([]byte, []int) {
-	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{24}
+	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *OpenMemoryRequest) GetPodId() string {
@@ -1797,7 +1877,7 @@ type Memory struct {
 
 func (x *Memory) Reset() {
 	*x = Memory{}
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[25]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1809,7 +1889,7 @@ func (x *Memory) String() string {
 func (*Memory) ProtoMessage() {}
 
 func (x *Memory) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[25]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1822,7 +1902,7 @@ func (x *Memory) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Memory.ProtoReflect.Descriptor instead.
 func (*Memory) Descriptor() ([]byte, []int) {
-	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{25}
+	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *Memory) GetPodId() string {
@@ -1869,7 +1949,7 @@ type CloseMemoryRequest struct {
 
 func (x *CloseMemoryRequest) Reset() {
 	*x = CloseMemoryRequest{}
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[26]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1881,7 +1961,7 @@ func (x *CloseMemoryRequest) String() string {
 func (*CloseMemoryRequest) ProtoMessage() {}
 
 func (x *CloseMemoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[26]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1894,7 +1974,7 @@ func (x *CloseMemoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseMemoryRequest.ProtoReflect.Descriptor instead.
 func (*CloseMemoryRequest) Descriptor() ([]byte, []int) {
-	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{26}
+	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *CloseMemoryRequest) GetPodId() string {
@@ -1933,7 +2013,7 @@ type MemoryStats struct {
 
 func (x *MemoryStats) Reset() {
 	*x = MemoryStats{}
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[27]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1945,7 +2025,7 @@ func (x *MemoryStats) String() string {
 func (*MemoryStats) ProtoMessage() {}
 
 func (x *MemoryStats) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[27]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1958,7 +2038,7 @@ func (x *MemoryStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemoryStats.ProtoReflect.Descriptor instead.
 func (*MemoryStats) Descriptor() ([]byte, []int) {
-	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{27}
+	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *MemoryStats) GetPodId() string {
@@ -2068,7 +2148,7 @@ type RemoveDeviceRequest struct {
 
 func (x *RemoveDeviceRequest) Reset() {
 	*x = RemoveDeviceRequest{}
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[28]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2080,7 +2160,7 @@ func (x *RemoveDeviceRequest) String() string {
 func (*RemoveDeviceRequest) ProtoMessage() {}
 
 func (x *RemoveDeviceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[28]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2093,7 +2173,7 @@ func (x *RemoveDeviceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveDeviceRequest.ProtoReflect.Descriptor instead.
 func (*RemoveDeviceRequest) Descriptor() ([]byte, []int) {
-	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{28}
+	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *RemoveDeviceRequest) GetPodId() string {
@@ -2111,7 +2191,7 @@ type RemoveDeviceResponse struct {
 
 func (x *RemoveDeviceResponse) Reset() {
 	*x = RemoveDeviceResponse{}
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[29]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2123,7 +2203,7 @@ func (x *RemoveDeviceResponse) String() string {
 func (*RemoveDeviceResponse) ProtoMessage() {}
 
 func (x *RemoveDeviceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[29]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2136,7 +2216,7 @@ func (x *RemoveDeviceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveDeviceResponse.ProtoReflect.Descriptor instead.
 func (*RemoveDeviceResponse) Descriptor() ([]byte, []int) {
-	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{29}
+	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{31}
 }
 
 type PutHeadRequest struct {
@@ -2157,7 +2237,7 @@ type PutHeadRequest struct {
 
 func (x *PutHeadRequest) Reset() {
 	*x = PutHeadRequest{}
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[30]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2169,7 +2249,7 @@ func (x *PutHeadRequest) String() string {
 func (*PutHeadRequest) ProtoMessage() {}
 
 func (x *PutHeadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[30]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2182,7 +2262,7 @@ func (x *PutHeadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutHeadRequest.ProtoReflect.Descriptor instead.
 func (*PutHeadRequest) Descriptor() ([]byte, []int) {
-	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{30}
+	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *PutHeadRequest) GetPodId() string {
@@ -2223,7 +2303,7 @@ type GetHeadRequest struct {
 
 func (x *GetHeadRequest) Reset() {
 	*x = GetHeadRequest{}
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[31]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2235,7 +2315,7 @@ func (x *GetHeadRequest) String() string {
 func (*GetHeadRequest) ProtoMessage() {}
 
 func (x *GetHeadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[31]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2248,7 +2328,7 @@ func (x *GetHeadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetHeadRequest.ProtoReflect.Descriptor instead.
 func (*GetHeadRequest) Descriptor() ([]byte, []int) {
-	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{31}
+	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *GetHeadRequest) GetKey() string {
@@ -2276,7 +2356,7 @@ type MemoryRef struct {
 
 func (x *MemoryRef) Reset() {
 	*x = MemoryRef{}
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[32]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2288,7 +2368,7 @@ func (x *MemoryRef) String() string {
 func (*MemoryRef) ProtoMessage() {}
 
 func (x *MemoryRef) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[32]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2301,7 +2381,7 @@ func (x *MemoryRef) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemoryRef.ProtoReflect.Descriptor instead.
 func (*MemoryRef) Descriptor() ([]byte, []int) {
-	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{32}
+	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *MemoryRef) GetLayer() string {
@@ -2359,7 +2439,7 @@ type Head struct {
 
 func (x *Head) Reset() {
 	*x = Head{}
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[33]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2371,7 +2451,7 @@ func (x *Head) String() string {
 func (*Head) ProtoMessage() {}
 
 func (x *Head) ProtoReflect() protoreflect.Message {
-	mi := &file_feos_disk_v1_disk_proto_msgTypes[33]
+	mi := &file_feos_disk_v1_disk_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2384,7 +2464,7 @@ func (x *Head) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Head.ProtoReflect.Descriptor instead.
 func (*Head) Descriptor() ([]byte, []int) {
-	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{33}
+	return file_feos_disk_v1_disk_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *Head) GetKey() string {
@@ -2569,7 +2649,10 @@ const file_feos_disk_v1_disk_proto_rawDesc = "" +
 	"\adry_run\x18\x04 \x01(\bR\x06dryRun\x12%\n" +
 	"\x0ebudget_seconds\x18\x05 \x01(\x04R\rbudgetSeconds\x12\x19\n" +
 	"\bno_grace\x18\x06 \x01(\bR\anoGrace\x12\x19\n" +
-	"\bmax_keys\x18\a \x01(\rR\amaxKeys\"\xa1\x03\n" +
+	"\bmax_keys\x18\a \x01(\rR\amaxKeys\"\x13\n" +
+	"\x11LiveLayersRequest\",\n" +
+	"\x12LiveLayersResponse\x12\x16\n" +
+	"\x06layers\x18\x01 \x03(\tR\x06layers\"\xa1\x03\n" +
 	"\vSweepReport\x128\n" +
 	"\x18snapshot_objects_deleted\x18\x01 \x01(\x04R\x16snapshotObjectsDeleted\x12%\n" +
 	"\x0elayers_deleted\x18\x02 \x01(\x04R\rlayersDeleted\x12%\n" +
@@ -2641,8 +2724,7 @@ const file_feos_disk_v1_disk_proto_rawDesc = "" +
 	"\x05chain\x18\x04 \x03(\tR\x05chain\x12!\n" +
 	"\flogical_size\x18\x05 \x01(\x04R\vlogicalSize\x12/\n" +
 	"\x06memory\x18\x06 \x01(\v2\x17.feos.disk.v1.MemoryRefR\x06memory\x12!\n" +
-	"\fvolume_heads\x18\a \x03(\tR\vvolumeHeads2\xd5\n" +
-	"\n" +
+	"\fvolume_heads\x18\a \x03(\tR\vvolumeHeads2\xa6\v\n" +
 	"\vDiskService\x12B\n" +
 	"\n" +
 	"ImportBase\x12\x1f.feos.disk.v1.ImportBaseRequest\x1a\x13.feos.disk.v1.Layer\x12C\n" +
@@ -2660,7 +2742,9 @@ const file_feos_disk_v1_disk_proto_rawDesc = "" +
 	"\x05Evict\x12\x1a.feos.disk.v1.EvictRequest\x1a\x18.feos.disk.v1.EvictStats\x12@\n" +
 	"\x05Stats\x12\x1a.feos.disk.v1.StatsRequest\x1a\x1b.feos.disk.v1.StatsResponse\x12;\n" +
 	"\x04Fsck\x12\x19.feos.disk.v1.FsckRequest\x1a\x18.feos.disk.v1.FsckReport\x12>\n" +
-	"\x05Sweep\x12\x1a.feos.disk.v1.SweepRequest\x1a\x19.feos.disk.v1.SweepReport\x12@\n" +
+	"\x05Sweep\x12\x1a.feos.disk.v1.SweepRequest\x1a\x19.feos.disk.v1.SweepReport\x12O\n" +
+	"\n" +
+	"LiveLayers\x12\x1f.feos.disk.v1.LiveLayersRequest\x1a .feos.disk.v1.LiveLayersResponse\x12@\n" +
 	"\tPutObject\x12\x1e.feos.disk.v1.PutObjectRequest\x1a\x13.feos.disk.v1.Empty\x12@\n" +
 	"\tGetObject\x12\x1e.feos.disk.v1.GetObjectRequest\x1a\x13.feos.disk.v1.Empty\x12;\n" +
 	"\aPutHead\x12\x1c.feos.disk.v1.PutHeadRequest\x1a\x12.feos.disk.v1.Head\x12;\n" +
@@ -2682,7 +2766,7 @@ func file_feos_disk_v1_disk_proto_rawDescGZIP() []byte {
 }
 
 var file_feos_disk_v1_disk_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_feos_disk_v1_disk_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_feos_disk_v1_disk_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_feos_disk_v1_disk_proto_goTypes = []any{
 	(EvictRequest_Target)(0),     // 0: feos.disk.v1.EvictRequest.Target
 	(*Empty)(nil),                // 1: feos.disk.v1.Empty
@@ -2708,25 +2792,27 @@ var file_feos_disk_v1_disk_proto_goTypes = []any{
 	(*FsckRequest)(nil),          // 21: feos.disk.v1.FsckRequest
 	(*FsckReport)(nil),           // 22: feos.disk.v1.FsckReport
 	(*SweepRequest)(nil),         // 23: feos.disk.v1.SweepRequest
-	(*SweepReport)(nil),          // 24: feos.disk.v1.SweepReport
-	(*OpenMemoryRequest)(nil),    // 25: feos.disk.v1.OpenMemoryRequest
-	(*Memory)(nil),               // 26: feos.disk.v1.Memory
-	(*CloseMemoryRequest)(nil),   // 27: feos.disk.v1.CloseMemoryRequest
-	(*MemoryStats)(nil),          // 28: feos.disk.v1.MemoryStats
-	(*RemoveDeviceRequest)(nil),  // 29: feos.disk.v1.RemoveDeviceRequest
-	(*RemoveDeviceResponse)(nil), // 30: feos.disk.v1.RemoveDeviceResponse
-	(*PutHeadRequest)(nil),       // 31: feos.disk.v1.PutHeadRequest
-	(*GetHeadRequest)(nil),       // 32: feos.disk.v1.GetHeadRequest
-	(*MemoryRef)(nil),            // 33: feos.disk.v1.MemoryRef
-	(*Head)(nil),                 // 34: feos.disk.v1.Head
+	(*LiveLayersRequest)(nil),    // 24: feos.disk.v1.LiveLayersRequest
+	(*LiveLayersResponse)(nil),   // 25: feos.disk.v1.LiveLayersResponse
+	(*SweepReport)(nil),          // 26: feos.disk.v1.SweepReport
+	(*OpenMemoryRequest)(nil),    // 27: feos.disk.v1.OpenMemoryRequest
+	(*Memory)(nil),               // 28: feos.disk.v1.Memory
+	(*CloseMemoryRequest)(nil),   // 29: feos.disk.v1.CloseMemoryRequest
+	(*MemoryStats)(nil),          // 30: feos.disk.v1.MemoryStats
+	(*RemoveDeviceRequest)(nil),  // 31: feos.disk.v1.RemoveDeviceRequest
+	(*RemoveDeviceResponse)(nil), // 32: feos.disk.v1.RemoveDeviceResponse
+	(*PutHeadRequest)(nil),       // 33: feos.disk.v1.PutHeadRequest
+	(*GetHeadRequest)(nil),       // 34: feos.disk.v1.GetHeadRequest
+	(*MemoryRef)(nil),            // 35: feos.disk.v1.MemoryRef
+	(*Head)(nil),                 // 36: feos.disk.v1.Head
 }
 var file_feos_disk_v1_disk_proto_depIdxs = []int32{
 	0,  // 0: feos.disk.v1.EvictRequest.target:type_name -> feos.disk.v1.EvictRequest.Target
 	18, // 1: feos.disk.v1.DeviceStats.histograms:type_name -> feos.disk.v1.Histogram
 	19, // 2: feos.disk.v1.StatsResponse.devices:type_name -> feos.disk.v1.DeviceStats
-	28, // 3: feos.disk.v1.StatsResponse.memories:type_name -> feos.disk.v1.MemoryStats
-	33, // 4: feos.disk.v1.PutHeadRequest.memory:type_name -> feos.disk.v1.MemoryRef
-	33, // 5: feos.disk.v1.Head.memory:type_name -> feos.disk.v1.MemoryRef
+	30, // 3: feos.disk.v1.StatsResponse.memories:type_name -> feos.disk.v1.MemoryStats
+	35, // 4: feos.disk.v1.PutHeadRequest.memory:type_name -> feos.disk.v1.MemoryRef
+	35, // 5: feos.disk.v1.Head.memory:type_name -> feos.disk.v1.MemoryRef
 	4,  // 6: feos.disk.v1.DiskService.ImportBase:input_type -> feos.disk.v1.ImportBaseRequest
 	6,  // 7: feos.disk.v1.DiskService.CreateDisk:input_type -> feos.disk.v1.CreateDiskRequest
 	7,  // 8: feos.disk.v1.DiskService.OpenDisk:input_type -> feos.disk.v1.OpenDiskRequest
@@ -2734,7 +2820,7 @@ var file_feos_disk_v1_disk_proto_depIdxs = []int32{
 	11, // 10: feos.disk.v1.DiskService.Seal:input_type -> feos.disk.v1.SealRequest
 	8,  // 11: feos.disk.v1.DiskService.Bake:input_type -> feos.disk.v1.BakeRequest
 	9,  // 12: feos.disk.v1.DiskService.SealFile:input_type -> feos.disk.v1.SealFileRequest
-	29, // 13: feos.disk.v1.DiskService.RemoveDevice:input_type -> feos.disk.v1.RemoveDeviceRequest
+	31, // 13: feos.disk.v1.DiskService.RemoveDevice:input_type -> feos.disk.v1.RemoveDeviceRequest
 	12, // 14: feos.disk.v1.DiskService.Materialize:input_type -> feos.disk.v1.MaterializeRequest
 	13, // 15: feos.disk.v1.DiskService.Push:input_type -> feos.disk.v1.LayerRef
 	13, // 16: feos.disk.v1.DiskService.Pull:input_type -> feos.disk.v1.LayerRef
@@ -2742,35 +2828,37 @@ var file_feos_disk_v1_disk_proto_depIdxs = []int32{
 	17, // 18: feos.disk.v1.DiskService.Stats:input_type -> feos.disk.v1.StatsRequest
 	21, // 19: feos.disk.v1.DiskService.Fsck:input_type -> feos.disk.v1.FsckRequest
 	23, // 20: feos.disk.v1.DiskService.Sweep:input_type -> feos.disk.v1.SweepRequest
-	2,  // 21: feos.disk.v1.DiskService.PutObject:input_type -> feos.disk.v1.PutObjectRequest
-	3,  // 22: feos.disk.v1.DiskService.GetObject:input_type -> feos.disk.v1.GetObjectRequest
-	31, // 23: feos.disk.v1.DiskService.PutHead:input_type -> feos.disk.v1.PutHeadRequest
-	32, // 24: feos.disk.v1.DiskService.GetHead:input_type -> feos.disk.v1.GetHeadRequest
-	25, // 25: feos.disk.v1.DiskService.OpenMemory:input_type -> feos.disk.v1.OpenMemoryRequest
-	27, // 26: feos.disk.v1.DiskService.CloseMemory:input_type -> feos.disk.v1.CloseMemoryRequest
-	5,  // 27: feos.disk.v1.DiskService.ImportBase:output_type -> feos.disk.v1.Layer
-	16, // 28: feos.disk.v1.DiskService.CreateDisk:output_type -> feos.disk.v1.Device
-	16, // 29: feos.disk.v1.DiskService.OpenDisk:output_type -> feos.disk.v1.Device
-	1,  // 30: feos.disk.v1.DiskService.StopDisk:output_type -> feos.disk.v1.Empty
-	5,  // 31: feos.disk.v1.DiskService.Seal:output_type -> feos.disk.v1.Layer
-	5,  // 32: feos.disk.v1.DiskService.Bake:output_type -> feos.disk.v1.Layer
-	5,  // 33: feos.disk.v1.DiskService.SealFile:output_type -> feos.disk.v1.Layer
-	30, // 34: feos.disk.v1.DiskService.RemoveDevice:output_type -> feos.disk.v1.RemoveDeviceResponse
-	1,  // 35: feos.disk.v1.DiskService.Materialize:output_type -> feos.disk.v1.Empty
-	1,  // 36: feos.disk.v1.DiskService.Push:output_type -> feos.disk.v1.Empty
-	1,  // 37: feos.disk.v1.DiskService.Pull:output_type -> feos.disk.v1.Empty
-	15, // 38: feos.disk.v1.DiskService.Evict:output_type -> feos.disk.v1.EvictStats
-	20, // 39: feos.disk.v1.DiskService.Stats:output_type -> feos.disk.v1.StatsResponse
-	22, // 40: feos.disk.v1.DiskService.Fsck:output_type -> feos.disk.v1.FsckReport
-	24, // 41: feos.disk.v1.DiskService.Sweep:output_type -> feos.disk.v1.SweepReport
-	1,  // 42: feos.disk.v1.DiskService.PutObject:output_type -> feos.disk.v1.Empty
-	1,  // 43: feos.disk.v1.DiskService.GetObject:output_type -> feos.disk.v1.Empty
-	34, // 44: feos.disk.v1.DiskService.PutHead:output_type -> feos.disk.v1.Head
-	34, // 45: feos.disk.v1.DiskService.GetHead:output_type -> feos.disk.v1.Head
-	26, // 46: feos.disk.v1.DiskService.OpenMemory:output_type -> feos.disk.v1.Memory
-	1,  // 47: feos.disk.v1.DiskService.CloseMemory:output_type -> feos.disk.v1.Empty
-	27, // [27:48] is the sub-list for method output_type
-	6,  // [6:27] is the sub-list for method input_type
+	24, // 21: feos.disk.v1.DiskService.LiveLayers:input_type -> feos.disk.v1.LiveLayersRequest
+	2,  // 22: feos.disk.v1.DiskService.PutObject:input_type -> feos.disk.v1.PutObjectRequest
+	3,  // 23: feos.disk.v1.DiskService.GetObject:input_type -> feos.disk.v1.GetObjectRequest
+	33, // 24: feos.disk.v1.DiskService.PutHead:input_type -> feos.disk.v1.PutHeadRequest
+	34, // 25: feos.disk.v1.DiskService.GetHead:input_type -> feos.disk.v1.GetHeadRequest
+	27, // 26: feos.disk.v1.DiskService.OpenMemory:input_type -> feos.disk.v1.OpenMemoryRequest
+	29, // 27: feos.disk.v1.DiskService.CloseMemory:input_type -> feos.disk.v1.CloseMemoryRequest
+	5,  // 28: feos.disk.v1.DiskService.ImportBase:output_type -> feos.disk.v1.Layer
+	16, // 29: feos.disk.v1.DiskService.CreateDisk:output_type -> feos.disk.v1.Device
+	16, // 30: feos.disk.v1.DiskService.OpenDisk:output_type -> feos.disk.v1.Device
+	1,  // 31: feos.disk.v1.DiskService.StopDisk:output_type -> feos.disk.v1.Empty
+	5,  // 32: feos.disk.v1.DiskService.Seal:output_type -> feos.disk.v1.Layer
+	5,  // 33: feos.disk.v1.DiskService.Bake:output_type -> feos.disk.v1.Layer
+	5,  // 34: feos.disk.v1.DiskService.SealFile:output_type -> feos.disk.v1.Layer
+	32, // 35: feos.disk.v1.DiskService.RemoveDevice:output_type -> feos.disk.v1.RemoveDeviceResponse
+	1,  // 36: feos.disk.v1.DiskService.Materialize:output_type -> feos.disk.v1.Empty
+	1,  // 37: feos.disk.v1.DiskService.Push:output_type -> feos.disk.v1.Empty
+	1,  // 38: feos.disk.v1.DiskService.Pull:output_type -> feos.disk.v1.Empty
+	15, // 39: feos.disk.v1.DiskService.Evict:output_type -> feos.disk.v1.EvictStats
+	20, // 40: feos.disk.v1.DiskService.Stats:output_type -> feos.disk.v1.StatsResponse
+	22, // 41: feos.disk.v1.DiskService.Fsck:output_type -> feos.disk.v1.FsckReport
+	26, // 42: feos.disk.v1.DiskService.Sweep:output_type -> feos.disk.v1.SweepReport
+	25, // 43: feos.disk.v1.DiskService.LiveLayers:output_type -> feos.disk.v1.LiveLayersResponse
+	1,  // 44: feos.disk.v1.DiskService.PutObject:output_type -> feos.disk.v1.Empty
+	1,  // 45: feos.disk.v1.DiskService.GetObject:output_type -> feos.disk.v1.Empty
+	36, // 46: feos.disk.v1.DiskService.PutHead:output_type -> feos.disk.v1.Head
+	36, // 47: feos.disk.v1.DiskService.GetHead:output_type -> feos.disk.v1.Head
+	28, // 48: feos.disk.v1.DiskService.OpenMemory:output_type -> feos.disk.v1.Memory
+	1,  // 49: feos.disk.v1.DiskService.CloseMemory:output_type -> feos.disk.v1.Empty
+	28, // [28:50] is the sub-list for method output_type
+	6,  // [6:28] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name
@@ -2787,7 +2875,7 @@ func file_feos_disk_v1_disk_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_feos_disk_v1_disk_proto_rawDesc), len(file_feos_disk_v1_disk_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   34,
+			NumMessages:   36,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

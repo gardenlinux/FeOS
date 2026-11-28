@@ -2128,11 +2128,19 @@ The leader's `object-store-sweep` loop (package `sweep`) reads, in one
 transaction, every row's `checkpoint_head` of the object store (and the
 heads that name none) and every layer of `image_bakes`
 (`store.SweepLiveSet`), adds what a `sweep.LiveSource` names (the backups
-of ADR 0064), and calls `SweepObjectStore` on a ready node of that store
-it is connected to. feosd refuses an empty live set and has diskd sweep
-with it (`Sweep`, its grace of 24 hours, a budget of 20 minutes, at most
-1000 of its keys in the answer). A node whose feosd does not know the
-call is passed over. `--object-store-sweep=dry-run` deletes nothing and
+of ADR 0064) and what every node of the store needs now
+(`ListLiveObjects`: diskd's `LiveLayers`, the chains of its open disks,
+its memory layers and what it has not uploaded, and its volumes'
+checkpoint heads), and calls `SweepObjectStore` on a ready node of that
+store it is connected to. A store with a node that is not ready, not
+connected or does not answer `ListLiveObjects` is not swept. feosd
+refuses an empty live set and has diskd sweep with it (`Sweep`, its
+grace of 24 hours, a budget of 20 minutes, at most 1000 of its keys in
+the answer). A node whose feosd does not know `SweepObjectStore` is
+passed over for the next. diskd trusts a chunk's upload marker for 12
+hours after its own PUT (`MARKER_TRUST`), never one it learned from a
+pull, a probe or `Fsck`, so that a push never skips a chunk a sweep may
+delete. `--object-store-sweep=dry-run` deletes nothing and
 logs what it would; every run logs what it saw and deleted.
 
 ### Tools and MCP

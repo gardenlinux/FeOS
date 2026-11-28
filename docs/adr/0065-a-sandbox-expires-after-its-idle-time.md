@@ -92,6 +92,11 @@ sweep's question.
   - every sandbox row's checkpoint head, in any state, instances and
     jobs included;
   - every layer of the image catalog (ADR 0022);
+  - what every node of the store needs now: the chains of its open
+    disks, the memory layers it serves and the layers it has not
+    uploaded, and the checkpoint head of every volume it holds. A pod or
+    a volume restored from a checkpoint reads chunks from it lazily, for
+    as long as it runs, after its row has moved on or been replaced;
   - the backups that ADR 0064 keeps.
   The disk daemon deletes what none of these reach, layers and chunks
   down the chains included, once it is older than its grace (ADR 0011:
@@ -99,8 +104,14 @@ sweep's question.
   hibernation still being written is younger than the grace and is
   kept.
 - The live set is read in one transaction. A sweep whose read fails,
-  or whose live set is empty, deletes nothing. A run that reaches its
-  time budget stops, and the next run continues.
+  or whose live set is empty, deletes nothing; nor does one of a store
+  with a node that is down or cannot say what it needs. A run that
+  reaches its time budget stops, and the next run continues.
+- A node trusts its marker of a chunk in the store, which lets a push
+  skip it, for 12 hours after it PUT the chunk, and never when it only
+  learned that the store has it. A chunk PUT in the last 12 hours is
+  younger than the grace, so no sweep deletes a chunk a push skips; an
+  older marker costs one PUT, which makes the chunk young again.
 - `--object-store-sweep` is `off`, `dry-run` or `on`. In `dry-run` the
   sweep reports what it would delete without deleting anything. Every
   run logs what it saw and what it deleted, and exports both as
@@ -160,4 +171,9 @@ installation's buckets, 56 GB of it checkpoints, and no sweep ever run.
 ADR 0064 had decided the sweep for the backups of postgres addons; this
 ADR runs the sweep on its own, ahead of those backups. The same day the
 rows from before were given `never` instead of the default counted from
-the release, so that no data is lost to the change (migration 0045).
+the release, so that no data is lost to the change (migration 0045);
+and a review found two ways the sweep could delete what is still read:
+the chunks a restored pod or volume reads lazily, which no row names,
+and markers trusted forever on a node other than the one that swept.
+The nodes' live set and the markers' 12 hours came before any sweep
+that deletes.

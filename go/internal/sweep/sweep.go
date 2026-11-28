@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package sweep is the leader's sweep of the object store (ADR 0065): it
-// names what is live, every sandbox row's checkpoint head and every layer
-// of the image catalog, and has one node per object store's disk daemon
-// delete the rest once it is older than the daemon's grace (ADR 0011).
+// names what is live, every sandbox row's checkpoint head, every layer of
+// the image catalog, and what every node of the store needs now (its open
+// disks' and memories' layers, what it has not uploaded, its volumes'
+// checkpoint heads), and has one node's disk daemon delete the rest once
+// it is older than the daemon's grace (ADR 0011). A store with a node
+// whose needs cannot be asked is not swept.
 package sweep
 
 import (
@@ -114,10 +117,23 @@ func (s *Sweeper) run(ctx context.Context) error {
 		return fmt.Errorf("sweep: nodes: %w", err)
 	}
 	byStore := map[string][]string{}
+	unreachable := map[string][]string{}
 	for _, n := range nodes {
-		if n.ObjectStoreID != "" && n.Status == model.NodeReady && s.conns.Connected(n.Name) {
-			byStore[n.ObjectStoreID] = append(byStore[n.ObjectStoreID], n.Name)
+		if n.ObjectStoreID == "" || n.Status == model.NodeRemoved {
+			continue
 		}
+		if n.Status == model.NodeReady && s.conns.Connected(n.Name) {
+			byStore[n.ObjectStoreID] = append(byStore[n.ObjectStoreID], n.Name)
+		} else {
+			unreachable[n.ObjectStoreID] = append(unreachable[n.ObjectStoreID], n.Name)
+		}
+	}
+	for id, names := range unreachable {
+		if _, ok := byStore[id]; ok && s.due(id) {
+			s.log.Warn("sweep skipped: a node of the object store is not reachable, so what it needs is unknown",
+				"objectStore", id, "nodes", names)
+		}
+		delete(byStore, id)
 	}
 	var errs []error
 	for _, id := range slices.Sorted(maps.Keys(byStore)) {
@@ -162,7 +178,20 @@ func (s *Sweeper) sweepStore(ctx context.Context, objectStore string, nodes []st
 		s.log.Warn("sweep skipped: the live set names no head", "objectStore", objectStore)
 		return nil
 	}
+	for _, node := range nodes {
+		heads, layers, err := s.nodeLive(ctx, node)
+		if status.Code(err) == codes.Unimplemented {
+			s.log.Info("sweep skipped: a node's feosd cannot say what it needs yet", "node", node, "objectStore", objectStore)
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("what node %s needs: %w", node, err)
+		}
+		live.Heads = append(live.Heads, heads...)
+		live.Layers = append(live.Layers, layers...)
+	}
 	dry := s.cfg.Mode != config.SweepOn
+	live.Heads, live.Layers = unique(live.Heads), unique(live.Layers)
 	for _, node := range nodes {
 		cctx, cancel := context.WithTimeout(ctx, budget+5*time.Minute)
 		rep, err := s.call(cctx, node, live, dry)
@@ -193,6 +222,27 @@ func (s *Sweeper) call(ctx context.Context, node string, live store.SweepLive, d
 	}
 	return podv1.NewPodServiceClient(cc).SweepObjectStore(ctx, &podv1.SweepObjectStoreRequest{
 		LiveHeads: live.Heads, LiveLayers: live.Layers, DryRun: dry, BudgetSeconds: uint64(budget / time.Second)})
+}
+
+// nodeLive asks node what of the object store it needs now.
+func (s *Sweeper) nodeLive(ctx context.Context, node string) (heads, layers []string, err error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	cc, err := s.conns.Conn(ctx, node)
+	if err != nil {
+		return nil, nil, err
+	}
+	r, err := podv1.NewPodServiceClient(cc).ListLiveObjects(ctx, &podv1.ListLiveObjectsRequest{})
+	if err != nil {
+		return nil, nil, err
+	}
+	return r.GetHeads(), r.GetLayers(), nil
+}
+
+// unique is keys sorted, without repeats.
+func unique(keys []string) []string {
+	slices.Sort(keys)
+	return slices.Compact(keys)
 }
 
 // sample is the first n of keys, for the log.

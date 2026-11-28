@@ -277,6 +277,9 @@ pub struct MemoryCtx {
 
 pub struct StartedMemory {
     pub socket: PathBuf,
+    /// The memory layer it serves, which a sweep keeps (ADR 0065); set by
+    /// the caller.
+    pub layer: String,
     pub stats: Arc<MemStats>,
     stop: Arc<AtomicBool>,
     wake: OwnedFd,
@@ -357,6 +360,7 @@ pub fn serve(ctx: MemoryCtx) -> Result<StartedMemory, String> {
         .map_err(|e| e.to_string())?;
     Ok(StartedMemory {
         socket,
+        layer: String::new(),
         stats,
         stop,
         wake,

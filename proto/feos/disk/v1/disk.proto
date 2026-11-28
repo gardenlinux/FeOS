@@ -68,6 +68,10 @@ service DiskService {
   // flight writes chunks, then the layer, then the head, so until it ends
   // its objects look unreferenced.
   rpc Sweep(SweepRequest) returns (SweepReport);
+  // The layers this node needs from the object store now (ADR 0065): the
+  // chains of its open disks, its open memory layers, and every layer it
+  // has not uploaded. A sweep names them live, from every node.
+  rpc LiveLayers(LiveLayersRequest) returns (LiveLayersResponse);
   // Puts a local file into the object store, or gets one into a local
   // file, so that all S3 traffic of a node runs through diskd. The caller
   // chooses the key, e.g. snapshots/<pod>/<epoch>/vmstate.
@@ -290,6 +294,12 @@ message SweepRequest {
   bool no_grace = 6;
   // At most this many keys in the report's deleted_keys; 0: all of them.
   uint32 max_keys = 7;
+}
+
+message LiveLayersRequest {}
+
+message LiveLayersResponse {
+  repeated string layers = 1;
 }
 
 message SweepReport {

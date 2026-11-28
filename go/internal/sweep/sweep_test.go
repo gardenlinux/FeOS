@@ -7,6 +7,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"slices"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -18,11 +19,14 @@ import (
 	"github.com/gardenlinux/feos/go/internal/store"
 )
 
-// fakeConns answers SweepObjectStore per node: an error, or a report.
+// fakeConns answers SweepObjectStore per node (an error, or a report)
+// and ListLiveObjects (an error, or the node's name as a head and a
+// layer).
 type fakeConns struct {
-	errs  map[string]error
-	calls []*podv1.SweepObjectStoreRequest
-	nodes []string
+	errs     map[string]error
+	liveErrs map[string]error
+	calls    []*podv1.SweepObjectStoreRequest
+	nodes    []string
 }
 
 func (f *fakeConns) Connected(string) bool { return true }
@@ -37,6 +41,14 @@ type fakeConn struct {
 }
 
 func (c fakeConn) Invoke(_ context.Context, method string, args, reply any, _ ...grpc.CallOption) error {
+	if method == podv1.PodService_ListLiveObjects_FullMethodName {
+		if err := c.f.liveErrs[c.node]; err != nil {
+			return err
+		}
+		r := reply.(*podv1.ListLiveObjectsResponse)
+		r.Heads, r.Layers = []string{"snapshots/volume-" + c.node + "/1/head.json"}, []string{"layer-" + c.node}
+		return nil
+	}
 	if method != podv1.PodService_SweepObjectStore_FullMethodName {
 		return status.Error(codes.Unimplemented, method)
 	}
@@ -80,8 +92,19 @@ func TestSweepStore(t *testing.T) {
 		t.Fatalf("calls %v on %v", conns.calls, conns.nodes)
 	}
 	c := conns.calls[0]
-	if !c.DryRun || len(c.LiveHeads) != 2 || c.LiveHeads[1] != "snapshots/volume-b/1/head.json" || len(c.LiveLayers) != 1 {
+	wantHeads := []string{"snapshots/a/1/head.json", "snapshots/volume-b/1/head.json", "snapshots/volume-new/1/head.json",
+		"snapshots/volume-old/1/head.json"}
+	if !c.DryRun || !slices.Equal(c.LiveHeads, wantHeads) || !slices.Equal(c.LiveLayers, []string{"l1", "layer-new", "layer-old"}) {
 		t.Fatalf("request %+v", c)
+	}
+
+	// A node that cannot say what it needs stops the sweep of its store.
+	blind := &fakeConns{liveErrs: map[string]error{"old": status.Error(codes.Unimplemented, "unknown method")}}
+	if err := newSweeper(config.SweepOn, blind, live, nil).sweepStore(ctx, "store-1", []string{"old", "new"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(blind.calls) != 0 {
+		t.Fatalf("swept without a node's live set: %+v", blind.calls)
 	}
 
 	on := &fakeConns{}

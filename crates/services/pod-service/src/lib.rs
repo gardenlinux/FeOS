@@ -25,12 +25,13 @@ use feos_proto::network_service::{
 use feos_proto::pod_service::pod_service_server::PodService;
 use feos_proto::pod_service::{
     CreatePodRequest, CreatePodResponse, DeletePodRequest, DeletePodResponse, GetPodRequest,
-    HibernatePodRequest, HibernatePodResponse, ListPodsRequest, ListPodsResponse, PodConsoleInput,
-    PodConsoleOutput, PodEvent, PodInfo, RestorePodRequest, RestorePodResponse, ResumePodRequest,
-    ResumePodResponse, SetPodHttpBindingsRequest, SetPodHttpBindingsResponse,
-    SetPodTlsBindingsRequest, SetPodTlsBindingsResponse, StartPodRequest, StartPodResponse,
-    StopPodRequest, StopPodResponse, StreamPodEventsRequest, SuspendPodRequest, SuspendPodResponse,
-    SweepObjectStoreRequest, SweepObjectStoreResponse,
+    HibernatePodRequest, HibernatePodResponse, ListLiveObjectsRequest, ListLiveObjectsResponse,
+    ListPodsRequest, ListPodsResponse, PodConsoleInput, PodConsoleOutput, PodEvent, PodInfo,
+    RestorePodRequest, RestorePodResponse, ResumePodRequest, ResumePodResponse,
+    SetPodHttpBindingsRequest, SetPodHttpBindingsResponse, SetPodTlsBindingsRequest,
+    SetPodTlsBindingsResponse, StartPodRequest, StartPodResponse, StopPodRequest, StopPodResponse,
+    StreamPodEventsRequest, SuspendPodRequest, SuspendPodResponse, SweepObjectStoreRequest,
+    SweepObjectStoreResponse,
 };
 use feos_proto::volume_service::volume_service_server::VolumeService;
 use feos_proto::volume_service::{
@@ -263,6 +264,14 @@ impl PodService for Pods {
     ) -> Result<Response<SweepObjectStoreResponse>, Status> {
         self.check_serving()?;
         Ok(Response::new(self.sweep_store(request.into_inner()).await?))
+    }
+
+    async fn list_live_objects(
+        &self,
+        _request: Request<ListLiveObjectsRequest>,
+    ) -> Result<Response<ListLiveObjectsResponse>, Status> {
+        self.check_serving()?;
+        Ok(Response::new(self.live_objects().await?))
     }
 }
 

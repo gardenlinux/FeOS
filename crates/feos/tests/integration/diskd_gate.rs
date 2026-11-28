@@ -13,9 +13,10 @@ use feos_proto::disk_service::disk_service_server::{DiskService, DiskServiceServ
 use feos_proto::disk_service::{
     BakeRequest, CloseMemoryRequest, CreateDiskRequest, Device, Empty, EvictRequest, EvictStats,
     FsckReport, FsckRequest, GetHeadRequest, GetObjectRequest, Head, ImportBaseRequest, Layer,
-    LayerRef, MaterializeRequest, Memory, OpenDiskRequest, OpenMemoryRequest, PutHeadRequest,
-    PutObjectRequest, RemoveDeviceRequest, RemoveDeviceResponse, SealFileRequest, SealRequest,
-    StatsRequest, StatsResponse, StopDiskRequest, SweepReport, SweepRequest,
+    LayerRef, LiveLayersRequest, LiveLayersResponse, MaterializeRequest, Memory, OpenDiskRequest,
+    OpenMemoryRequest, PutHeadRequest, PutObjectRequest, RemoveDeviceRequest, RemoveDeviceResponse,
+    SealFileRequest, SealRequest, StatsRequest, StatsResponse, StopDiskRequest, SweepReport,
+    SweepRequest,
 };
 use hyper_util::rt::TokioIo;
 use pod_service::disk::DISKD_SOCKET;
@@ -290,6 +291,7 @@ forward! {
     stats(StatsRequest) -> StatsResponse, |_| GateCall::Other("Stats");
     fsck(FsckRequest) -> FsckReport, |_| GateCall::Other("Fsck");
     sweep(SweepRequest) -> SweepReport, |_| GateCall::Other("Sweep");
+    live_layers(LiveLayersRequest) -> LiveLayersResponse, |_| GateCall::Other("LiveLayers");
     put_object(PutObjectRequest) -> Empty, |_| GateCall::Other("PutObject");
     get_object(GetObjectRequest) -> Empty, |_| GateCall::Other("GetObject");
     put_head(PutHeadRequest) -> Head, GateCall::PutHead;

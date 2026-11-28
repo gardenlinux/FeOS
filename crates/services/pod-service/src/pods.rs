@@ -68,9 +68,10 @@ use feos_proto::microvm::{
 };
 use feos_proto::pod_service::{
     BakedLayer, Checkpoint, ContainerSpec, ContainerState, ContainerStatus, HibernatePodResponse,
-    Hibernation as HibernationInfo, HibernationPhase, ImageLayers, MicroVm, PodConsoleInput,
-    PodConsoleOutput, PodEvent, PodHttpBindings, PodInfo, PodNetwork, PodSpec, PodState,
-    RestorePodResponse, SweepObjectStoreRequest, SweepObjectStoreResponse, TlsBinding,
+    Hibernation as HibernationInfo, HibernationPhase, ImageLayers, ListLiveObjectsResponse,
+    MicroVm, PodConsoleInput, PodConsoleOutput, PodEvent, PodHttpBindings, PodInfo, PodNetwork,
+    PodSpec, PodState, RestorePodResponse, SweepObjectStoreRequest, SweepObjectStoreResponse,
+    TlsBinding,
 };
 use feos_proto::volume_service::{Volume, VolumeCheckpoint, VolumeState};
 use feos_utils::vsock::{self, API_PORT};
@@ -1203,6 +1204,24 @@ impl Pods {
             sample_keys: report.deleted_keys,
             keys_deleted: report.keys_deleted,
         })
+    }
+
+    /// What of the object store this node needs now (ADR 0065): diskd's
+    /// live layers, and the checkpoint head of every volume, which a
+    /// volume restored from a checkpoint reads from lazily.
+    pub async fn live_objects(&self) -> Result<ListLiveObjectsResponse, Status> {
+        let layers = self.inner.disks.live_layers().await?;
+        let mut heads: Vec<String> = self
+            .inner
+            .volumes
+            .list()
+            .into_iter()
+            .filter_map(|v| v.checkpoint.map(|c| c.head_key))
+            .filter(|k| !k.is_empty())
+            .collect();
+        heads.sort();
+        heads.dedup();
+        Ok(ListLiveObjectsResponse { layers, heads })
     }
 
     /// Takes the pod off the node into object storage (ADR 0008), in a task

@@ -19,10 +19,10 @@
 use crate::bake;
 use feos_proto::disk_service::{
     disk_service_client::DiskServiceClient, BakeRequest, CloseMemoryRequest, CreateDiskRequest,
-    GetHeadRequest, GetObjectRequest, Head, ImportBaseRequest, Layer, LayerRef, MemoryRef,
-    OpenDiskRequest, OpenMemoryRequest, PutHeadRequest, PutObjectRequest, RemoveDeviceRequest,
-    SealFileRequest, SealRequest, StatsRequest, StatsResponse, StopDiskRequest, SweepReport,
-    SweepRequest,
+    GetHeadRequest, GetObjectRequest, Head, ImportBaseRequest, Layer, LayerRef, LiveLayersRequest,
+    MemoryRef, OpenDiskRequest, OpenMemoryRequest, PutHeadRequest, PutObjectRequest,
+    RemoveDeviceRequest, SealFileRequest, SealRequest, StatsRequest, StatsResponse,
+    StopDiskRequest, SweepReport, SweepRequest,
 };
 use feos_proto::pod_service::BakedLayer;
 use feos_proto::volume_service::{Volume, VolumeState};
@@ -447,6 +447,17 @@ impl Disks {
     pub async fn sweep(&self, request: SweepRequest) -> Result<SweepReport, Status> {
         let report = self.client().sweep(request).await.map_err(diskd)?;
         Ok(report.into_inner())
+    }
+
+    /// The layers diskd needs from the object store now: its open disks'
+    /// chains, its memories and what it has not uploaded (ADR 0065).
+    pub async fn live_layers(&self) -> Result<Vec<String>, Status> {
+        let live = self
+            .client()
+            .live_layers(LiveLayersRequest {})
+            .await
+            .map_err(diskd)?;
+        Ok(live.into_inner().layers)
     }
 
     /// diskd's figures of the node, without those of its devices: its

@@ -34,6 +34,7 @@ const (
 	PodService_RestorePod_FullMethodName         = "/feos.pod.v1.PodService/RestorePod"
 	PodService_StreamPodConsole_FullMethodName   = "/feos.pod.v1.PodService/StreamPodConsole"
 	PodService_SweepObjectStore_FullMethodName   = "/feos.pod.v1.PodService/SweepObjectStore"
+	PodService_ListLiveObjects_FullMethodName    = "/feos.pod.v1.PodService/ListLiveObjects"
 )
 
 // PodServiceClient is the client API for PodService service.
@@ -145,6 +146,11 @@ type PodServiceClient interface {
 	// older than the daemon's grace, is deleted. The control plane names
 	// what is live; it calls one node per object store.
 	SweepObjectStore(ctx context.Context, in *SweepObjectStoreRequest, opts ...grpc.CallOption) (*SweepObjectStoreResponse, error)
+	// What of the object store this node needs now (ADR 0065): the layers
+	// of its open disks and memories and those it has not uploaded, and
+	// the checkpoint heads of its volumes, which a volume restored from a
+	// checkpoint reads from lazily. A sweep names them live.
+	ListLiveObjects(ctx context.Context, in *ListLiveObjectsRequest, opts ...grpc.CallOption) (*ListLiveObjectsResponse, error)
 }
 
 type podServiceClient struct {
@@ -317,6 +323,16 @@ func (c *podServiceClient) SweepObjectStore(ctx context.Context, in *SweepObject
 	return out, nil
 }
 
+func (c *podServiceClient) ListLiveObjects(ctx context.Context, in *ListLiveObjectsRequest, opts ...grpc.CallOption) (*ListLiveObjectsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListLiveObjectsResponse)
+	err := c.cc.Invoke(ctx, PodService_ListLiveObjects_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PodServiceServer is the server API for PodService service.
 // All implementations must embed UnimplementedPodServiceServer
 // for forward compatibility.
@@ -426,6 +442,11 @@ type PodServiceServer interface {
 	// older than the daemon's grace, is deleted. The control plane names
 	// what is live; it calls one node per object store.
 	SweepObjectStore(context.Context, *SweepObjectStoreRequest) (*SweepObjectStoreResponse, error)
+	// What of the object store this node needs now (ADR 0065): the layers
+	// of its open disks and memories and those it has not uploaded, and
+	// the checkpoint heads of its volumes, which a volume restored from a
+	// checkpoint reads from lazily. A sweep names them live.
+	ListLiveObjects(context.Context, *ListLiveObjectsRequest) (*ListLiveObjectsResponse, error)
 	mustEmbedUnimplementedPodServiceServer()
 }
 
@@ -480,6 +501,9 @@ func (UnimplementedPodServiceServer) StreamPodConsole(grpc.BidiStreamingServer[P
 }
 func (UnimplementedPodServiceServer) SweepObjectStore(context.Context, *SweepObjectStoreRequest) (*SweepObjectStoreResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SweepObjectStore not implemented")
+}
+func (UnimplementedPodServiceServer) ListLiveObjects(context.Context, *ListLiveObjectsRequest) (*ListLiveObjectsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListLiveObjects not implemented")
 }
 func (UnimplementedPodServiceServer) mustEmbedUnimplementedPodServiceServer() {}
 func (UnimplementedPodServiceServer) testEmbeddedByValue()                    {}
@@ -754,6 +778,24 @@ func _PodService_SweepObjectStore_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PodService_ListLiveObjects_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLiveObjectsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PodServiceServer).ListLiveObjects(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PodService_ListLiveObjects_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PodServiceServer).ListLiveObjects(ctx, req.(*ListLiveObjectsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PodService_ServiceDesc is the grpc.ServiceDesc for PodService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -812,6 +854,10 @@ var PodService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SweepObjectStore",
 			Handler:    _PodService_SweepObjectStore_Handler,
+		},
+		{
+			MethodName: "ListLiveObjects",
+			Handler:    _PodService_ListLiveObjects_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

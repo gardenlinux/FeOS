@@ -34,6 +34,7 @@ const (
 	DiskService_Stats_FullMethodName        = "/feos.disk.v1.DiskService/Stats"
 	DiskService_Fsck_FullMethodName         = "/feos.disk.v1.DiskService/Fsck"
 	DiskService_Sweep_FullMethodName        = "/feos.disk.v1.DiskService/Sweep"
+	DiskService_LiveLayers_FullMethodName   = "/feos.disk.v1.DiskService/LiveLayers"
 	DiskService_PutObject_FullMethodName    = "/feos.disk.v1.DiskService/PutObject"
 	DiskService_GetObject_FullMethodName    = "/feos.disk.v1.DiskService/GetObject"
 	DiskService_PutHead_FullMethodName      = "/feos.disk.v1.DiskService/PutHead"
@@ -112,6 +113,10 @@ type DiskServiceClient interface {
 	// flight writes chunks, then the layer, then the head, so until it ends
 	// its objects look unreferenced.
 	Sweep(ctx context.Context, in *SweepRequest, opts ...grpc.CallOption) (*SweepReport, error)
+	// The layers this node needs from the object store now (ADR 0065): the
+	// chains of its open disks, its open memory layers, and every layer it
+	// has not uploaded. A sweep names them live, from every node.
+	LiveLayers(ctx context.Context, in *LiveLayersRequest, opts ...grpc.CallOption) (*LiveLayersResponse, error)
 	// Puts a local file into the object store, or gets one into a local
 	// file, so that all S3 traffic of a node runs through diskd. The caller
 	// chooses the key, e.g. snapshots/<pod>/<epoch>/vmstate.
@@ -294,6 +299,16 @@ func (c *diskServiceClient) Sweep(ctx context.Context, in *SweepRequest, opts ..
 	return out, nil
 }
 
+func (c *diskServiceClient) LiveLayers(ctx context.Context, in *LiveLayersRequest, opts ...grpc.CallOption) (*LiveLayersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LiveLayersResponse)
+	err := c.cc.Invoke(ctx, DiskService_LiveLayers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *diskServiceClient) PutObject(ctx context.Context, in *PutObjectRequest, opts ...grpc.CallOption) (*Empty, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Empty)
@@ -424,6 +439,10 @@ type DiskServiceServer interface {
 	// flight writes chunks, then the layer, then the head, so until it ends
 	// its objects look unreferenced.
 	Sweep(context.Context, *SweepRequest) (*SweepReport, error)
+	// The layers this node needs from the object store now (ADR 0065): the
+	// chains of its open disks, its open memory layers, and every layer it
+	// has not uploaded. A sweep names them live, from every node.
+	LiveLayers(context.Context, *LiveLayersRequest) (*LiveLayersResponse, error)
 	// Puts a local file into the object store, or gets one into a local
 	// file, so that all S3 traffic of a node runs through diskd. The caller
 	// chooses the key, e.g. snapshots/<pod>/<epoch>/vmstate.
@@ -500,6 +519,9 @@ func (UnimplementedDiskServiceServer) Fsck(context.Context, *FsckRequest) (*Fsck
 }
 func (UnimplementedDiskServiceServer) Sweep(context.Context, *SweepRequest) (*SweepReport, error) {
 	return nil, status.Error(codes.Unimplemented, "method Sweep not implemented")
+}
+func (UnimplementedDiskServiceServer) LiveLayers(context.Context, *LiveLayersRequest) (*LiveLayersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method LiveLayers not implemented")
 }
 func (UnimplementedDiskServiceServer) PutObject(context.Context, *PutObjectRequest) (*Empty, error) {
 	return nil, status.Error(codes.Unimplemented, "method PutObject not implemented")
@@ -810,6 +832,24 @@ func _DiskService_Sweep_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DiskService_LiveLayers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LiveLayersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DiskServiceServer).LiveLayers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DiskService_LiveLayers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DiskServiceServer).LiveLayers(ctx, req.(*LiveLayersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DiskService_PutObject_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PutObjectRequest)
 	if err := dec(in); err != nil {
@@ -984,6 +1024,10 @@ var DiskService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Sweep",
 			Handler:    _DiskService_Sweep_Handler,
+		},
+		{
+			MethodName: "LiveLayers",
+			Handler:    _DiskService_LiveLayers_Handler,
 		},
 		{
 			MethodName: "PutObject",

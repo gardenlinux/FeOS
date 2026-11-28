@@ -339,6 +339,16 @@ impl DiskSvc {
 // never durability-proofed: they are written unsynced, a lost marker
 // costs one redundant PUT, and `Fsck --check-s3` rebuilds them from S3
 // truth (marker present ⟺ object present).
+//
+// A marker is trusted for MARKER_TRUST after this node PUT its chunk, and
+// never when it only learned that S3 has it (a pull, a probe, an fsck):
+// a chunk PUT within the last 12 hours is younger than the sweep's grace
+// of 24 hours, so no sweep deletes a chunk that a push skips (ADR 0065).
+// An older marker costs one PUT, which makes the chunk young again.
+
+/// How long a marker of a chunk this node PUT is trusted; less than the
+/// sweep's grace (DEFAULT_SWEEP_GRACE_SECONDS) by more than a push takes.
+const MARKER_TRUST: std::time::Duration = std::time::Duration::from_secs(12 * 60 * 60);
 
 impl DiskSvc {
     fn chunk_marker_dir(&self) -> PathBuf {
@@ -350,23 +360,46 @@ impl DiskSvc {
         self.chunk_marker_dir().join(&hex[0..2]).join(hex)
     }
 
+    /// Whether a push may skip the chunk: its marker says this node PUT
+    /// it within MARKER_TRUST.
     fn chunk_uploaded(&self, h: &disk_store::chunk::Hash) -> bool {
-        self.chunk_marker(h).is_file()
+        std::fs::metadata(self.chunk_marker(h))
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age < MARKER_TRUST)
     }
 
-    /// Record "this chunk is in S3". Hint only — no fsync (see module
-    /// comment above); errors are logged, not fatal.
+    /// Record "this node PUT this chunk to S3 now": a marker of now,
+    /// refreshed when it exists. Hint only — no fsync (see module comment
+    /// above); errors are logged, not fatal.
     fn mark_chunk_uploaded(&self, h: &disk_store::chunk::Hash) {
-        let p = self.chunk_marker(h);
-        if p.is_file() {
-            return;
+        self.write_chunk_marker(h, std::time::SystemTime::now());
+    }
+
+    /// Record "S3 has this chunk", learned without a PUT: a marker that is
+    /// never trusted (its time is the epoch), kept for `Fsck` and the
+    /// journals; an existing one stays as it is.
+    fn mark_chunk_known(&self, h: &disk_store::chunk::Hash) {
+        if !self.chunk_marker(h).is_file() {
+            self.write_chunk_marker(h, std::time::UNIX_EPOCH);
         }
+    }
+
+    fn write_chunk_marker(&self, h: &disk_store::chunk::Hash, at: std::time::SystemTime) {
+        let p = self.chunk_marker(h);
         if let Some(dir) = p.parent()
             && !dir.is_dir()
         {
             let _ = std::fs::create_dir_all(dir);
         }
-        if let Err(e) = std::fs::write(&p, b"") {
+        let written = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&p)
+            .and_then(|f| f.set_modified(at));
+        if let Err(e) = written {
             tracing::debug!(hash = %h.to_hex(), error = %e, "chunk marker write failed");
         }
     }
@@ -384,6 +417,37 @@ impl DiskSvc {
 ",
         )
         .map_err(|e| e.to_string())
+    }
+
+    /// The layers this node needs from the object store now (ADR 0065),
+    /// sorted: every open disk's chain, every memory layer it serves, and
+    /// every layer it has not uploaded. A sweep keeps them and their
+    /// parents.
+    fn live_layer_ids(&self) -> Result<Vec<String>, String> {
+        let mut ids = std::collections::BTreeSet::new();
+        let st = State::load(&self.state_dir).map_err(|e| e.to_string())?;
+        for row in st.devices.values() {
+            ids.extend(row.chain.iter().cloned());
+        }
+        {
+            let t = self.memories.lock().map_err(|_| "poisoned".to_string())?;
+            ids.extend(
+                t.values()
+                    .map(|m| m.layer.clone())
+                    .filter(|l| !l.is_empty()),
+            );
+        }
+        if let Ok(rd) = std::fs::read_dir(self.state_dir.join("layers")) {
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                if let Some(id) = name.strip_suffix(".manifest")
+                    && !self.state_dir.join("uploaded").join(id).is_file()
+                {
+                    ids.insert(id.to_string());
+                }
+            }
+        }
+        Ok(ids.into_iter().collect())
     }
 
     /// Chunks that must never be evicted by policy: chunks of live device
@@ -505,7 +569,9 @@ impl DiskSvc {
                         n_bytes.fetch_add(raw.len() as u64, Ordering::Relaxed);
                     } else if s3.has_chunk(&h).await {
                         // Evicted locally, present remotely (the memory-increment
-                        // case): learn the marker without a re-upload.
+                        // case): no re-upload, and no marker either, since a
+                        // probe says nothing of the object's age (ADR 0065).
+                        return Ok(None);
                     } else {
                         return Err(format!("chunk missing locally and in S3: {}", h.to_hex()));
                     }
@@ -660,7 +726,7 @@ impl DiskSvc {
                 std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
                 for e in &m.entries {
                     if e.kind == disk_store::manifest::EntryKind::Data {
-                        self.mark_chunk_uploaded(&disk_store::chunk::Hash::from(e.hash));
+                        self.mark_chunk_known(&disk_store::chunk::Hash::from(e.hash));
                     }
                 }
                 self.mark_uploaded(&id)?;
@@ -1850,7 +1916,7 @@ impl DiskService for DiskSvc {
             }
             for h in &probes {
                 if remote.contains(h) {
-                    this.mark_chunk_uploaded(h);
+                    this.mark_chunk_known(h);
                 } else {
                     this.unmark_chunk(h);
                 }
@@ -1888,6 +1954,15 @@ impl DiskService for DiskSvc {
     // one prefix, each only ever deleting objects that are unreachable
     // AND past the grace — a sweep that stops halfway (budget, error)
     // leaves the store consistent.
+    async fn live_layers(
+        &self,
+        _request: Request<pb::LiveLayersRequest>,
+    ) -> Result<Response<pb::LiveLayersResponse>, Status> {
+        Ok(Response::new(pb::LiveLayersResponse {
+            layers: self.live_layer_ids().map_err(internal)?,
+        }))
+    }
+
     async fn sweep(
         &self,
         request: Request<pb::SweepRequest>,
@@ -2127,6 +2202,8 @@ impl DiskService for DiskSvc {
             stats: stats.clone(),
         })
         .map_err(internal)?;
+        let mut started = started;
+        started.layer = req.layer.clone();
         let chunks_total = stats.chunks_total.load(Ordering::Relaxed);
         let previous = {
             let mut t = self.memories.lock().map_err(|_| internal("poisoned"))?;
@@ -2844,6 +2921,54 @@ mod tests {
         let pinned = svc.pinned_row_chunks().unwrap();
         let want: HashSet<Hash> = [h(3), h(10), h(11), h(30)].into_iter().collect();
         assert_eq!(pinned, want);
+    }
+
+    // A marker of a chunk this node PUT is trusted for 12 hours; one
+    // learned from S3 never is, though it is kept (ADR 0065).
+    #[test]
+    fn markers_are_trusted_for_12_hours_after_a_put() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = svc(dir.path());
+        svc.mark_chunk_uploaded(&h(1));
+        assert!(svc.chunk_uploaded(&h(1)));
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(13 * 60 * 60);
+        std::fs::File::options()
+            .write(true)
+            .open(svc.chunk_marker(&h(1)))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        assert!(!svc.chunk_uploaded(&h(1)), "an old marker is trusted");
+        svc.mark_chunk_uploaded(&h(1));
+        assert!(
+            svc.chunk_uploaded(&h(1)),
+            "a PUT does not refresh the marker"
+        );
+        svc.mark_chunk_known(&h(2));
+        assert!(svc.chunk_marker(&h(2)).is_file() && !svc.chunk_uploaded(&h(2)));
+        svc.mark_chunk_known(&h(1));
+        assert!(
+            svc.chunk_uploaded(&h(1)),
+            "a probe made a PUT's marker untrusted"
+        );
+    }
+
+    // The live layers are the open disks' chains and the layers not
+    // uploaded; an uploaded layer no disk has is not live.
+    #[test]
+    fn live_layers_are_open_chains_and_what_is_not_uploaded() {
+        let dir = tempfile::tempdir().unwrap();
+        let svc = svc(dir.path());
+        let mut st = State::default();
+        st.devices.insert("pod".into(), row(&["l0", "top"]));
+        State::store(&svc.state_dir, &st).unwrap();
+        let layers = svc.state_dir.join("layers");
+        std::fs::create_dir_all(&layers).unwrap();
+        for id in ["local", "pushed"] {
+            std::fs::write(layers.join(format!("{id}.manifest")), b"").unwrap();
+        }
+        svc.mark_uploaded("pushed").unwrap();
+        assert_eq!(svc.live_layer_ids().unwrap(), vec!["l0", "local", "top"]);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
